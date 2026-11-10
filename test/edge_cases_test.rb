@@ -287,6 +287,27 @@ class EdgeCasesTest < Minitest::Test
     end
   end
 
+  def test_each_without_options_reads_rows_from_the_index
+    rows = (1..5).map { |i| %(<row r="#{i}"><c r="A#{i}"><v>#{i}</v></c><c r="B#{i}"><v>#{i}</v></c></row>) }.join
+    dense = write(rows)
+    sparse = write(rows + %(<row r="6"><c r="XFD6"><v>6</v></c></row>))
+
+    # roo's Sheet#row answers the first row, and every row of a sheet too
+    # sparse to lay out.
+    { dense => 1, sparse => 6 }.each do |path, rows_from_roo|
+      _, counts = Oracle.read(native: true) { Roo::Excelx.new(path).each.to_a }
+
+      assert_equal rows_from_roo, counts[:sheet_rows]
+    end
+  end
+
+  def test_each_without_options_uses_a_subclass_row
+    path = write((1..5).map { |i| %(<row r="#{i}"><c r="A#{i}"><v>#{i}</v></c></row>) }.join)
+    subclass = Class.new(Roo::Excelx) { def row(number, sheet = nil) = super.map { |v| "<#{v}>" } }
+
+    assert_same_as_roo("subclass row") { subclass.new(path).each.to_a }
+  end
+
   def test_each_without_headers_reads_no_cell
     path = write_header_book
 

@@ -13,7 +13,10 @@ module Roo
 
       def each(options = {}, &)
         return super if !block_given? || !Calamine.enabled?
-        return each_without_options(&) if options.empty?
+        if options.empty?
+          # A subclass's #row would apply to the rows roo answers only.
+          return method(:row).owner.equal?(::Roo::Excelx) ? each_without_options(&) : super
+        end
 
         headers = header_columns(options)
         @header_line.upto(last_row) do |line|
@@ -44,7 +47,7 @@ module Roo
       # Roo::Base#each without options: `1.upto(last_row) { |line| yield row(line) }`.
       def each_without_options
         index = RowIndex.new(self)
-        1.upto(last_row) { |line| yield index.row(line) }
+        1.upto(last_row) { |line| yield index.row(line, @calamine_writes) }
       end
 
       # Roo::Base#each, up to its loop over the rows.

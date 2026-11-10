@@ -17,6 +17,13 @@ module Oracle
     end
   end)
 
+  Roo::Excelx::Sheet.prepend(Module.new do
+    define_method(:row) do |*args|
+      Oracle.counts[:sheet_rows] += 1
+      super(*args)
+    end
+  end)
+
   Roo::Calamine::Native::Reader.singleton_class.prepend(Module.new do
     define_method(:new) do |*args|
       Oracle.counts[:native_readers] += 1
