@@ -24,4 +24,5 @@ Dir.mktmpdir do |dir|
   check workbook.cell(1, 1) == "name", "roo reads a string cell"
   check workbook.cell(1, 2).inspect == "1.0", "roo reads 1.0 as the Float roo returns"
   check workbook.each_row_streaming.map { |row| row.map(&:value) } == [["name", 1.0]], "each_row_streaming works"
+  check Roo::Calamine.each_row_values(path).to_a == [["name", 1.0]], "Roo::Calamine.each_row_values reads through roo"
 end

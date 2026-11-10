@@ -78,6 +78,26 @@ module Oracle
     end
   end
 
+  # What Roo::Calamine.each_row_values must yield: the value of each cell
+  # that roo's each_row_streaming(pad_cells: true) yields.
+  def describe_streamed_values(workbook)
+    workbook.sheets.map do |sheet|
+      rows = workbook.each_row_streaming(sheet:, pad_cells: true).map do |row|
+        row.map { |cell| describe_value(cell&.value) }
+      end
+      [sheet, rows]
+    end
+  end
+
+  def describe_each_row_values(path, options)
+    Roo::Excelx.new(path, options.dup).sheets.map do |sheet|
+      rows = Roo::Calamine.each_row_values(path, sheet:, **options).map do |values|
+        values.map { |value| describe_value(value) }
+      end
+      [sheet, rows]
+    end
+  end
+
   # The Roo::Base API on top of the cells: bounds, rows, columns, formulas.
   def describe_api(workbook)
     workbook.sheets.map do |sheet|

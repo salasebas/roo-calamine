@@ -51,12 +51,27 @@ module Roo
       def each_cell(row_xml, &)
         return super unless row_xml.is_a?(Native::Row)
 
-        @calamine_stream_converter ||= Native::Converter.new(Context.new(@shared, hyperlinks(@relationships), true),
-                                                             true)
-        @calamine_stream_converter.row_cells(row_xml).each(&)
+        calamine_stream_converter.row_cells(row_xml).each(&)
+      end
+
+      # Roo::Calamine.each_row_values. `sheet` is the Roo::Excelx::Sheet that
+      # owns this document; it turns rows that roo reads itself into cells.
+      def each_row_values(sheet)
+        each_row_streaming do |row|
+          yield(if row.is_a?(Native::Row)
+                  calamine_stream_converter.row_values(row)
+                else
+                  sheet.send(:cells_for_row_element, row, pad_cells: true).map { |cell| cell&.value }
+                end)
+        end
       end
 
       private
+
+      def calamine_stream_converter
+        @calamine_stream_converter ||= Native::Converter.new(Context.new(@shared, hyperlinks(@relationships), true),
+                                                             true)
+      end
 
       def native?
         @path && Calamine.enabled?

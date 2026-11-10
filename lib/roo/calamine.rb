@@ -31,6 +31,31 @@ module Roo
       def enabled?
         @enabled && available? && !DISABLING_ENV_VALUES.include?(ENV.fetch("ROO_CALAMINE", "").downcase)
       end
+
+      # roo-calamine's own API, not roo's: yields each row of a worksheet as an
+      # Array of the values roo's cells return from `#value`, without building
+      # the cells. A row is what
+      # `Roo::Excelx#each_row_streaming(sheet:, pad_cells: true)` yields, with
+      # `cell&.value` in place of each cell: one entry per column from A up to
+      # the row's last cell, `nil` where the worksheet has no cell.
+      #
+      # `source` and `options` are what `Roo::Excelx.new` takes. The workbook
+      # is closed when the block returns. Without a block, returns an
+      # Enumerator.
+      def each_row_values(source, sheet: nil, **options, &block)
+        return enum_for(__method__, source, sheet:, **options) unless block
+
+        workbook = Roo::Excelx.new(source, options)
+        roo_sheet = workbook.sheet_for(sheet)
+        if available?
+          roo_sheet.instance_variable_get(:@sheet).each_row_values(roo_sheet, &block)
+        else
+          roo_sheet.each_row(pad_cells: true) { |cells| yield cells.map { |cell| cell&.value } }
+        end
+        nil
+      ensure
+        workbook&.close
+      end
     end
   end
 end

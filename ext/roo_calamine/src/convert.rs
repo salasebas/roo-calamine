@@ -1,10 +1,13 @@
 //! Builds the `Roo::Excelx::Cell` objects that
 //! `Roo::Excelx::SheetDoc#cell_from_xml` builds, by calling roo's own
-//! constructors with the same arguments.
+//! constructors with the same arguments, or only the values those cells
+//! return from `#value`.
 
 use std::cell::{Cell as StdCell, RefCell};
+use std::os::raw::c_int;
 
 use magnus::gc::Marker;
+use magnus::rb_sys::{protect, AsRawValue, FromRawValue};
 use magnus::value::{Lazy, Opaque, ReprValue};
 use magnus::{
     prelude::*, DataTypeFunctions, Error, IntoValue, RArray, RClass, RHash, RString, Ruby,
@@ -47,6 +50,46 @@ enum ValueType {
     Number,
 }
 
+/// Whether a format string matches `/%/` or `/\.0/`, which makes
+/// `Cell::Number#create_numeric` read every number as a Float.
+fn reads_as_float(format: Value) -> Result<bool, Error> {
+    let format = RString::try_convert(format)?;
+    let format = unsafe { format.as_slice() };
+    Ok(format.contains(&b'%') || format.windows(2).any(|pair| pair == b".0"))
+}
+
+/// `/\A[-+]?\d+E[-+]?\d+\z/i`, the exponent test in `Cell::Number#create_numeric`.
+fn is_exponent_number(text: &str) -> bool {
+    let digits = |part: &str| {
+        let part = part.strip_prefix(['-', '+']).unwrap_or(part);
+        !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit())
+    };
+    match text.split_once(['E', 'e']) {
+        Some((mantissa, exponent)) => digits(mantissa) && digits(exponent),
+        None => false,
+    }
+}
+
+/// Ruby's `Integer(text, 10)` when `badcheck`, else `text.to_i`: the C
+/// function both call, on a String, so errors read as Ruby's do.
+fn ruby_integer(ruby: &Ruby, text: &str, badcheck: bool) -> Result<Value, Error> {
+    let text = ruby.str_new(text);
+    let raw =
+        protect(|| unsafe { rb_sys::rb_str_to_inum(text.as_raw(), 10, c_int::from(badcheck)) })?;
+    Ok(unsafe { Value::from_raw(raw) })
+}
+
+/// Ruby's `Float(text)`: the C function it calls, on a String.
+fn ruby_float(ruby: &Ruby, text: &str) -> Result<Value, Error> {
+    let text = ruby.str_new(text);
+    let mut number = 0.0;
+    protect(|| {
+        number = unsafe { rb_sys::rb_str_to_dbl(text.as_raw(), 1) };
+        rb_sys::Qnil as rb_sys::VALUE
+    })?;
+    Ok(ruby.float_from_f64(number).as_value())
+}
+
 /// Turns raw rows into roo cells for one worksheet. The Ruby objects it keeps
 /// are pinned by [`DataTypeFunctions::mark`]; caches that may be filled while
 /// Ruby runs live in `Cell`/`RefCell` fields that `mark` does not borrow.
@@ -71,6 +114,8 @@ pub struct Converter {
     /// (`nil` when the HTML wrapper is disabled). Fetched on first use.
     shared_plain: StdCell<Option<Opaque<RArray>>>,
     shared_html: StdCell<Option<Opaque<Value>>>,
+    /// `Roo::Excelx::ERROR_VALUES`, which `Cell::Number` keeps as text.
+    error_values: Vec<String>,
 }
 
 impl DataTypeFunctions for Converter {
@@ -106,7 +151,99 @@ impl Converter {
             types: RefCell::new(Vec::new()),
             shared_plain: StdCell::new(None),
             shared_html: StdCell::new(None),
+            error_values: ruby.eval("Roo::Excelx::ERROR_VALUES.to_a")?,
         })
+    }
+
+    /// `Roo::Calamine.each_row_values` for a streamed row: the `value` of each
+    /// cell that `Sheet#each_row(pad_cells: true)` yields, and `nil` for each
+    /// cell it pads.
+    pub fn row_values(ruby: &Ruby, rb_self: &Self, row: &crate::Row) -> Result<RArray, Error> {
+        let row = row.raw();
+        let values = ruby.ary_new_capa(row.cells.len());
+        let mut last_column = 0;
+        for raw in &row.cells {
+            let (column, value) = rb_self.value(ruby, row, raw)?;
+            for _ in last_column + 1..column {
+                values.push(ruby.qnil())?;
+            }
+            values.push(value)?;
+            last_column = column;
+        }
+        Ok(values)
+    }
+
+    /// The column of a streamed cell and its `value`. A cell with a
+    /// hyperlink, a DateTime, or a Time is built as a roo cell and asked for
+    /// its value; every other value follows roo's rule without a cell.
+    fn value(&self, ruby: &Ruby, row: &RawRow, raw: &RawCell) -> Result<(i64, Value), Error> {
+        let column = match (&raw.reference, self.hyperlinks) {
+            (Reference::At { column, .. }, None) => *column,
+            _ => {
+                let coordinate = self.coordinate(ruby, raw, 0, 0)?;
+                let column = coordinate.funcall("column", ())?;
+                if !self.link(ruby, coordinate).is_nil() {
+                    return Ok((column, self.cell_value(ruby, row, raw)?));
+                }
+                column
+            }
+        };
+        let text = match &raw.body {
+            Body::Empty => return Ok((column, ruby.qnil().as_value())),
+            Body::Inline(text) => return Ok((column, ruby.str_new(row.text(text)).as_value())),
+            Body::Value(text) => row.text(text),
+        };
+        let (format, format_type) = self.style_info(ruby, self.style(ruby, raw)?)?;
+        let value = match (raw.kind, format_type) {
+            (Kind::Shared, _) => self.shared_string(ruby, text)?,
+            (Kind::Boolean, _) => {
+                let one = i64::try_convert(ruby_integer(ruby, text, false)?).ok() == Some(1);
+                one.into_value_with(ruby)
+            }
+            (Kind::Str, _) => ruby.str_new(text).as_value(),
+            (Kind::InlineStr, _) | (Kind::ByFormat, ValueType::Number) => {
+                self.number(ruby, text, reads_as_float(format)?)?
+            }
+            (Kind::ByFormat, ValueType::Date) => ruby
+                .get_inner(self.base_date)
+                .funcall("+", (ruby_integer(ruby, text, false)?,))?,
+            (Kind::ByFormat, ValueType::DateTime | ValueType::Time) => {
+                self.cell_value(ruby, row, raw)?
+            }
+        };
+        Ok((column, value))
+    }
+
+    /// `Cell::Number#create_numeric`.
+    fn number(&self, ruby: &Ruby, text: &str, float_format: bool) -> Result<Value, Error> {
+        if self.error_values.iter().any(|error| error == text) {
+            return Ok(ruby.str_new(text).as_value());
+        }
+        if text.is_empty() {
+            return Ok(ruby.qnil().as_value());
+        }
+        if float_format || text.contains('.') || is_exponent_number(text) {
+            ruby_float(ruby, text)
+        } else {
+            ruby_integer(ruby, text, true)
+        }
+    }
+
+    fn cell_value(&self, ruby: &Ruby, row: &RawRow, raw: &RawCell) -> Result<Value, Error> {
+        match self.cell(ruby, row, raw, 0, 0)? {
+            Some((_, cell)) => cell.funcall("value", ()),
+            None => Ok(ruby.qnil().as_value()),
+        }
+    }
+
+    fn link(&self, ruby: &Ruby, coordinate: Value) -> Value {
+        match self.hyperlinks {
+            Some(hyperlinks) => ruby
+                .get_inner(hyperlinks)
+                .get(coordinate)
+                .unwrap_or_else(|| ruby.qnil().as_value()),
+            None => ruby.qnil().as_value(),
+        }
     }
 
     /// `SheetDoc#each_cell` for a streamed row: every cell, empty ones too.
@@ -245,13 +382,7 @@ impl Converter {
     ) -> Result<Option<(Value, Value)>, Error> {
         let coordinate = self.coordinate(ruby, raw, row_number, column)?;
         let style = self.style(ruby, raw)?;
-        let link = match self.hyperlinks {
-            Some(hyperlinks) => ruby
-                .get_inner(hyperlinks)
-                .get(coordinate)
-                .unwrap_or_else(|| ruby.qnil().as_value()),
-            None => ruby.qnil().as_value(),
-        };
+        let link = self.link(ruby, coordinate);
         let formula = raw.formula.as_ref().map(|f| ruby.str_new(row.text(f)));
         let cell: Value =
             match &raw.body {

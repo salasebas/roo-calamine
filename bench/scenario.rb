@@ -49,9 +49,19 @@ def roo_scenario(scenario, path, digest)
   end
 end
 
+def values_scenario(library, path, digest)
+  if library == "roo-calamine"
+    Roo::Calamine.each_row_values(path) { |row| row.each { |cell_value| digest << value(cell_value) } }
+  else
+    Roo::Spreadsheet.open(path).each_row_streaming(pad_cells: true) do |row|
+      row.each { |cell| digest << value(cell&.value) }
+    end
+  end
+end
+
 def calx_scenario(scenario, path, digest)
   case scenario
-  when "stream"
+  when "stream", "values"
     Calx.each_row(path) { |row| row.each { |value| digest << value(value) } }
   when "parse"
     header, *rows = Calx.read(path)
@@ -75,6 +85,12 @@ end
 GC.start
 digest = DIGESTING ? Digest::SHA256.new : Sink.new
 started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-library == "calx" ? calx_scenario(scenario, path, digest) : roo_scenario(scenario, path, digest)
+if library == "calx"
+  calx_scenario(scenario, path, digest)
+elsif scenario == "values"
+  values_scenario(library, path, digest)
+else
+  roo_scenario(scenario, path, digest)
+end
 seconds = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
 puts JSON.generate(seconds:, peak_rss: peak_rss_bytes, digest: digest.hexdigest)
