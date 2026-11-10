@@ -9,10 +9,10 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-magnus = "0.9.3"
+magnus = { version = "0.9.3", features = ["rb-sys"] }
 quick-xml = "0.42.0"
 rb-sys = "0.9.130"
 
 [dev-dependencies]
 # Links libruby so `cargo test` can build this extension crate.
-magnus = { version = "0.9.3", features = ["embed"] }
+magnus = { version = "0.9.3", features = ["embed", "rb-sys"] }

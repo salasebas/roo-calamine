@@ -77,8 +77,13 @@ when the XML uses something it does not reproduce exactly the way Nokogiri
 does:
 
 - an XML encoding other than UTF-8 (some Windows Phone exports are UTF-16);
+- a document type declaration, whose entities and attribute defaults Nokogiri
+  applies;
 - an entity reference other than the five XML ones and character references;
-- XML that is not well-formed.
+- XML that is not well-formed: characters XML does not allow, unbalanced or
+  missing tags, malformed attributes and names, `]]>` in text, `--` in
+  comments, anything but whitespace, comments, and processing instructions
+  around the root element, and a late XML declaration.
 
 For `each_row_streaming`, the rows read before such a spot are kept and roo
 continues from the next row, so nothing is read twice and the rows come out
@@ -164,6 +169,10 @@ design:
   `Roo::Excelx::SheetDoc#cell_from_xml` or `#extract_cells`, or
   `Roo::Excelx::Cell.cell_class`, is bypassed while the native reader is on.
   Public methods and the `Cell` classes themselves are used as they are.
+- On a worksheet whose XML breaks partway, `each_row_streaming` raises the
+  same `Nokogiri::XML::SyntaxError` as roo, but yields every row before the
+  bad spot; roo stops a little earlier, where libxml2's read-ahead reaches
+  it (241 of 250 good rows in `test/edge_cases_test.rb`).
 - Resource use changes (see [Benchmarks](#benchmarks)): peak memory is 3–5×
   lower for `cells`-based reads and a little higher for streaming, and each
   sheet read starts a short-lived native thread that parses ahead of Ruby.

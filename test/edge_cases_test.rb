@@ -182,22 +182,61 @@ class EdgeCasesTest < Minitest::Test
     assert_every_path_same_as_roo(path, native_only: false)
   end
 
-  def test_unsupported_xml_goes_to_roo_and_streaming_resumes_where_it_stopped
+  def test_streaming_hands_over_to_roo_where_the_native_reader_stops
     rows = (1..300).map { |i| %(<row r="#{i}"><c r="A#{i}"><v>#{i}</v></c></row>) }
-    rows[250] = %(<row r="251"><c r="A251" t="str"><v>&custom;</v></c></row>)
-    xml = Workbook.sheet(rows.join).sub("<worksheet", %(<!DOCTYPE worksheet [<!ENTITY custom "expanded">]><worksheet))
-    path = Workbook.write(@dir, "book", sheets: { "Sheet1" => xml })
+    rows[250] = %(<row r="251"><c r="A251" t="str"><v>a&#1;b</v></c></row>)
+    path = write(rows.join)
 
     assert_every_path_same_as_roo(path, native_only: false)
 
-    stream = -> { Roo::Excelx.new(path).each_row_streaming.map { |row| row.map(&:value) } }
+    stream = lambda do
+      yielded = []
+      Roo::Excelx.new(path).each_row_streaming { |row| yielded << row.map(&:value) }
+      [yielded.size, nil]
+    rescue StandardError => e
+      [yielded.size, e.class]
+    end
     roo, = Oracle.read(native: false, &stream)
     native, counts = Oracle.read(native: true, &stream)
 
-    assert_equal :ok, roo.first
-    assert_equal roo, native
+    # roo raises a little before row 251, where libxml2's read-ahead hits the
+    # bad character; roo-calamine yields every row before it, then roo raises.
+    assert_equal Nokogiri::XML::SyntaxError, roo.dig(1, 1)
+    assert_operator roo.dig(1, 0), :<=, 250
+    assert_equal [:ok, [250, Nokogiri::XML::SyntaxError]], native
     assert_equal 1, counts[:native_readers]
-    assert_equal 50, counts[:roo_cells], "roo should parse only rows 251 to 300"
+    assert_equal 0, counts[:roo_cells], "roo should not build the 250 rows already yielded again"
+  end
+
+  # A sheet doc whose worksheet is a FIFO that a writer holds open without
+  # writing, until `release` gets a value, so a reader waits for a batch.
+  def waiting_sheet_doc(release)
+    doc = Roo::Excelx.new(write("")).sheet_for(nil).instance_variable_get(:@sheet)
+    fifo = File.join(@dir, "sheet.fifo")
+    File.mkfifo(fifo)
+    doc.instance_variable_set(:@path, fifo)
+    [doc, Thread.new { File.open(fifo, "w") { release.pop } }]
+  end
+
+  def test_an_exception_while_waiting_for_a_batch_arrives_as_itself
+    skip "needs File.mkfifo" unless File.respond_to?(:mkfifo)
+
+    release = Queue.new
+    doc, writer = waiting_sheet_doc(release)
+    stop = Class.new(StandardError)
+    reader = Thread.new do
+      doc.each_row_streaming { nil }
+    rescue Exception => e # rubocop:disable Lint/RescueException
+      e
+    end
+    sleep 0.3
+    reader.raise(stop, "stop requested")
+    stopped = reader.join(5)
+    release.push(true)
+    writer.join
+
+    assert stopped, "the reader did not stop"
+    assert_instance_of stop, reader.value
   end
 
   def test_xml_libxml2_rejects_goes_to_roo

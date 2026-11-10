@@ -167,6 +167,9 @@ pub struct SheetReader<R: BufRead> {
     sheet_data_depth: Option<usize>,
     root_is_worksheet: bool,
     done: bool,
+    /// Whether any event was read yet; an XML declaration must come first.
+    started: bool,
+    seen_root: bool,
     /// An error met after some rows of a batch, returned by the next call.
     pending_error: Option<Unsupported>,
 }
@@ -198,7 +201,9 @@ fn child(e: &BytesStart<'_>) -> Child {
 impl<R: BufRead> SheetReader<R> {
     pub fn new(input: R, mode: Mode) -> Self {
         let mut xml = quick_xml::Reader::from_reader(input);
-        xml.config_mut().check_end_names = true;
+        let config = xml.config_mut();
+        config.check_end_names = true;
+        config.check_comments = true;
         Self {
             xml,
             mode,
@@ -207,6 +212,8 @@ impl<R: BufRead> SheetReader<R> {
             sheet_data_depth: None,
             root_is_worksheet: false,
             done: false,
+            started: false,
+            seen_root: false,
             pending_error: None,
         }
     }
@@ -251,7 +258,11 @@ impl<R: BufRead> SheetReader<R> {
         }
         loop {
             buf.clear();
-            match self.read_event(buf)? {
+            let event = self.read_event(buf)?;
+            if self.depth == 0 {
+                self.check_top_level(&event)?;
+            }
+            match event {
                 Event::Start(e) => {
                     self.depth += 1;
                     if self.is_row(&e) {
@@ -288,19 +299,52 @@ impl<R: BufRead> SheetReader<R> {
         }
     }
 
+    /// Outside the root element, XML allows only one root, whitespace,
+    /// comments, and processing instructions.
+    fn check_top_level(&mut self, event: &Event<'_>) -> Result<()> {
+        match event {
+            Event::Start(_) | Event::Empty(_) if self.seen_root => {
+                Err(Unsupported("a second root element".into()))
+            }
+            Event::Start(_) | Event::Empty(_) => {
+                self.seen_root = true;
+                Ok(())
+            }
+            Event::Text(t) if !t.trim_ascii().is_empty() => {
+                Err(Unsupported("text outside the root element".into()))
+            }
+            Event::CData(_) | Event::GeneralRef(_) => {
+                Err(Unsupported("text outside the root element".into()))
+            }
+            Event::Eof if !self.seen_root => Err(Unsupported("no root element".into())),
+            _ => Ok(()),
+        }
+    }
+
     /// The next event, rejecting characters XML does not allow, which
     /// Nokogiri does not accept and quick-xml does not check.
     fn read_event<'b>(&mut self, buf: &'b mut Vec<u8>) -> Result<Event<'b>> {
         let event = self.xml.read_event_into(buf)?;
+        let first = !std::mem::replace(&mut self.started, true);
         match &event {
-            Event::Start(e) | Event::Empty(e) => check_attributes(e)?,
+            Event::Start(e) | Event::Empty(e) => check_start(e)?,
+            Event::Text(t) if t.contains("]]>") => {
+                return Err(Unsupported("`]]>` in text".into()));
+            }
             Event::Text(t) | Event::Comment(t) => check_chars(t)?,
             Event::CData(t) => check_chars(&t.xml10_content())?,
+            Event::PI(pi) => check_chars(pi)?,
             Event::GeneralRef(r) => {
                 if let Some(c) = r.resolve_char_ref()? {
                     check_chars(c.encode_utf8(&mut [0; 4]))?;
                 }
             }
+            Event::Decl(_) if !first => {
+                return Err(Unsupported("an XML declaration after the start".into()));
+            }
+            // A DTD can define entities and attribute defaults, which Nokogiri
+            // applies and this reader does not.
+            Event::DocType(_) => return Err(Unsupported("a document type declaration".into())),
             _ => {}
         }
         Ok(event)
@@ -532,15 +576,60 @@ fn check_chars(text: &str) -> Result<()> {
     Ok(())
 }
 
-fn check_attributes(e: &BytesStart<'_>) -> Result<()> {
+/// An element name and its attributes, as far as quick-xml leaves them
+/// unchecked: name characters, whitespace between attributes, `<` in values,
+/// and the references in values.
+fn check_start(e: &BytesStart<'_>) -> Result<()> {
+    check_name(e.name().as_ref())?;
     let raw = e.attributes_raw();
     check_chars(raw)?;
-    if raw.contains("&#") {
-        for attribute in e.attributes() {
-            check_chars(&attribute?.normalized_value(XmlVersion::Implicit1_0)?)?;
+    let mut quote = None;
+    let mut after_value = false;
+    for c in raw.chars() {
+        match quote {
+            Some(q) if c == q => {
+                quote = None;
+                after_value = true;
+            }
+            Some(_) if c == '<' => return Err(Unsupported("`<` in an attribute value".into())),
+            Some(_) => {}
+            None if after_value && !c.is_ascii_whitespace() && c != '/' => {
+                return Err(Unsupported(
+                    "attributes without whitespace between them".into(),
+                ));
+            }
+            None => {
+                after_value = false;
+                if c == '"' || c == '\'' {
+                    quote = Some(c);
+                }
+            }
+        }
+    }
+    for attribute in e.attributes() {
+        let attribute = attribute?;
+        check_name(attribute.key.as_ref())?;
+        if attribute.value.contains('&') {
+            check_chars(&attribute.normalized_value(XmlVersion::Implicit1_0)?)?;
         }
     }
     Ok(())
+}
+
+/// XML names start with a letter, `_`, `:`, or a non-ASCII character, and
+/// continue with those, digits, `-`, and `.`.
+fn check_name(name: &str) -> Result<()> {
+    let valid = name.chars().enumerate().all(|(i, c)| {
+        !c.is_ascii()
+            || c.is_ascii_alphabetic()
+            || matches!(c, '_' | ':')
+            || (i > 0 && (c.is_ascii_digit() || matches!(c, '-' | '.')))
+    });
+    if valid && !name.is_empty() {
+        Ok(())
+    } else {
+        Err(Unsupported(format!("the name {name:?}")))
+    }
 }
 
 fn push_reference(text: &mut String, reference: &BytesRef<'_>) -> Result<()> {
@@ -745,6 +834,80 @@ mod tests {
             reader.next_row().is_err(),
             "a sheet that ends with open elements"
         );
+    }
+
+    #[test]
+    fn rejects_xml_that_is_not_well_formed() {
+        let rows = r#"<sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData>"#;
+        for (label, xml) in [
+            (
+                "unquoted value",
+                "<worksheet><sheetData><row r=1/></sheetData></worksheet>".to_string(),
+            ),
+            (
+                "no space between attributes",
+                r#"<worksheet><sheetData><row r="1"s="2"/></sheetData></worksheet>"#.to_string(),
+            ),
+            (
+                "`<` in a value",
+                format!(r#"<worksheet x="a<b">{rows}</worksheet>"#),
+            ),
+            (
+                "unknown entity in a value",
+                format!(r#"<worksheet x="&bogus;">{rows}</worksheet>"#),
+            ),
+            (
+                "bare `&` in a value",
+                format!(r#"<worksheet x="a & b">{rows}</worksheet>"#),
+            ),
+            (
+                "`]]>` in text",
+                format!("<worksheet>{rows}a ]]> b</worksheet>"),
+            ),
+            (
+                "second root",
+                format!("<worksheet>{rows}</worksheet><worksheet/>"),
+            ),
+            (
+                "text before the root",
+                format!("x<worksheet>{rows}</worksheet>"),
+            ),
+            (
+                "doctype",
+                format!("<!DOCTYPE worksheet><worksheet>{rows}</worksheet>"),
+            ),
+            (
+                "illegal character in a PI",
+                format!("<?pi \u{1}?><worksheet>{rows}</worksheet>"),
+            ),
+            (
+                "`--` in a comment",
+                format!("<!-- a -- b --><worksheet>{rows}</worksheet>"),
+            ),
+            (
+                "invalid name",
+                format!("<worksheet><1x/>{rows}</worksheet>"),
+            ),
+            (
+                "late declaration",
+                format!(r#"<!-- c --><?xml version="1.0"?><worksheet>{rows}</worksheet>"#),
+            ),
+            ("empty document", String::new()),
+        ] {
+            for mode in [Mode::Document, Mode::Stream] {
+                let mut reader = SheetReader::new(xml.as_bytes(), mode);
+                let read: Result<Vec<RawRow>> =
+                    std::iter::from_fn(|| reader.next_row().transpose()).collect();
+                assert!(read.is_err(), "{label} ({mode:?})");
+            }
+        }
+        let fine = format!(
+            r#"<?xml version="1.0"?>
+<!-- c --><?pi ok?><worksheet x="a &amp; b" y='1'>{rows}</worksheet>
+"#
+        );
+        let mut reader = SheetReader::new(fine.as_bytes(), Mode::Document);
+        assert_eq!(reader.next_rows(10).unwrap().len(), 1);
     }
 
     #[test]

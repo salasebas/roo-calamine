@@ -10,7 +10,9 @@ use std::cell::{Cell as StdCell, RefCell};
 use std::ffi::c_void;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
-use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, TryRecvError};
+use std::time::Duration;
 
 use magnus::value::Lazy;
 use magnus::{function, method, prelude::*, Error, ExceptionClass, RArray, RHash, Ruby};
@@ -27,36 +29,70 @@ fn unsupported(ruby: &Ruby, error: Unsupported) -> Error {
     Error::new(ruby.get_inner(&UNSUPPORTED), error.0)
 }
 
-/// Runs `work` with the GVL released. `work` must not touch any Ruby object.
-fn without_gvl<F: FnOnce() -> R, R>(work: F) -> R {
-    struct Call<F, R> {
+/// Runs `work` with the GVL released. `work` must not touch any Ruby object,
+/// and should return soon after the flag it is given turns true: Ruby sets
+/// it when it has something to deliver to this thread (`Thread#raise`,
+/// `Timeout`, Ctrl-C). Such an exception comes back as `Err` instead of
+/// unwinding through the caller's Rust frames.
+fn without_gvl<F: FnOnce(&AtomicBool) -> R, R>(work: F) -> Result<R, Error> {
+    struct Call<'a, F, R> {
         work: Option<F>,
+        interrupted: &'a AtomicBool,
         result: Option<std::thread::Result<R>>,
     }
 
-    unsafe extern "C" fn trampoline<F: FnOnce() -> R, R>(data: *mut c_void) -> *mut c_void {
-        let call = unsafe { &mut *(data as *mut Call<F, R>) };
+    unsafe extern "C" fn trampoline<F: FnOnce(&AtomicBool) -> R, R>(
+        data: *mut c_void,
+    ) -> *mut c_void {
+        let call = unsafe { &mut *(data as *mut Call<'_, F, R>) };
         let work = call.work.take().expect("called once");
-        call.result = Some(panic::catch_unwind(AssertUnwindSafe(work)));
+        let interrupted = call.interrupted;
+        call.result = Some(panic::catch_unwind(AssertUnwindSafe(|| work(interrupted))));
         std::ptr::null_mut()
     }
 
+    unsafe extern "C" fn unblock(data: *mut c_void) {
+        unsafe { &*(data as *const AtomicBool) }.store(true, Ordering::Release);
+    }
+
+    let interrupted = AtomicBool::new(false);
     let mut call = Call {
         work: Some(work),
+        interrupted: &interrupted,
         result: None,
     };
-    unsafe {
-        rb_sys::rb_thread_call_without_gvl(
-            Some(trampoline::<F, R>),
-            &mut call as *mut _ as *mut c_void,
-            None,
-            std::ptr::null_mut(),
-        );
-    }
+    let data = &mut call as *mut Call<'_, F, R> as *mut c_void;
+    let flag = &interrupted as *const AtomicBool as *mut c_void;
+    magnus::rb_sys::protect(|| unsafe {
+        rb_sys::rb_thread_call_without_gvl(Some(trampoline::<F, R>), data, Some(unblock), flag);
+        rb_sys::Qnil as rb_sys::VALUE
+    })?;
     match call.result.expect("trampoline ran") {
-        Ok(result) => result,
+        Ok(result) => Ok(result),
         Err(payload) => panic::resume_unwind(payload),
     }
+}
+
+enum Wait {
+    Batch(Batch),
+    /// Ruby interrupted the wait without raising; wait again.
+    Interrupted,
+    /// The reading thread ended without sending a last batch.
+    Stopped,
+}
+
+/// Waits for the next batch with the GVL released.
+fn wait_for(batches: &Receiver<Batch>) -> Result<Wait, Error> {
+    without_gvl(|interrupted| loop {
+        match batches.recv_timeout(Duration::from_millis(20)) {
+            Ok(batch) => return Wait::Batch(batch),
+            Err(RecvTimeoutError::Disconnected) => return Wait::Stopped,
+            Err(RecvTimeoutError::Timeout) if interrupted.load(Ordering::Acquire) => {
+                return Wait::Interrupted
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+        }
+    })
 }
 
 /// One streamed `<row>`, converted to cells only when roo asks for them.
@@ -123,19 +159,28 @@ impl Reader {
             ));
         }
         let received = match self.batches.borrow().as_ref() {
-            None => Ok(Ok(Vec::new())),
+            None => Ok(Wait::Batch(Ok(Vec::new()))),
             Some(batches) => match batches.try_recv() {
-                Ok(batch) => Ok(batch),
-                Err(TryRecvError::Empty) => {
-                    without_gvl(|| batches.recv()).map_err(|_| TryRecvError::Disconnected)
-                }
-                Err(error) => Err(error),
+                Ok(batch) => Ok(Wait::Batch(batch)),
+                Err(TryRecvError::Disconnected) => Ok(Wait::Stopped),
+                Err(TryRecvError::Empty) => loop {
+                    match wait_for(batches) {
+                        Ok(Wait::Interrupted) => continue,
+                        other => break other,
+                    }
+                },
             },
         };
         self.in_use.set(false);
-        let rows = received
-            .map_err(|_| unsupported(ruby, Unsupported("the reader thread stopped".into())))?
-            .map_err(|e| unsupported(ruby, e))?;
+        let rows = match received? {
+            Wait::Batch(batch) => batch.map_err(|e| unsupported(ruby, e))?,
+            Wait::Stopped | Wait::Interrupted => {
+                return Err(unsupported(
+                    ruby,
+                    Unsupported("the reader thread stopped".into()),
+                ));
+            }
+        };
         if rows.is_empty() {
             self.done.set(true);
         }
