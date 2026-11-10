@@ -6,6 +6,7 @@ use std::path::Path;
 use std::sync::atomic::Ordering;
 
 use magnus::gc::Marker;
+use magnus::rb_sys::AsRawValue;
 use magnus::typed_data::Obj;
 use magnus::value::{Opaque, ReprValue};
 use magnus::{
@@ -112,6 +113,10 @@ pub struct Store {
     index: Vec<u32>,
     /// The cells built so far, by [`key`].
     built: Opaque<RHash>,
+    /// By record, the values [`Store::row`] handed out before their cell
+    /// was built, which that cell then holds: `nil`, or an object that is
+    /// not a shared string (the converter picks the same one again).
+    handed_out: Opaque<RArray>,
     /// The keys more than one record has, sorted.
     repeated: Vec<u64>,
 }
@@ -120,6 +125,7 @@ impl DataTypeFunctions for Store {
     fn mark(&self, marker: &Marker) {
         marker.mark(self.converter);
         marker.mark(self.built);
+        marker.mark(self.handed_out);
     }
 }
 
@@ -143,24 +149,26 @@ impl Records {
     }
 }
 
-/// The key [`Store::built`] holds a cell under: `row << 32 | column`.
-pub fn key(row: i64, column: i64) -> Option<u64> {
-    Some(u64::from(u32::try_from(row).ok()?) << 32 | u64::from(u32::try_from(column).ok()?))
-}
+/// The records [`read`] reads with the GVL released before it checks them.
+const BATCH_RECORDS: usize = 16_384;
 
-/// Reads every row with the GVL released. `None` when a record does not fit
-/// in a [`Record`].
-fn read(ruby: &Ruby, path: &str, empty_cell: bool) -> Result<Option<Records>, Error> {
+/// Reads every row with the GVL released, in batches. `None` as soon as a
+/// record does not fit in a [`Record`], or `converter` might not build it
+/// safely.
+fn read(ruby: &Ruby, path: &str, converter: &Converter) -> Result<Option<Records>, Error> {
     let mut sheet =
         SheetReader::open(Path::new(path), Mode::Document).map_err(|e| unsupported(ruby, e))?;
     let mut records = Records {
         text: String::new(),
         records: Vec::new(),
     };
+    let empty_cell = converter.empty_cell();
     let mut rows = 0;
+    let mut checked = 0;
     loop {
+        let batch_end = checked + BATCH_RECORDS;
         let read = without_gvl(|interrupted| {
-            while !interrupted.load(Ordering::Acquire) {
+            while !interrupted.load(Ordering::Acquire) && records.records.len() < batch_end {
                 let Some(row) = sheet.next_row()? else {
                     return Ok(Some(true));
                 };
@@ -171,10 +179,19 @@ fn read(ruby: &Ruby, path: &str, empty_cell: bool) -> Result<Option<Records>, Er
             }
             Ok(Some(false))
         })?;
-        match read.map_err(|e| unsupported(ruby, e))? {
-            Some(true) => break,
-            Some(false) => continue,
-            None => return Ok(None),
+        let Some(done) = read.map_err(|e| unsupported(ruby, e))? else {
+            return Ok(None);
+        };
+        let batch = &records.records[checked..];
+        if !batch
+            .iter()
+            .all(|record| converter.builds_safely(ruby, &records.text, &record.raw()))
+        {
+            return Ok(None);
+        }
+        checked = records.records.len();
+        if done {
+            break;
         }
     }
     records.text.shrink_to_fit();
@@ -187,15 +204,9 @@ impl Store {
     /// be built all at once, in order. `context` is a `Roo::Calamine::Context`.
     fn read(ruby: &Ruby, path: String, context: Value) -> Result<Option<Self>, Error> {
         let converter = ruby.obj_wrap(Converter::new(ruby, context, false)?);
-        let Some(Records { text, records }) = read(ruby, &path, converter.empty_cell())? else {
+        let Some(Records { text, records }) = read(ruby, &path, &converter)? else {
             return Ok(None);
         };
-        if !records
-            .iter()
-            .all(|record| converter.builds_safely(ruby, &text, &record.raw()))
-        {
-            return Ok(None);
-        }
         let Ok(count) = u32::try_from(records.len()) else {
             return Ok(None);
         };
@@ -222,6 +233,7 @@ impl Store {
             records,
             index,
             built: ruby.hash_new().into(),
+            handed_out: ruby.ary_new().into(),
             repeated,
         };
         // `Roo::Link.new` copies a linked cell's shared string, which roo does
@@ -238,39 +250,75 @@ impl Store {
 
     fn build(&self, ruby: &Ruby, record: u32) -> Result<Value, Error> {
         let built = ruby.get_inner(self.built);
+        let handed_out: Value = ruby.get_inner(self.handed_out).entry(record as isize)?;
         let record = &self.records[record as usize];
         let key = record.built_key();
         if let Some(cell) = built.get(key) {
             return Ok(cell);
         }
+        let known = (!handed_out.is_nil()).then_some(handed_out);
         let (_, cell) = ruby
             .get_inner(self.converter)
-            .cell(ruby, &self.text, &record.raw(), 0, 0)?
+            .cell(ruby, &self.text, &record.raw(), 0, 0, known)?
             .expect("the store holds only records roo keeps");
         built.aset(key, cell)?;
         Ok(cell)
     }
 
-    /// The cell built for `key`, for `Reader#fill_cells` to put in `cells`
-    /// in place of a new one. roo's `cells` keeps the key of the first record
-    /// with a repeated coordinate, so that record gets a cell of its own.
-    pub fn reused(&self, ruby: &Ruby, cells: RHash, key: u64) -> Result<Option<Value>, Error> {
-        let Some(cell) = ruby.get_inner(self.built).get(key) else {
-            return Ok(None);
-        };
-        if self.repeated.binary_search(&key).is_ok() {
-            let coordinate: Value = cell.funcall("coordinate", ())?;
-            if cells.get(coordinate).is_none() {
-                return Ok(None);
-            }
+    /// `cells[key]&.value` for the key of `record`, from its cell when it is
+    /// built, else as that cell will hold it.
+    fn value(&self, ruby: &Ruby, record: u32) -> Result<Value, Error> {
+        let raw = &self.records[record as usize];
+        if let Some(cell) = ruby.get_inner(self.built).get(raw.built_key()) {
+            return cell.funcall("value", ());
         }
-        Ok(Some(cell))
+        let handed_out = ruby.get_inner(self.handed_out);
+        let kept: Value = handed_out.entry(record as isize)?;
+        if !kept.is_nil() {
+            return Ok(kept);
+        }
+        let converter = ruby.get_inner(self.converter);
+        let Some(value) = converter.known_value(ruby, &self.text, &raw.raw())? else {
+            return self.build(ruby, record)?.funcall("value", ());
+        };
+        let shared = raw.kind == Kind::Shared && matches!(raw.content, Content::Value(_));
+        if !rb_sys::SPECIAL_CONST_P(value.as_raw()) && !shared {
+            handed_out.store(record as isize, value)?;
+        }
+        Ok(value)
     }
 
-    /// The converter that built them, for `Reader#fill_cells` to build the
-    /// rest with the same shared strings.
-    fn converter(ruby: &Ruby, rb_self: &Self) -> Obj<Converter> {
-        ruby.get_inner(rb_self.converter)
+    /// The position in [`Store::index`] of the record for `key`.
+    fn position(&self, key: (u32, u32)) -> Result<usize, usize> {
+        self.index
+            .binary_search_by_key(&key, |&i| self.records[i as usize].key())
+    }
+
+    /// `cells` as `SheetDoc#extract_cells` builds it, holding the cells
+    /// built so far and the values handed out. Of the records with a
+    /// repeated key, all but the one [`Store::index`] keeps get a cell of
+    /// their own, as roo builds one for each.
+    fn cells(ruby: &Ruby, rb_self: &Self) -> Result<RHash, Error> {
+        let cells = ruby.hash_new_capa(rb_self.index.len());
+        let built = ruby.get_inner(rb_self.built);
+        let handed_out = ruby.get_inner(rb_self.handed_out);
+        let converter = ruby.get_inner(rb_self.converter);
+        for (record, raw) in (0..).zip(&rb_self.records) {
+            let key = raw.built_key();
+            let kept = rb_self.repeated.binary_search(&key).is_err()
+                || rb_self.position(raw.key()).map(|i| rb_self.index[i]) == Ok(record);
+            if let Some(cell) = built.get(key).filter(|_| kept) {
+                cells.aset(cell.funcall::<_, _, Value>("coordinate", ())?, cell)?;
+                continue;
+            }
+            let value: Value = handed_out.entry(record as isize)?;
+            let known = (kept && !value.is_nil()).then_some(value);
+            let (coordinate, cell) = converter
+                .cell(ruby, &rb_self.text, &raw.raw(), 0, 0, known)?
+                .expect("the store holds only records roo keeps");
+            cells.aset(coordinate, cell)?;
+        }
+        Ok(cells)
     }
 
     /// `cells[key]`.
@@ -287,13 +335,64 @@ impl Store {
         let (Some(row), Some(column)) = (part(0), part(1)) else {
             return Ok(None);
         };
-        let found = rb_self
-            .index
-            .binary_search_by_key(&(row, column), |&i| rb_self.records[i as usize].key());
-        match found {
+        match rb_self.position((row, column)) {
             Ok(i) => rb_self.build(ruby, rb_self.index[i]).map(Some),
             Err(_) => Ok(None),
         }
+    }
+
+    /// `first_column.upto(last_column).map { |column| cells[[row, column]]&.value }`,
+    /// building only the cells whose value needs one.
+    fn row(
+        ruby: &Ruby,
+        rb_self: &Self,
+        row: Value,
+        first_column: i64,
+        last_column: i64,
+    ) -> Result<RArray, Error> {
+        let width = usize::try_from(last_column - first_column + 1).unwrap_or(0);
+        let values = ruby.ary_new_capa(width);
+        let mut column = first_column;
+        if let Some(row) = Integer::from_value(row).and_then(|n| n.to_u32().ok()) {
+            let from = u32::try_from(first_column.max(0)).unwrap_or(u32::MAX);
+            let start = rb_self.position((row, from)).unwrap_or_else(|start| start);
+            for &record in &rb_self.index[start..] {
+                let (record_row, record_column) = rb_self.records[record as usize].key();
+                if record_row != row || i64::from(record_column) > last_column {
+                    break;
+                }
+                for _ in column..i64::from(record_column) {
+                    values.push(ruby.qnil())?;
+                }
+                values.push(rb_self.value(ruby, record)?)?;
+                column = i64::from(record_column) + 1;
+            }
+        }
+        for _ in column..=last_column {
+            values.push(ruby.qnil())?;
+        }
+        Ok(values)
+    }
+
+    /// `fields.each_with_object({}) { |(key, slot), hash| hash[key] = values[slot] }`
+    /// for the `values` of [`Store::row`].
+    fn hash_row(
+        ruby: &Ruby,
+        rb_self: &Self,
+        row: Value,
+        first_column: i64,
+        last_column: i64,
+        fields: RArray,
+    ) -> Result<RHash, Error> {
+        let values = Self::row(ruby, rb_self, row, first_column, last_column)?;
+        let hash = ruby.hash_new_capa(fields.len());
+        for field in fields {
+            let field = RArray::try_convert(field)?;
+            let key: Value = field.entry(0)?;
+            let slot: isize = field.entry(1)?;
+            hash.aset(key, values.entry::<Value>(slot)?)?;
+        }
+        Ok(hash)
     }
 
     /// What `Roo::Excelx::Sheet#first_last_row_col` computes from `cells`.
@@ -348,6 +447,8 @@ pub fn define(ruby: &Ruby, native: magnus::RModule) -> Result<(), Error> {
     store.define_singleton_method("read", magnus::function!(Store::read, 2))?;
     store.define_method("[]", magnus::method!(Store::get, 1))?;
     store.define_method("bounds", magnus::method!(Store::bounds, 0))?;
-    store.define_method("converter", magnus::method!(Store::converter, 0))?;
+    store.define_method("row", magnus::method!(Store::row, 3))?;
+    store.define_method("hash_row", magnus::method!(Store::hash_row, 4))?;
+    store.define_method("cells", magnus::method!(Store::cells, 0))?;
     Ok(())
 }

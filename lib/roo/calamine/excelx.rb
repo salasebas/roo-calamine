@@ -5,16 +5,13 @@ module Roo
     # Prepended to Roo::Excelx. With options, Roo::Base#each reads every value
     # through #cell, which resolves the sheet and looks up an Array key in its
     # cells hash, one cell at a time. These keep roo's header handling (its own
-    # private methods) and read the cells hash with less work per cell.
-    # Without options, #each reads its rows through a RowIndex.
+    # private methods) and read the cells with less work per cell.
     #
-    # roo's single-cell lookups read Sheet#cell_at instead of Sheet#cells, so
-    # they build only the cells they read. #each and #parse read every cell, so
-    # they build them all at once, as roo does.
+    # roo's single-cell lookups read Sheet#cell_at instead of Sheet#cells, and
+    # rows read Sheet#row, so they build only the cells their values need.
+    # #each without options reads its rows through Sheet#row, or through a
+    # RowIndex once every cell is built.
     module Excelx
-      NO_CELLS = [].freeze
-      private_constant :NO_CELLS
-
       def each(options = {}, &)
         return super unless block_given?
 
@@ -93,7 +90,7 @@ module Roo
       end
 
       def row_index?
-        Calamine.enabled? && method(:row).owner.equal?(::Roo::Excelx)
+        Calamine.enabled? && !sheet_for(nil).lazy_cells && method(:row).owner.equal?(::Roo::Excelx)
       end
 
       # Roo::Base#each, up to its loop over the rows.
@@ -104,35 +101,19 @@ module Roo
         @headers || (first_column..last_column).to_h { |column| [cell(@header_line, column), column] }
       end
 
-      # Builds every cell before roo's next step, which reads them all. When
-      # that raises, roo's own read raises the same error where roo raises it.
+      # Builds every cell before roo's next step, which reads them all, unless
+      # the lazy cells answer it. When that raises, roo's own read raises the
+      # same error where roo raises it.
       def build_cells
-        sheet_for(nil).cells
+        sheet = sheet_for(nil)
+        sheet.cells unless sheet.lazy_cells
       rescue StandardError
         nil
       end
 
       def rows_for(headers)
         fields = headers.map { |key, column| [key, normalize(0, column).last] }
-        slots = fields.map(&:last).uniq.each_with_index.to_h
-        by_line = cells_by_line(slots)
-        fields = fields.map { |key, column| [key, slots.fetch(column)] }
-        @header_line.upto(last_row).map do |line|
-          cells = by_line.fetch(line, NO_CELLS)
-          fields.each_with_object({}) do |(key, slot), row|
-            cell = cells[slot]
-            row[key] = (cell.value if cell.respond_to?(:value)) # Roo::Excelx#safe_send, inline
-          end
-        end
-      end
-
-      def cells_by_line(slots)
-        by_line = {}
-        sheet_for(nil).cells.each do |(line, column), cell|
-          slot = slots[column] or next
-          (by_line[line] ||= Array.new(slots.size))[slot] = cell
-        end
-        by_line
+        sheet_for(nil).parse_rows(@header_line.upto(last_row), fields)
       end
     end
   end

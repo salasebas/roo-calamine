@@ -19,7 +19,7 @@ module Roo
 
         store = @calamine_store || nil
         @calamine_store = nil
-        @cells = read_cells(relationships, store)
+        @cells = store ? store.cells : read_cells(relationships)
       rescue UnsupportedError
         super
       end
@@ -104,13 +104,12 @@ module Roo
         @path && Calamine.enabled?
       end
 
-      # Every cell, in roo's order. With a Native::Store, its converter builds
-      # them and the cells it built go in their places.
-      def read_cells(relationships, store)
+      # Every cell, in roo's order.
+      def read_cells(relationships)
         cells = {}
         reader = Native::Reader.new(@path, false, BATCH_CELLS)
-        converter = store ? store.converter : Native::Converter.new(context(relationships), false)
-        nil while reader.fill_cells(cells, converter, store)
+        converter = Native::Converter.new(context(relationships), false)
+        nil while reader.fill_cells(cells, converter)
         expand_merged_ranges(cells) if @options[:expand_merged_ranges]
         cells
       ensure

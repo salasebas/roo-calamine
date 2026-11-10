@@ -51,6 +51,15 @@ class RooFixturesTest < Minitest::Test
       end
     end
 
+    define_method("test_row_reads_#{slug}") do
+      OPEN_OPTIONS.each do |options|
+        lazy = native_only && !options[:expand_merged_ranges]
+        assert_same_as_roo("#{name} row reads #{options}", native_only:, lazy:) do
+          Oracle.describe_row_reads(Roo::Excelx.new(path, options.dup))
+        end
+      end
+    end
+
     define_method("test_lookups_#{slug}") do
       OPEN_OPTIONS.each do |options|
         lazy = native_only && !options[:expand_merged_ranges]
