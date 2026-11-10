@@ -37,3 +37,27 @@ Metrics/AbcSize:
 
 Layout/LineLength:
   Max: 120
+  Exclude:
+    - "test/**/*"
+
+Minitest/MultipleAssertions:
+  Max: 6
+
+Style/StringConcatenation:
+  Exclude:
+    - "test/**/*"
+
+Metrics/ParameterLists:
+  CountKeywordArgs: false
+
+Metrics/PerceivedComplexity:
+  Exclude:
+    - "test/**/*"
+
+Metrics/CyclomaticComplexity:
+  Exclude:
+    - "test/**/*"
+
+Metrics/ClassLength:
+  Exclude:
+    - "test/**/*"

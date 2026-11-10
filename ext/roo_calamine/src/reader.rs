@@ -92,6 +92,8 @@ pub struct SheetReader<R: BufRead> {
     sheet_data_depth: Option<usize>,
     root_is_worksheet: bool,
     done: bool,
+    /// An error met after some rows of a batch, returned by the next call.
+    pending_error: Option<Unsupported>,
 }
 
 impl SheetReader<BufReader<File>> {
@@ -115,16 +117,27 @@ impl<R: BufRead> SheetReader<R> {
             sheet_data_depth: None,
             root_is_worksheet: false,
             done: false,
+            pending_error: None,
         }
     }
 
-    /// Reads up to `limit` rows. An empty vector means the sheet is done.
+    /// Reads up to `limit` rows. An empty vector means the sheet is done. When
+    /// an error stops a batch, the rows before it are returned first and the
+    /// error on the next call.
     pub fn next_rows(&mut self, limit: usize) -> Result<Vec<RawRow>> {
+        if let Some(error) = self.pending_error.take() {
+            return Err(error);
+        }
         let mut rows = Vec::with_capacity(limit.min(1024));
         while rows.len() < limit {
-            match self.next_row()? {
-                Some(row) => rows.push(row),
-                None => break,
+            match self.next_row() {
+                Ok(Some(row)) => rows.push(row),
+                Ok(None) => break,
+                Err(error) if rows.is_empty() => return Err(error),
+                Err(error) => {
+                    self.pending_error = Some(error);
+                    break;
+                }
             }
         }
         Ok(rows)
@@ -163,9 +176,6 @@ impl<R: BufRead> SheetReader<R> {
                     self.depth -= 1;
                 }
                 Event::Decl(decl) => check_encoding(&decl)?,
-                Event::DocType(_) => {
-                    return Err(Unsupported("document type declarations".into()));
-                }
                 Event::Eof => {
                     self.done = true;
                     return Ok(None);
@@ -523,6 +533,16 @@ mod tests {
         assert!(SheetReader::new(entity.as_bytes(), Mode::Document)
             .next_row()
             .is_err());
+    }
+
+    #[test]
+    fn returns_the_rows_before_an_error_first() {
+        let xml = format!(
+            "<worksheet {NS}><sheetData><row/><row><c><v>&x;</v></c></row></sheetData></worksheet>"
+        );
+        let mut reader = SheetReader::new(xml.as_bytes(), Mode::Document);
+        assert_eq!(reader.next_rows(5).unwrap().len(), 1);
+        assert!(reader.next_rows(5).is_err());
     }
 
     #[test]

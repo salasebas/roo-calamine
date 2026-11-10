@@ -15,21 +15,22 @@ module Roo
 
         cells = {}
         reader = Native::Reader.new(@path, false)
-        context = Context.new(@shared, hyperlinks(relationships), @options[:empty_cell])
-        nil while reader.fill_cells(cells, context, DOCUMENT_BATCH_ROWS)
+        converter = Native::Converter.new(Context.new(@shared, hyperlinks(relationships), @options[:empty_cell]), false)
+        nil while reader.fill_cells(cells, converter, DOCUMENT_BATCH_ROWS)
         expand_merged_ranges(cells) if @options[:expand_merged_ranges]
         @cells = cells
       rescue UnsupportedError
         super
       end
 
+      # Yields Native::Row objects; #each_cell turns one into cells when roo
+      # asks for it, so rows roo skips are never converted, as in roo.
       def each_row_streaming(&)
         return super unless @path && Calamine.enabled?
 
         yielded = 0
         reader = Native::Reader.new(@path, true)
-        context = Context.new(@shared, hyperlinks(@relationships), true)
-        while (rows = reader.next_rows(context, STREAM_BATCH_ROWS))
+        while (rows = reader.next_rows(STREAM_BATCH_ROWS))
           rows.each do |row|
             yield row
             yielded += 1
@@ -43,9 +44,11 @@ module Roo
       end
 
       def each_cell(row_xml, &)
-        return super unless row_xml.is_a?(Array)
+        return super unless row_xml.is_a?(Native::Row)
 
-        row_xml.each(&)
+        @calamine_stream_converter ||= Native::Converter.new(Context.new(@shared, hyperlinks(@relationships), true),
+                                                             true)
+        @calamine_stream_converter.row_cells(row_xml).each(&)
       end
     end
   end

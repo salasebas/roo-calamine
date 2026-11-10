@@ -11,10 +11,10 @@ require "json"
 require "open3"
 require "rbconfig"
 
-ROO_TAG = "v4.0.0"
-ROO_SHA = "a25a8cf97e048ab1e152e5d5a70701eaa518a6bf"
+require_relative "../support/roo_checkout"
+
 ROOT = File.expand_path("../..", __dir__)
-CHECKOUT = File.join(ROOT, "tmp", "roo-#{ROO_TAG}")
+CHECKOUT = RooCheckout.ensure!
 PROBE = File.join(__dir__, "probe.rb")
 
 SUITES = {
@@ -25,16 +25,6 @@ SUITES = {
   "spec/lib/roo/strict_spec.rb" => :rspec,
   "spec/lib/roo/excelx" => :rspec
 }.freeze
-
-def checkout_roo
-  unless File.directory?(CHECKOUT)
-    FileUtils.mkdir_p(File.dirname(CHECKOUT))
-    system("git", "clone", "--quiet", "--depth", "1", "--branch", ROO_TAG,
-           "https://github.com/roo-rb/roo.git", CHECKOUT, exception: true)
-  end
-  sha = IO.popen(["git", "-C", CHECKOUT, "rev-parse", "HEAD"], &:read).strip
-  abort "#{CHECKOUT} is at #{sha}, expected #{ROO_SHA}" unless sha == ROO_SHA
-end
 
 def command(kind, path, probe_out)
   ruby = [RbConfig.ruby, "-I", File.join(ROOT, "lib"), "-r", PROBE]
@@ -70,7 +60,6 @@ def run_suite(path, kind, mode)
   result.merge(probe: File.exist?(probe_out) ? JSON.parse(File.read(probe_out)) : {})
 end
 
-checkout_roo
 rows = []
 mismatch = false
 SUITES.each do |path, kind|

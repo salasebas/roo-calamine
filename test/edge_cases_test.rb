@@ -1,0 +1,232 @@
+# frozen_string_literal: true
+
+require_relative "test_helper"
+
+# Hand-built worksheets for the cases where a reader that does not follow
+# roo's own rules would return something else. Each test first pins what roo
+# itself returns, so the workbook is known to exercise the case, then asserts
+# that roo-calamine returns the same thing on every read path.
+class EdgeCasesTest < Minitest::Test
+  include OracleAssertions
+
+  HYPERLINK_RELS = %(<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="#{Workbook::REL}/hyperlink" Target="https://example.com/" TargetMode="External"/></Relationships>).freeze
+
+  def setup
+    @dir = Dir.mktmpdir("roo-calamine")
+  end
+
+  def teardown
+    FileUtils.rm_rf(@dir)
+  end
+
+  def write(rows, **)
+    Workbook.write(@dir, "book", sheets: { "Sheet1" => Workbook.sheet(rows) }, **)
+  end
+
+  def assert_every_path_same_as_roo(path, native_only: true, **open_options)
+    assert_same_as_roo("cells", native_only:) { Oracle.describe_cells(Roo::Excelx.new(path, open_options.dup)) }
+    assert_same_as_roo("api", native_only:) { Oracle.describe_api(Roo::Excelx.new(path, open_options.dup)) }
+    Oracle::STREAM_OPTIONS.each do |stream_options|
+      assert_same_as_roo("each_row_streaming #{stream_options}", native_only:) do
+        Oracle.describe_stream(Roo::Excelx.new(path, open_options.dup), stream_options)
+      end
+    end
+  end
+
+  def roo_cell(path, row, column)
+    Roo::Calamine.enabled = false
+    Roo::Excelx.new(path).cell(row, column)
+  ensure
+    Roo::Calamine.enabled = true
+  end
+
+  def test_integer_or_float_follows_the_written_text
+    path = write(<<~XML)
+      <row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>1.0</v></c><c r="C1"><v>1E3</v></c>
+        <c r="D1"><v>12345678901234567890</v></c><c r="E1" s="5"><v>2</v></c><c r="F1" s="4"><v>1</v></c>
+        <c r="G1"><v>-0</v></c><c r="H1" s="7"><v>5</v></c><c r="I1" s="8"><v>7</v></c><c r="J1"><v></v></c></row>
+    XML
+
+    assert_equal [Integer, Float, Float, Integer, Float],
+                 [roo_cell(path, 1, 1), roo_cell(path, 1, 2), roo_cell(path, 1, 3), roo_cell(path, 1, 4),
+                  roo_cell(path, 1, 5)].map(&:class)
+    assert_every_path_same_as_roo(path)
+  end
+
+  def test_dates_datetimes_and_times_follow_the_style_and_the_value
+    path = write(<<~XML)
+      <row r="1"><c r="A1" s="1"><v>45000</v></c><c r="B1" s="2"><v>45000.5</v></c><c r="C1" s="2"><v>45000</v></c>
+        <c r="D1" s="3"><v>0.25</v></c><c r="E1" s="6"><v>45000.75</v></c><c r="F1" s="1"><v>45000.9</v></c>
+        <c r="G1" s="3"><v>1.5</v></c><c r="H1" s="1"><v>#N/A</v></c></row>
+    XML
+
+    assert_equal [Date, DateTime, Date, Integer],
+                 [roo_cell(path, 1, 1), roo_cell(path, 1, 2), roo_cell(path, 1, 3), roo_cell(path, 1, 4)].map(&:class)
+    assert_every_path_same_as_roo(path)
+  end
+
+  def test_the_1904_date_system
+    path = write(%(<row r="1"><c r="A1" s="1"><v>1</v></c></row>))
+    Zip::File.open(path) do |zip|
+      xml = zip.read("xl/workbook.xml").sub("<sheets>", %(<workbookPr date1904="1"/><sheets>))
+      zip.get_output_stream("xl/workbook.xml") { |io| io.write(xml) }
+    end
+
+    assert_equal Date.new(1904, 1, 2), roo_cell(path, 1, 1)
+    assert_every_path_same_as_roo(path)
+  end
+
+  def test_booleans_errors_and_typed_strings
+    path = write(<<~XML)
+      <row r="1"><c r="A1" t="b"><v>1</v></c><c r="B1" t="b"><v>0</v></c><c r="C1" t="e"><v>#DIV/0!</v></c>
+        <c r="D1" t="str"><v>a &amp; b &lt;c&gt; &#x263A;</v></c><c r="E1" t="inlineStr"><v>42</v></c>
+        <c r="F1" t="str"><v><![CDATA[<raw>]]></v></c><c r="G1" t="n"><v>3</v></c></row>
+    XML
+
+    assert_equal [true, false, "#DIV/0!", "a & b <c> ☺"], ((1..4).map { |c| roo_cell(path, 1, c) })
+    assert_every_path_same_as_roo(path)
+  end
+
+  def test_shared_strings_including_rich_text
+    shared = Workbook.shared_strings(
+      "<si><t>plain</t></si>",
+      "<si><r><rPr><b/></rPr><t>bold</t></r><r><t> rest</t></r></si>",
+      %(<si><r><rPr><vertAlign val="superscript"/></rPr><t>2</t></r></si>),
+      "<si><t>line_x000D_break</t></si>",
+      "<si><t>&lt;b&gt;looks like html</t></si>",
+      %(<si><t xml:space="preserve">  spaced  </t><rPh><t>phonetic</t></rPh></si>)
+    )
+    cells = (0..5).map { |i| %(<c r="#{("A".ord + i).chr}1" t="s"><v>#{i}</v></c>) }.join
+    path = write(%(<row r="1">#{cells}</row><row r="2"><c r="A2" t="s"><v>0</v></c><c r="B2" t="s"><v> 1</v></c></row>),
+                 shared_strings: shared)
+
+    assert_equal "<html><b>bold</b> rest</html>", roo_cell(path, 1, 2)
+    assert_every_path_same_as_roo(path)
+    assert_every_path_same_as_roo(path, disable_html_wrapper: true)
+  end
+
+  def test_formulas_and_their_cached_values
+    path = write(<<~XML)
+      <row r="1"><c r="A1"><f>1+1</f><v>2</v></c><c r="B1"><f t="shared" ref="B1:B3" si="0">A1*2</f><v>4</v></c></row>
+      <row r="2"><c r="B2"><f t="shared" si="0"/><v>0</v></c><c r="C2" t="str"><f>"x"&amp;"y"</f><v>xy</v></c></row>
+      <row r="3"><c r="B3"><f t="shared" si="0"/></c><c r="C3" t="e"><f>1/0</f><v>#DIV/0!</v></c><c r="D3"><v>1</v><f>late</f></c></row>
+    XML
+
+    assert_equal "", Roo::Excelx.new(path).formula(2, 2)
+    assert_every_path_same_as_roo(path)
+  end
+
+  def test_coordinates_padding_and_empty_cells
+    path = write(<<~XML)
+      <row r="2"><c r="C2"><v>1</v></c><c r="F2"/><c r="H2" t="inlineStr"><is><t></t></is></c></row>
+      <row><c><v>2</v></c><c><v>3</v></c></row>
+      <row r="7"/>
+      <row r="9"><c r="aa9"><v>4</v></c></row>
+    XML
+
+    assert_every_path_same_as_roo(path, native_only: false)
+    assert_every_path_same_as_roo(path, empty_cell: true, native_only: false)
+  end
+
+  def test_inline_strings_take_every_t_element
+    path = write(<<~XML)
+      <row r="1"><c r="A1" t="inlineStr"><is><r><t>a</t></r><r><rPr><b/></rPr><t>b</t></r><rPh><t>c</t></rPh></is></c>
+        <c r="B1" t="inlineStr"><is><t>line&#10;two</t></is></c></row>
+    XML
+
+    assert_equal "abc", roo_cell(path, 1, 1)
+    assert_every_path_same_as_roo(path)
+  end
+
+  def test_merged_ranges_and_hyperlinks
+    sheet = Workbook.sheet(
+      %(<row r="1"><c r="A1"><v>1</v></c><c r="B1" t="str"><v>link</v></c></row><row r="2"><c r="A2"/></row>),
+      extra: %(<mergeCells count="1"><mergeCell ref="A1:A2"/></mergeCells><hyperlinks><hyperlink ref="B1" r:id="rId1" location="top"/></hyperlinks>)
+    )
+    path = Workbook.write(@dir, "book", sheets: { "Sheet1" => sheet }, sheet_rels: { "Sheet1" => HYPERLINK_RELS })
+
+    assert_equal "https://example.com/#top", roo_cell(path, 1, 2).href
+    assert_every_path_same_as_roo(path)
+    assert_every_path_same_as_roo(path, expand_merged_ranges: true)
+    assert_every_path_same_as_roo(path, no_hyperlinks: true)
+  end
+
+  def test_prefixed_namespaces
+    xml = %(<x:worksheet xmlns:x="#{Workbook::MAIN}"><x:sheetData><x:row r="1"><x:c r="A1" t="inlineStr"><x:is><x:t>hi</x:t></x:is></x:c><x:c r="B1"><x:v>2</x:v></x:c></x:row></x:sheetData></x:worksheet>)
+    path = Workbook.write(@dir, "book", sheets: { "Sheet1" => xml })
+
+    assert_equal "hi", roo_cell(path, 1, 1)
+    assert_every_path_same_as_roo(path)
+  end
+
+  def test_errors_are_roos_errors
+    no_styles = write(%(<row r="1"><c r="A1"><v>1</v></c></row>), styles: nil)
+    bad_reference = write(%(<row r="1"><c r="1A"><v>1</v></c></row>))
+    bad_number = write(%(<row r="1"><c r="A1"><v>2020-01-01</v></c></row>))
+
+    [no_styles, bad_reference, bad_number].each do |path|
+      roo, = Oracle.read(native: false) { Roo::Excelx.new(path).cell(1, 1) }
+
+      assert_equal :error, roo.first
+      assert_every_path_same_as_roo(path, native_only: false)
+    end
+  end
+
+  def test_multiple_sheets_and_a_missing_shared_strings_part
+    sheets = { "One" => Workbook.sheet(%(<row r="1"><c r="A1"><v>1</v></c></row>)),
+               "Two" => Workbook.sheet(%(<row r="3"><c r="B3" t="s"><v>0</v></c></row>)) }
+    path = Workbook.write(@dir, "book", sheets:)
+
+    assert_every_path_same_as_roo(path, native_only: false)
+  end
+
+  def test_unsupported_xml_goes_to_roo_and_streaming_resumes_where_it_stopped
+    rows = (1..300).map { |i| %(<row r="#{i}"><c r="A#{i}"><v>#{i}</v></c></row>) }
+    rows[250] = %(<row r="251"><c r="A251" t="str"><v>&custom;</v></c></row>)
+    xml = Workbook.sheet(rows.join).sub("<worksheet", %(<!DOCTYPE worksheet [<!ENTITY custom "expanded">]><worksheet))
+    path = Workbook.write(@dir, "book", sheets: { "Sheet1" => xml })
+
+    assert_every_path_same_as_roo(path, native_only: false)
+
+    stream = -> { Roo::Excelx.new(path).each_row_streaming.map { |row| row.map(&:value) } }
+    roo, = Oracle.read(native: false, &stream)
+    native, counts = Oracle.read(native: true, &stream)
+
+    assert_equal :ok, roo.first
+    assert_equal roo, native
+    assert_equal 1, counts[:native_readers]
+    assert_equal 50, counts[:roo_cells], "roo should parse only rows 251 to 300"
+  end
+
+  def test_kill_switch_restores_roo
+    path = write(%(<row r="1"><c r="A1"><v>1</v></c></row>))
+
+    Roo::Calamine.enabled = false
+    Oracle.counts.clear
+    Roo::Excelx.new(path).cell(1, 1)
+
+    assert_equal 0, Oracle.counts[:native_readers]
+    assert_equal 1, Oracle.counts[:roo_cells]
+  ensure
+    Roo::Calamine.enabled = true
+  end
+
+  def test_environment_variable_disables_the_native_reader
+    path = write(%(<row r="1"><c r="A1"><v>1</v></c></row>))
+    %w[0 false OFF].each do |value|
+      ENV["ROO_CALAMINE"] = value
+      Oracle.counts.clear
+      Roo::Excelx.new(path).each_row_streaming.to_a
+
+      refute_predicate Roo::Calamine, :enabled?
+      assert_equal 0, Oracle.counts[:native_readers]
+    end
+  ensure
+    ENV.delete("ROO_CALAMINE")
+  end
+
+  def test_enabled_on_cruby_by_default
+    assert_predicate Roo::Calamine, :available?
+    assert_predicate Roo::Calamine, :enabled?
+  end
+end
