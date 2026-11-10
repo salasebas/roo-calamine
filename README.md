@@ -150,14 +150,14 @@ Median of 3 runs on an Apple M5 Pro, Ruby 3.4.12. Memory is peak RSS.
 
 | File | Scenario | roo | roo-calamine | Speedup |
 |---|---|---:|---:|---:|
-| 100k rows × 20 mixed columns | `each_row_streaming` | 16.16 s, 119 MB | 1.41 s, 132 MB | 11.5× |
-| | `parse(headers: true)` | 23.66 s, 3312 MB | 2.96 s, 844 MB | 8.0× |
-| | 10,000 random `cell(row, col)` | 21.01 s, 3287 MB | 2.03 s, 670 MB | 10.4× |
-| | values only: `each_row_values` | 15.56 s, 123 MB | 0.81 s, 130 MB | 19.2× |
-| 100k rows × 10 shared strings | `each_row_streaming` | 5.83 s, 146 MB | 0.47 s, 151 MB | 12.4× |
-| | `parse(headers: true)` | 7.64 s, 1633 MB | 1.07 s, 416 MB | 7.1× |
-| | 10,000 random `cell(row, col)` | 6.11 s, 1637 MB | 0.76 s, 316 MB | 8.0× |
-| | values only: `each_row_values` | 5.86 s, 126 MB | 0.38 s, 165 MB | 15.4× |
+| 100k rows × 20 mixed columns | `each_row_streaming` | 14.51 s, 118 MB | 1.43 s, 132 MB | 10.2× |
+| | `parse(headers: true)` | 23.34 s, 3423 MB | 2.91 s, 839 MB | 8.0× |
+| | 10,000 random `cell(row, col)` | 20.28 s, 3272 MB | 0.91 s, 235 MB | 22.2× |
+| | values only: `each_row_values` | 15.80 s, 118 MB | 0.81 s, 128 MB | 19.5× |
+| 100k rows × 10 shared strings | `each_row_streaming` | 6.18 s, 136 MB | 0.46 s, 131 MB | 13.5× |
+| | `parse(headers: true)` | 6.46 s, 1681 MB | 0.97 s, 396 MB | 6.7× |
+| | 10,000 random `cell(row, col)` | 6.12 s, 1598 MB | 0.47 s, 160 MB | 13.2× |
+| | values only: `each_row_values` | 5.91 s, 120 MB | 0.38 s, 165 MB | 15.5× |
 
 For the values-only rows, plain roo runs the `each_row_streaming(pad_cells:
 true)` code above.
