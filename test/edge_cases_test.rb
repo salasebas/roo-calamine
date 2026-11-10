@@ -632,17 +632,17 @@ class EdgeCasesTest < Minitest::Test
   end
 
   # Two sheets; One has a repeated header, a column without a header, and
-  # rows with gaps.
-  def write_header_book
+  # rows with gaps. `last_cell` adds a cell to the last row of One.
+  def write_header_book(name = "book", last_cell: "")
     one = Workbook.sheet(<<~XML)
       <row r="1"><c r="A1" t="inlineStr"><is><t>name</t></is></c><c r="B1" t="inlineStr"><is><t>qty</t></is></c>
         <c r="C1" t="inlineStr"><is><t>name</t></is></c><c r="E1"><v>5</v></c></row>
       <row r="2"><c r="A2" t="inlineStr"><is><t>a</t></is></c><c r="B2"><v>1</v></c></row>
       <row r="4"><c r="C4"><v>3</v></c><c r="E4" t="inlineStr"><is><t>e</t></is></c></row>
-      <row r="5"><c r="A5" t="inlineStr"><is><t>c</t></is></c></row>
+      <row r="5"><c r="A5" t="inlineStr"><is><t>c</t></is></c>#{last_cell}</row>
     XML
     two = Workbook.sheet(%(<row r="3"><c r="A3" t="inlineStr"><is><t>other</t></is></c><c r="B3"><v>7</v></c></row>))
-    Workbook.write(@dir, "book", sheets: { "One" => one, "Two" => two })
+    Workbook.write(@dir, name, sheets: { "One" => one, "Two" => two })
   end
 
   # The rows each(options) yields, calling `change` after each one with the
@@ -683,6 +683,8 @@ class EdgeCasesTest < Minitest::Test
 
   def test_each_without_options_follows_changes_made_by_its_block
     path = write_header_book
+    # Too sparse for one slot per column of each row.
+    sparse = write_header_book("sparse", last_cell: %(<c r="Z5"><v>26</v></c>))
     scenarios = {
       set_before_the_index: ->(xlsx, n) { xlsx.set(4, 2, 99) if n == 1 },
       set_after_the_index: ->(xlsx, n) { xlsx.set(4, 2, 99) if n == 2 },
@@ -692,9 +694,9 @@ class EdgeCasesTest < Minitest::Test
     roo, = Oracle.read(native: false) { each_with_change(path, scenarios[:set_after_the_index], {}) }
 
     assert_equal 99, roo.dig(1, 3, 1)
-    ROW_PATHS.product(scenarios.to_a).each do |open_options, (name, change)|
-      assert_same_as_roo("#{name} #{open_options}") do
-        Oracle.describe_rows(each_with_change(path, change, {}, open_options))
+    [path, sparse].product(ROW_PATHS, scenarios.to_a).each do |book, open_options, (name, change)|
+      assert_same_as_roo("#{name} #{open_options} #{File.basename(book)}") do
+        Oracle.describe_rows(each_with_change(book, change, {}, open_options))
       end
     end
   end
@@ -703,7 +705,7 @@ class EdgeCasesTest < Minitest::Test
     sheets = {
       # An empty string is no value for the bounds, but #each still yields it.
       "Blank first" => Workbook.sheet(%(<row r="1"><c r="A1" t="str"><v></v></c></row><row r="2"><c r="A2"><v>1</v></c></row>)),
-      # Too sparse to lay out by row: roo's own lookups answer.
+      # Too sparse for one slot per column of each row.
       "Sparse" => Workbook.sheet((1..50).map { |i| %(<row r="#{i}"><c r="A#{i}"><v>#{i}</v></c></row>) }.join +
                                  %(<row r="51"><c r="XFD51"><v>0</v></c></row>)),
       "Empty" => Workbook.sheet("")
@@ -727,8 +729,8 @@ class EdgeCasesTest < Minitest::Test
 
     # On a sheet built whole (here for expand_merged_ranges), roo's
     # Sheet#row answers the first row, and every row of a sheet too short to
-    # repay the index or too sparse to lay out.
-    { dense => 1, short => 2, sparse => 6 }.each do |path, rows_from_roo|
+    # repay the index.
+    { dense => 1, short => 2, sparse => 1 }.each do |path, rows_from_roo|
       _, counts = Oracle.read(native: true) { Roo::Excelx.new(path, expand_merged_ranges: true).each.to_a }
 
       assert_equal rows_from_roo, counts[:sheet_rows]
