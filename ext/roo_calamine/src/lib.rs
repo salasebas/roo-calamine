@@ -118,9 +118,8 @@ type Batch = Result<Vec<RawRow>, Unsupported>;
 struct Reader {
     /// `None` once closed.
     batches: RefCell<Option<Receiver<Batch>>>,
-    /// The rows of the last batch that [`Self::next_values`] has not
-    /// converted yet.
-    unconverted: RefCell<std::vec::IntoIter<RawRow>>,
+    /// The rows of the last batch not handed to Ruby yet.
+    pending: RefCell<std::vec::IntoIter<RawRow>>,
     /// Set while a Ruby thread waits on `batches` without the GVL; the
     /// receiver must not be used from two threads at once.
     in_use: StdCell<bool>,
@@ -148,7 +147,7 @@ impl Reader {
             .map_err(|e| Error::new(ruby.exception_runtime_error(), e.to_string()))?;
         Ok(Self {
             batches: RefCell::new(Some(batches)),
-            unconverted: RefCell::new(Vec::new().into_iter()),
+            pending: RefCell::new(Vec::new().into_iter()),
             in_use: StdCell::new(false),
             done: StdCell::new(false),
             rows_read: StdCell::new(0),
@@ -204,7 +203,7 @@ impl Reader {
             ));
         }
         rb_self.batches.borrow_mut().take();
-        rb_self.unconverted.replace(Vec::new().into_iter());
+        rb_self.pending.replace(Vec::new().into_iter());
         rb_self.done.set(true);
         Ok(())
     }
@@ -226,17 +225,21 @@ impl Reader {
         Ok(!rows.is_empty())
     }
 
-    /// Stream mode: the next batch of rows, or `nil` at the end of the sheet.
-    fn next_rows(ruby: &Ruby, rb_self: &Self) -> Result<Option<RArray>, Error> {
-        let rows = rb_self.read_batch(ruby)?;
-        if rows.is_empty() {
-            return Ok(None);
+    /// Stream mode: the next row of the sheet, `None` at its end. Rows wait
+    /// in their batch until asked for, so Ruby holds one at a time.
+    fn next_raw_row(&self, ruby: &Ruby) -> Result<Option<RawRow>, Error> {
+        if let Some(row) = self.pending.borrow_mut().next() {
+            return Ok(Some(row));
         }
-        let out = ruby.ary_new_capa(rows.len());
-        for row in rows {
-            out.push(Row(row))?;
-        }
-        Ok(Some(out))
+        let mut rows = self.read_batch(ruby)?.into_iter();
+        let row = rows.next();
+        self.pending.replace(rows);
+        Ok(row)
+    }
+
+    /// Stream mode: the next row, or `nil` at the end of the sheet.
+    fn next_row(ruby: &Ruby, rb_self: &Self) -> Result<Option<Row>, Error> {
+        Ok(rb_self.next_raw_row(ruby)?.map(Row))
     }
 
     /// Stream mode: the values of the next row, as
@@ -248,19 +251,10 @@ impl Reader {
         rb_self: &Self,
         converter: &Converter,
     ) -> Result<Option<RArray>, Error> {
-        let next = rb_self.unconverted.borrow_mut().next();
-        let row = match next {
-            Some(row) => row,
-            None => {
-                let mut rows = rb_self.read_batch(ruby)?.into_iter();
-                let Some(row) = rows.next() else {
-                    return Ok(None);
-                };
-                rb_self.unconverted.replace(rows);
-                row
-            }
-        };
-        converter.row_values(ruby, &row).map(Some)
+        match rb_self.next_raw_row(ruby)? {
+            Some(row) => converter.row_values(ruby, &row).map(Some),
+            None => Ok(None),
+        }
     }
 }
 
@@ -274,7 +268,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     let reader = native.define_class("Reader", ruby.class_object())?;
     reader.define_singleton_method("new", function!(Reader::new, 3))?;
     reader.define_method("fill_cells", method!(Reader::fill_cells, 2))?;
-    reader.define_method("next_rows", method!(Reader::next_rows, 0))?;
+    reader.define_method("next_row", method!(Reader::next_row, 0))?;
     reader.define_method("next_values", method!(Reader::next_values, 1))?;
     reader.define_method("close", method!(Reader::close, 0))?;
 

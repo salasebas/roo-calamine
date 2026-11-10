@@ -42,11 +42,9 @@ module Roo
 
         yielded = 0
         reader = Native::Reader.new(@path, true, BATCH_CELLS)
-        while (rows = reader.next_rows)
-          rows.each do |row|
-            yield row
-            yielded += 1
-          end
+        while (row = reader.next_row)
+          yield row
+          yielded += 1
         end
         nil
       rescue UnsupportedError
