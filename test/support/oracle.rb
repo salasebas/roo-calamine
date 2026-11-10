@@ -185,20 +185,30 @@ module Oracle
     end
   end
 
-  # #each and #parse(headers: true) after one single-cell lookup, before
+  # #each and #parse without a block after one single-cell lookup, before
   # anything builds `cells`, then whether `cells`, built after them, holds
-  # the very values they returned.
+  # the very values #each and #parse(headers: true) returned. The other
+  # parses look for the first row's last value, so their columns need not
+  # start at the sheet's first.
   def describe_row_reads(workbook)
     workbook.sheets.map do |sheet|
       workbook.default_sheet = sheet
       bounds = BOUNDS.map { |m| workbook.public_send(m) }
       workbook.cell(bounds[0], bounds[2]) if bounds[0]
+      searched = describe_header_parses(workbook, bounds[0] && workbook.row(bounds[0]).compact.last)
       rows = outcome { workbook.each.to_a }
       parsed = outcome { workbook.parse(headers: true) }
       kept = outcome { kept_row_values(workbook.sheet_for(sheet).cells, workbook, bounds[2], rows, parsed) }
-      [sheet, bounds, rows.first, rows.first == :ok && describe_rows(rows.last), parsed.first,
-       parsed.first == :ok && describe_rows(parsed.last), kept]
+      [sheet, bounds, searched, described_rows(rows), described_rows(parsed), kept]
     end
+  end
+
+  def described_rows(read)
+    read.first == :ok ? [:ok, describe_rows(read.last)] : read.first
+  end
+
+  def describe_header_parses(workbook, header)
+    [{ header_search: [header] }, { last: header }].map { |options| outcome { describe_rows(workbook.parse(options)) } }
   end
 
   def kept_row_values(cells, workbook, first_column, rows, parsed)

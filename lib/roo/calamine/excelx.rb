@@ -16,7 +16,7 @@ module Roo
         return super unless block_given?
 
         if options.empty?
-          build_cells
+          build_cells(lazy: true)
           return row_index? ? each_without_options(&) : super
         end
         return super unless Calamine.enabled?
@@ -36,7 +36,7 @@ module Roo
       def parse(options = {})
         return super if block_given? || options.empty? || !Calamine.enabled?
 
-        rows = rows_for(header_columns(options))
+        rows = rows_for(header_columns(options, lazy: true))
         options[:headers] == true ? rows : rows.drop(1)
       end
 
@@ -94,19 +94,19 @@ module Roo
       end
 
       # Roo::Base#each, up to its loop over the rows.
-      def header_columns(options)
+      def header_columns(options, lazy: false)
         clean_sheet_if_need(options)
-        build_cells
+        build_cells(lazy:)
         search_or_set_header(options)
         @headers || (first_column..last_column).to_h { |column| [cell(@header_line, column), column] }
       end
 
       # Builds every cell before roo's next step, which reads them all, unless
-      # the lazy cells answer it. When that raises, roo's own read raises the
-      # same error where roo raises it.
-      def build_cells
+      # it reads them `lazy` and the lazy cells answer it. When that raises,
+      # roo's own read raises the same error where roo raises it.
+      def build_cells(lazy: false)
         sheet = sheet_for(nil)
-        sheet.cells unless sheet.lazy_cells
+        sheet.cells unless lazy && sheet.lazy_cells
       rescue StandardError
         nil
       end

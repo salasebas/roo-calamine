@@ -712,6 +712,17 @@ class EdgeCasesTest < Minitest::Test
     assert_equal roo, calamine
   end
 
+  def test_parse_reads_header_columns_from_the_second_on
+    path = write(<<~XML)
+      <row r="1"><c r="B1" t="str"><v>h1</v></c><c r="C1" t="str"><v>h2</v></c><c r="D1" t="str"><v>h3</v></c></row>
+      <row r="2"><c r="B2"><v>1</v></c><c r="C2"><v>2</v></c><c r="D2"><v>3</v></c></row>
+    XML
+    roo, = Oracle.read(native: false) { Roo::Excelx.new(path).parse(b: "h2", c: "h3") }
+
+    assert_equal [:ok, [{ b: 2, c: 3 }]], roo
+    assert_every_path_same_as_roo(path)
+  end
+
   def test_parse_reads_cells_set_before_it
     path = write_header_book
 
