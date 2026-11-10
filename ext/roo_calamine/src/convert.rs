@@ -204,12 +204,11 @@ impl Converter {
     /// `Roo::Calamine.each_row_values` for a streamed row: the `value` of each
     /// cell that `Sheet#each_row(pad_cells: true)` yields, and `nil` for each
     /// cell it pads.
-    pub fn row_values(ruby: &Ruby, rb_self: &Self, row: &crate::Row) -> Result<RArray, Error> {
-        let row = row.raw();
+    pub fn row_values(&self, ruby: &Ruby, row: &RawRow) -> Result<RArray, Error> {
         let values = ruby.ary_new_capa(row.cells.len());
         let mut last_column = 0;
         for raw in &row.cells {
-            let (column, value) = rb_self.value(ruby, row, raw)?;
+            let (column, value) = self.value(ruby, row, raw)?;
             for _ in last_column + 1..column {
                 values.push(ruby.qnil())?;
             }

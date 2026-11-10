@@ -718,6 +718,20 @@ class EdgeCasesTest < Minitest::Test
     assert_equal 0, counts[:roo_cells], "roo should not build the 250 rows already yielded again"
   end
 
+  def test_roo_reads_on_where_the_native_reader_stops
+    rows = (1..300).map { |i| %(<row r="#{i}"><c r="A#{i}"><v>#{i}</v></c></row>) }
+    rows[250] = %(<row r="251"><c r="A251" t="inlineStr"><is><x:t xmlns:x="urn:other">a</x:t><t>251</t></is></c></row>)
+    path = write(rows.join)
+    values = -> { Roo::Calamine.each_row_values(path).map(&:first) }
+    roo, = Oracle.read(native: false, &values)
+    native, counts = Oracle.read(native: true, &values)
+
+    assert_equal [:ok, [*1..250, "251", *252..300]], roo
+    assert_equal roo, native
+    assert_equal 50, counts[:roo_cells], "roo should read on from row 251"
+    assert_every_path_same_as_roo(path, native_only: false)
+  end
+
   def test_an_exception_while_waiting_for_a_batch_arrives_as_itself
     skip "needs File.mkfifo" unless File.respond_to?(:mkfifo)
 

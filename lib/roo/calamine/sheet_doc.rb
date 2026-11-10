@@ -66,17 +66,34 @@ module Roo
 
       # Roo::Calamine.each_row_values. `sheet` is the Roo::Excelx::Sheet that
       # owns this document; it turns rows that roo reads itself into cells.
-      def each_row_values(sheet)
-        each_row_streaming do |row|
-          yield(if row.is_a?(Native::Row)
-                  calamine_stream_converter.row_values(row)
-                else
-                  sheet.send(:cells_for_row_element, row, pad_cells: true).map { |cell| cell&.value }
-                end)
+      def each_row_values(sheet, &)
+        return each_roo_row_values(sheet, 0, &) unless native?
+
+        yielded = 0
+        reader = Native::Reader.new(@path, true, BATCH_CELLS)
+        while (values = reader.next_values(calamine_stream_converter))
+          yield values
+          yielded += 1
         end
+        nil
+      rescue UnsupportedError
+        each_roo_row_values(sheet, yielded, &)
+      ensure
+        reader&.close
       end
 
       private
+
+      # The values of the rows roo's own #each_row_streaming yields, after the
+      # first `skip`.
+      def each_roo_row_values(sheet, skip)
+        method(:each_row_streaming).super_method.call do |row|
+          next skip -= 1 unless skip.zero?
+
+          yield sheet.send(:cells_for_row_element, row, pad_cells: true).map { |cell| cell&.value }
+        end
+        nil
+      end
 
       def calamine_stream_converter
         @calamine_stream_converter ||= Native::Converter.new(Context.new(@shared, hyperlinks(@relationships), true),
