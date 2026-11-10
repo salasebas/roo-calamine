@@ -1,7 +1,7 @@
 # roo-calamine
 
 Make [roo](https://github.com/roo-rb/roo) read `.xlsx` and `.xlsm` files
-8–22× faster on large sheets, with identical results and 4–14× less memory
+7–22× faster on large sheets, with identical results and 4–14× less memory
 outside streaming. Your roo code does not change.
 
 ```ruby
