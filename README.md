@@ -50,7 +50,11 @@ It also prepends `Roo::Excelx#parse` and `#each` for calls with options
 handling and build each row's Hash from the `cells` hash. roo builds it with
 one `#cell` call per value instead. `parse` without a block groups the cells
 by row in one pass. `each`, and `parse` with a block, look up each value
-directly, because the block may change the workbook between rows.
+directly, because the block may change the workbook between rows. `each`
+without options, behind `each_with_index`, `to_a`, and `parse` without
+options, reads rows past the first 1,000 from an index built in one pass
+over the sheet's cells, and hands back to roo's lookups once the block calls
+`set`, `reload`, or changes `default_sheet`.
 
 When a sheet uses XML the reader does not reproduce exactly the way Nokogiri
 does (a non-UTF-8 encoding, a DTD, custom entities, or malformed XML), it
@@ -126,6 +130,8 @@ Known differences, by design:
   `#extract_cells`, `Cell.cell_class`) is bypassed while the reader is on, and
   so is a `Roo::Excelx` subclass's `#cell` or `#each` inside `parse` and
   `each` with options.
+- Inside an `each` block without options, a write straight into
+  `sheet_for(...).cells` (not through `set`) does not show in later rows.
 - On XML that breaks partway, `each_row_streaming` raises the same
   `Nokogiri::XML::SyntaxError` as roo but yields a few more rows before it.
 - Streaming uses about 10 MB more peak memory.

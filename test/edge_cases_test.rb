@@ -220,14 +220,14 @@ class EdgeCasesTest < Minitest::Test
     Workbook.write(@dir, "book", sheets: { "One" => one, "Two" => two })
   end
 
-  # The rows each(headers: true) yields, calling `change` after each one with
-  # the workbook and how many rows it yielded.
-  def each_with_change(path, change)
+  # The rows each(options) yields, calling `change` after each one with the
+  # workbook and how many rows it yielded.
+  def each_with_change(path, change, options = { headers: true })
     xlsx = Roo::Excelx.new(path)
     seen = []
     # Roo::Excelx#set warns that the Cell it builds is deprecated.
     Oracle.silence do
-      xlsx.each(headers: true) do |row|
+      xlsx.each(options) do |row|
         seen << row
         change.call(xlsx, seen.size)
       end
@@ -248,6 +248,42 @@ class EdgeCasesTest < Minitest::Test
     assert_equal 99, roo.dig(1, 3, "qty")
     scenarios.each do |name, change|
       assert_same_as_roo(name) { Oracle.describe_rows(each_with_change(path, change)) }
+    end
+  end
+
+  # Without options, the tests' row index answers from the second row on.
+  def test_each_without_options_follows_changes_made_by_its_block
+    path = write_header_book
+    scenarios = {
+      set_before_the_index: ->(xlsx, n) { xlsx.set(4, 2, 99) if n == 1 },
+      set_after_the_index: ->(xlsx, n) { xlsx.set(4, 2, 99) if n == 2 },
+      switch_sheets: ->(xlsx, n) { xlsx.default_sheet = "Two" if n == 2 },
+      reload: ->(xlsx, n) { xlsx.reload if n == 2 }
+    }
+    roo, = Oracle.read(native: false) { each_with_change(path, scenarios[:set_after_the_index], {}) }
+
+    assert_equal 99, roo.dig(1, 3, 1)
+    scenarios.each do |name, change|
+      assert_same_as_roo(name) { Oracle.describe_rows(each_with_change(path, change, {})) }
+    end
+  end
+
+  def test_each_without_options_on_blank_sparse_and_empty_sheets
+    sheets = {
+      # An empty string is no value for the bounds, but #each still yields it.
+      "Blank first" => Workbook.sheet(%(<row r="1"><c r="A1" t="str"><v></v></c></row><row r="2"><c r="A2"><v>1</v></c></row>)),
+      # Too sparse to lay out by row: roo's own lookups answer.
+      "Sparse" => Workbook.sheet((1..50).map { |i| %(<row r="#{i}"><c r="A#{i}"><v>#{i}</v></c></row>) }.join +
+                                 %(<row r="51"><c r="XFD51"><v>0</v></c></row>)),
+      "Empty" => Workbook.sheet("")
+    }
+    path = Workbook.write(@dir, "book", sheets:)
+
+    assert_every_path_same_as_roo(path)
+    # Switched before the index is built, so it would be built for a sheet
+    # without bounds.
+    assert_same_as_roo("switch to an empty sheet") do
+      Oracle.describe_rows(each_with_change(path, ->(xlsx, n) { xlsx.default_sheet = "Empty" if n == 1 }, {}))
     end
   end
 
