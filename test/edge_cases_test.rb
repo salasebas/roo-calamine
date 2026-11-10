@@ -11,6 +11,28 @@ class EdgeCasesTest < Minitest::Test
 
   HYPERLINK_RELS = %(<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="#{Workbook::REL}/hyperlink" Target="https://example.com/" TargetMode="External"/></Relationships>).freeze
 
+  TWO_HYPERLINK_RELS = %(<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">) +
+                       %(<Relationship Id="rId1" Type="#{Workbook::REL}/hyperlink" Target="https://example.com/" TargetMode="External"/>) +
+                       %(<Relationship Id="rId2" Type="#{Workbook::REL}/hyperlink" Target="https://example.org/?a=1&amp;b=2" TargetMode="External"/></Relationships>)
+
+  LINKS_AND_MERGES = <<~XML.freeze
+    <sheetPr><extLst><hyperlinks><hyperlink ref="A3" r:id="rId1"/></hyperlinks></extLst></sheetPr>
+    <x:mergeCells xmlns:x="#{Workbook::MAIN}"><x:mergeCell ref="A1:B2"/><mergeCell ref="B2:C3"/><mergeCell ref="D4:D4"/></x:mergeCells>
+    <hyperlinks>
+      <hyperlink ref="A1" r:id="rId1"/>
+      <hyperlink ref="B1:C2" r:id="rId2" location="s&amp;1&#10;&#x9;&#13;&lt;\t|\r\n|\n|\r|"/>
+      <hyperlink ref="A1" r:id="rId2"/>
+      <hyperlink ref="D1" location="Sheet1!A1"/>
+      <hyperlink ref="D2" r:id="rId9"/>
+      <hyperlink ref="D3" id="rId1" r:id="rId2"/>
+      <hyperlink r:id="rId1" ref="A4" id="rId2"/>
+      <hyperlink r:id="rId1"/>
+      <hyperlink ref="B4" r:id="rId1"><hyperlink ref="C4" r:id="rId1"/></hyperlink>
+    </hyperlinks>
+    <mergeCells><mergeCell ref="C1:D1"/></mergeCells>
+    <x:hyperlinks xmlns:x="#{Workbook::MAIN}" xmlns:rel="#{Workbook::REL}"><x:hyperlink ref="C3" rel:id="rId1" location="x"/></x:hyperlinks>
+  XML
+
   def setup
     @dir = Dir.mktmpdir("roo-calamine")
   end
@@ -43,6 +65,13 @@ class EdgeCasesTest < Minitest::Test
   def roo_cell(path, row, column)
     Roo::Calamine.enabled = false
     Roo::Excelx.new(path).cell(row, column)
+  ensure
+    Roo::Calamine.enabled = true
+  end
+
+  def roo_sheet_hyperlinks(path)
+    Roo::Calamine.enabled = false
+    Roo::Excelx.new(path).sheet_for(nil).hyperlinks
   ensure
     Roo::Calamine.enabled = true
   end
@@ -168,7 +197,7 @@ class EdgeCasesTest < Minitest::Test
     read = -> { Oracle.describe_cells(Roo::Excelx.new(path, empty_cell: true)) }
     (_, cells), counts = Oracle.read(native: true, &read)
 
-    assert_equal 10, cells.first.last.size
+    assert_equal 10, cells.first[1].size
     assert_equal 0, counts[:constructors]
 
     with_roo_version("4.1.0") do
@@ -331,6 +360,68 @@ class EdgeCasesTest < Minitest::Test
     assert_every_path_same_as_roo(path)
     assert_every_path_same_as_roo(path, expand_merged_ranges: true)
     assert_every_path_same_as_roo(path, no_hyperlinks: true)
+  end
+
+  def test_links_and_merges_are_read_natively_only_under_a_known_roo
+    sheet = Workbook.sheet(%(<row r="1"><c r="A1"><v>1</v></c><c r="B1" t="str"><v>link</v></c></row>),
+                           extra: %(<mergeCells><mergeCell ref="A1:B1"/></mergeCells><hyperlinks><hyperlink ref="B1" r:id="rId1"/></hyperlinks>))
+    path = Workbook.write(@dir, "book", sheets: { "Sheet1" => sheet }, sheet_rels: { "Sheet1" => HYPERLINK_RELS })
+    read = -> { Oracle.describe_cells(Roo::Excelx.new(path, expand_merged_ranges: true)) }
+    _, counts = Oracle.read(native: true, &read)
+
+    assert_equal 0, counts[:roo_documents]
+
+    with_roo_version("4.1.0") do
+      assert_same_as_roo("links and merges under another roo", native_only: false, &read)
+      _, counts = Oracle.read(native: true, &read)
+
+      assert_operator counts[:roo_documents], :>, 0, "roo should read the whole document"
+    end
+  end
+
+  def test_hyperlink_and_merged_range_markup
+    rows = (1..4).map { |r| %(<row r="#{r}">#{("A".."D").map { |c| %(<c r="#{c}#{r}" t="str"><v>#{c}#{r}</v></c>) }.join}</row>) }
+    path = Workbook.write(@dir, "book", sheets: { "Sheet1" => Workbook.sheet(rows.join, extra: LINKS_AND_MERGES) },
+                                        sheet_rels: { "Sheet1" => TWO_HYPERLINK_RELS })
+    links = roo_sheet_hyperlinks(path)
+
+    assert_equal "https://example.org/?a=1&b=2", links[[1, 1]]
+    assert_equal "https://example.org/?a=1&b=2#s&1\n\t\r< | | | |", links[[2, 3]]
+    assert_equal [[1, 1], [1, 2], [1, 3], [2, 2], [2, 3], [3, 4], [4, 1], [4, 2], [3, 3]], links.keys
+    assert_every_path_same_as_roo(path)
+    assert_every_path_same_as_roo(path, expand_merged_ranges: true)
+  end
+
+  def test_merged_ranges_roo_raises_on
+    sheet = ->(ref) { Workbook.sheet(%(<row r="1"><c r="A1"><v>1</v></c></row>), extra: %(<mergeCells><mergeCell #{ref}/></mergeCells>)) }
+    paths = { "no ref" => "", "one cell" => %(ref="A1"), "bad reference" => %(ref="1A:B2") }.to_h do |name, ref|
+      [name, Workbook.write(@dir, name.tr(" ", "_"), sheets: { "Sheet1" => sheet.call(ref) })]
+    end
+
+    paths.each do |name, path|
+      roo, = Oracle.read(native: false) { Roo::Excelx.new(path, expand_merged_ranges: true).cell(1, 1) }
+
+      assert_equal :error, roo.first, name
+      assert_every_path_same_as_roo(path, native_only: false, expand_merged_ranges: true)
+    end
+  end
+
+  # libxml2 recovers from these into a document without the hyperlinks and
+  # merged ranges that follow them.
+  def test_hyperlinks_and_merged_ranges_libxml2_recovers_from_go_to_roo
+    extra = %(<mergeCells><mergeCell ref="A1:B1"/></mergeCells><hyperlinks><hyperlink ref="A1" r:id="rId1"/></hyperlinks>)
+    broken = { "unclosed" => %(<row r="1"><c r="A1"><v>1</v></row>),
+               "closed twice" => %(<row r="1"><c r="A1"><v>1</v></c></c></row>),
+               "attributes run together" => %(<row r="1"><c r="A1"s="0"><v>1</v></c></row>),
+               "a bad name" => %(<row r="1"><1c r="A1"><v>1</v></1c></row>) }
+    broken.each do |name, rows|
+      path = Workbook.write(@dir, name.tr(" ", "_"), sheets: { "Sheet1" => Workbook.sheet(rows, extra:) },
+                                                     sheet_rels: { "Sheet1" => HYPERLINK_RELS })
+
+      assert_empty roo_sheet_hyperlinks(path), name
+      assert_every_path_same_as_roo(path, native_only: false)
+      assert_every_path_same_as_roo(path, native_only: false, expand_merged_ranges: true)
+    end
   end
 
   def test_prefixed_namespaces

@@ -158,7 +158,8 @@ Known differences, by design:
   is on, under roo 4.0.0. Other roo versions build their shared strings
   themselves.
 - Code that overrides roo's private cell parsing (`SheetDoc#cell_from_xml`,
-  `#extract_cells`, `Cell.cell_class`) is bypassed while the reader is on, and
+  `#extract_cells`, `#extract_hyperlinks`, `#expand_merged_ranges`,
+  `Cell.cell_class`) is bypassed while the reader is on, and
   so are a `Roo::Excelx` subclass's `#cell` or `#each` inside `parse` and
   `each` with options, and redefinitions of the single-cell reads (see
   [How it works](#how-it-works)) in `Roo::Excelx` or `Roo::Excelx::Sheet`
@@ -213,8 +214,13 @@ until something asks for it. If the file uses XML that Nokogiri reads
 differently (see below), or a `vertAlign` without `val` (roo raises on it),
 roo builds the arrays itself.
 
+roo finds a sheet's hyperlinks, and its merged ranges under
+`expand_merged_ranges`, with XPath on a Nokogiri document of the whole sheet.
+The extension reads those `hyperlink` and `mergeCell` elements alone, and
+copies of roo's loops turn them into the same hyperlinks and merged cells.
+
 Everything else stays roo's code: styles, number formats, the base date,
-hyperlinks, comments, images, and every open option. It works with
+comments, images, and every open option. It works with
 `Roo::Spreadsheet.open`, `Roo::Excelx.new`, and IO streams.
 
 It also prepends `Roo::Excelx#parse` and `#each` for calls with options
