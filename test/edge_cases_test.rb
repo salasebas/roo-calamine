@@ -206,6 +206,68 @@ class EdgeCasesTest < Minitest::Test
     assert_every_path_same_as_roo(path, native_only: false)
   end
 
+  # Two sheets; One has a repeated header, a column without a header, and
+  # rows with gaps.
+  def write_header_book
+    one = Workbook.sheet(<<~XML)
+      <row r="1"><c r="A1" t="inlineStr"><is><t>name</t></is></c><c r="B1" t="inlineStr"><is><t>qty</t></is></c>
+        <c r="C1" t="inlineStr"><is><t>name</t></is></c><c r="E1"><v>5</v></c></row>
+      <row r="2"><c r="A2" t="inlineStr"><is><t>a</t></is></c><c r="B2"><v>1</v></c></row>
+      <row r="4"><c r="C4"><v>3</v></c><c r="E4" t="inlineStr"><is><t>e</t></is></c></row>
+      <row r="5"><c r="A5" t="inlineStr"><is><t>c</t></is></c></row>
+    XML
+    two = Workbook.sheet(%(<row r="3"><c r="A3" t="inlineStr"><is><t>other</t></is></c><c r="B3"><v>7</v></c></row>))
+    Workbook.write(@dir, "book", sheets: { "One" => one, "Two" => two })
+  end
+
+  # The rows each(headers: true) yields, calling `change` after each one with
+  # the workbook and how many rows it yielded.
+  def each_with_change(path, change)
+    xlsx = Roo::Excelx.new(path)
+    seen = []
+    # Roo::Excelx#set warns that the Cell it builds is deprecated.
+    Oracle.silence do
+      xlsx.each(headers: true) do |row|
+        seen << row
+        change.call(xlsx, seen.size)
+      end
+    end
+    seen
+  end
+
+  def test_each_follows_changes_made_by_its_block
+    path = write_header_book
+    scenarios = {
+      set_a_later_row: ->(xlsx, n) { xlsx.set(4, 2, 99) if n == 1 },
+      switch_sheets: ->(xlsx, n) { xlsx.default_sheet = "Two" if n == 2 },
+      reload: ->(xlsx, n) { xlsx.reload if n == 2 },
+      set_then_reload: ->(xlsx, n) { n == 1 ? xlsx.set(4, 1, "x") : (xlsx.reload if n == 2) }
+    }
+    roo, = Oracle.read(native: false) { each_with_change(path, scenarios[:set_a_later_row]) }
+
+    assert_equal 99, roo.dig(1, 3, "qty")
+    scenarios.each do |name, change|
+      assert_same_as_roo(name) { Oracle.describe_rows(each_with_change(path, change)) }
+    end
+  end
+
+  def test_parse_reads_cells_set_before_it
+    path = write_header_book
+
+    assert_same_as_roo("set, then parse") do
+      xlsx = Roo::Excelx.new(path)
+      # roo computes the bounds only over the cells it read, not over the
+      # Cell objects #set builds.
+      xlsx.first_row
+      Oracle.silence do
+        xlsx.set(2, 5, "late")
+        xlsx.set(1, 4, "new header")
+      end
+      xlsx.header_line = 2
+      Oracle.describe_rows(xlsx.parse(headers: true) + xlsx.parse(name: "name") + xlsx.sheet("Two").parse(headers: true))
+    end
+  end
+
   def test_streaming_hands_over_to_roo_where_the_native_reader_stops
     rows = (1..300).map { |i| %(<row r="#{i}"><c r="A#{i}"><v>#{i}</v></c></row>) }
     rows[250] = %(<row r="251"><c r="A251" t="str"><v>a&#1;b</v></c></row>)

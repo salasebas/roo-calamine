@@ -45,6 +45,13 @@ Everything else stays roo's code: shared strings, styles, number formats,
 dates, hyperlinks, comments, images, and every open option. It works with
 `Roo::Spreadsheet.open`, `Roo::Excelx.new`, and IO streams.
 
+It also prepends `Roo::Excelx#parse` and `#each` for calls with options
+(`headers`, `header_search`, header queries, `clean`). They keep roo's header
+handling and build each row's Hash from the `cells` hash. roo builds it with
+one `#cell` call per value instead. `parse` without a block groups the cells
+by row in one pass. `each`, and `parse` with a block, look up each value
+directly, because the block may change the workbook between rows.
+
 When a sheet uses XML the reader does not reproduce exactly the way Nokogiri
 does (a non-UTF-8 encoding, a DTD, custom entities, or malformed XML), it
 hands the sheet back to roo. A stream that hits such a spot continues in roo
@@ -103,10 +110,12 @@ roo is the oracle: every check takes roo's own output as the expected result.
 - **Every roo fixture.** `test/roo_fixtures_test.rb` compares all 84
   `.xlsx`/`.xlsm` files in roo's `test/files` cell by cell (class, value,
   type, formatted value, every instance variable) across open options,
-  streaming options, and the `Roo::Base` API.
+  streaming options, and the `Roo::Base` API, including `parse` and `each`
+  under nine option sets, with and without a block.
 - **Edge cases.** `test/edge_cases_test.rb` pins roo's answer for Integer vs
   Float, dates and the 1904 system, merged ranges, rich text, inline strings,
-  shared formulas, error cells, namespaces, and more.
+  shared formulas, error cells, namespaces, `parse` and `each` after `set`
+  or with a block that changes the workbook, and more.
 - **Values only.** Both suites also compare `Roo::Calamine.each_row_values`
   with the values of roo's `each_row_streaming(pad_cells: true)`, with the
   native reader on and off.

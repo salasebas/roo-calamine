@@ -98,14 +98,44 @@ module Oracle
     end
   end
 
-  # The Roo::Base API on top of the cells: bounds, rows, columns, formulas.
+  # The Roo::Base API on top of the cells: bounds, rows, columns, formulas,
+  # and #parse and #each under every option set.
   def describe_api(workbook)
     workbook.sheets.map do |sheet|
       workbook.default_sheet = sheet
       bounds = BOUNDS.map { |m| workbook.public_send(m) }
       rows = bounds[0] ? (bounds[0]..bounds[1]).map { |i| workbook.row(i).map { |v| describe_value(v) } } : []
       columns = bounds[2] ? (bounds[2]..bounds[3]).map { |i| workbook.column(i).map { |v| describe_value(v) } } : []
-      [sheet, bounds, rows, columns, workbook.formulas(sheet), outcome { workbook.to_csv }]
+      [sheet, bounds, rows, columns, workbook.formulas(sheet), outcome { workbook.to_csv },
+       describe_parse(workbook, bounds[0])]
+    end
+  end
+
+  # Option sets for Roo::Base#each and #parse. The ones that look for a header
+  # row look for `header`, a value of the sheet's first row (nil when the
+  # sheet is empty). :clean changes the cells, so those sets come last.
+  def parse_options(header)
+    [{}, { headers: true }, { headers: :first_row }, { header_search: [header] }, { first: header },
+     { first: /#{Regexp.escape(header.to_s)}/ }, { first: header, missing: "no such header" },
+     { headers: true, clean: true }, { clean: true }]
+  end
+
+  # #parse without a block, #parse with one, and #each, which yield the same
+  # rows through different code.
+  def describe_parse(workbook, first_row)
+    header = first_row && workbook.row(first_row).compact.first
+    parse_options(header).map do |options|
+      [options,
+       outcome { describe_rows(workbook.parse(options.dup)) },
+       outcome { describe_rows(workbook.parse(options.dup) { |row| row }) },
+       outcome { describe_rows(workbook.each(options.dup).to_a) },
+       workbook.header_line, workbook.headers]
+    end
+  end
+
+  def describe_rows(rows)
+    rows.map do |row|
+      row.is_a?(Hash) ? row.map { |key, value| [describe_value(key), describe_value(value)] } : row.map { |v| describe_value(v) }
     end
   end
 
