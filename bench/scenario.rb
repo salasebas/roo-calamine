@@ -49,8 +49,6 @@ def roo_scenario(scenario, path, digest)
   end
 end
 
-# Roo::Calamine.each_row_values yields the values of the cells roo's
-# each_row_streaming(pad_cells: true) yields; plain roo reads them that way.
 def values_scenario(library, path, digest)
   if library == "roo-calamine"
     Roo::Calamine.each_row_values(path) { |row| row.each { |cell_value| digest << value(cell_value) } }

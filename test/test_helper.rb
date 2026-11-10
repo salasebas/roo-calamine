@@ -20,9 +20,6 @@ module OracleAssertions
     assert_equal 0, counts[:roo_cells], "#{label}: roo parsed cells itself"
   end
 
-  # Asserts that Roo::Calamine.each_row_values, with the native reader on and
-  # off, yields the values of the cells roo's own
-  # each_row_streaming(pad_cells: true) yields.
   def assert_values_same_as_roo(label, path, options = {}, native_only: true)
     roo, = Oracle.read(native: false) { Oracle.describe_streamed_values(Roo::Excelx.new(path, options.dup)) }
     fallback, = Oracle.read(native: false) { Oracle.describe_each_row_values(path, options) }

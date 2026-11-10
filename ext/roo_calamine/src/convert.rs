@@ -229,7 +229,6 @@ impl Converter {
         }
     }
 
-    /// The `value` of the roo cell built for a streamed cell.
     fn cell_value(&self, ruby: &Ruby, row: &RawRow, raw: &RawCell) -> Result<Value, Error> {
         match self.cell(ruby, row, raw, 0, 0)? {
             Some((_, cell)) => cell.funcall("value", ()),
@@ -237,7 +236,6 @@ impl Converter {
         }
     }
 
-    /// The hyperlink target `SheetDoc#hyperlinks` holds for a coordinate, or `nil`.
     fn link(&self, ruby: &Ruby, coordinate: Value) -> Value {
         match self.hyperlinks {
             Some(hyperlinks) => ruby
