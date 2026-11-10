@@ -1,0 +1,65 @@
+plugins:
+  - rubocop-minitest
+  - rubocop-performance
+  - rubocop-rake
+
+AllCops:
+  NewCops: enable
+  SuggestExtensions: false
+  TargetRubyVersion: 3.3
+  Exclude:
+    - "tmp/**/*"
+    - "vendor/**/*"
+    - "target/**/*"
+    - "bench/fixtures/**/*"
+
+Style/StringLiterals:
+  EnforcedStyle: double_quotes
+
+Style/StringLiteralsInInterpolation:
+  EnforcedStyle: double_quotes
+
+Style/Documentation:
+  Exclude:
+    - "test/**/*"
+    - "bench/**/*"
+
+Metrics/BlockLength:
+  Exclude:
+    - "test/**/*"
+    - "*.gemspec"
+
+Metrics/MethodLength:
+  Max: 20
+
+Metrics/AbcSize:
+  Max: 30
+
+Layout/LineLength:
+  Max: 120
+  Exclude:
+    - "test/**/*"
+    - "script/smoke.rb"
+
+Minitest/MultipleAssertions:
+  Max: 6
+
+Style/StringConcatenation:
+  Exclude:
+    - "test/**/*"
+    - "script/smoke.rb"
+
+Metrics/ParameterLists:
+  CountKeywordArgs: false
+
+Metrics/PerceivedComplexity:
+  Exclude:
+    - "test/**/*"
+
+Metrics/CyclomaticComplexity:
+  Exclude:
+    - "test/**/*"
+
+Metrics/ClassLength:
+  Exclude:
+    - "test/**/*"

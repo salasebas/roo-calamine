@@ -1,0 +1,58 @@
+---
+name: pr-title
+
+# Pull requests are squash-merged with their title as the commit message,
+# and release-please reads those messages to pick the next version and write
+# the CHANGELOG, so a title must be a Conventional Commit (`feat: ...`,
+# `fix(reader): ...`, `feat!: ...`).
+#
+# release.yml dispatches this workflow for release-please's own pull request:
+# pull requests opened with GITHUB_TOKEN do not trigger workflows, and
+# workflow_dispatch is the documented exception.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Number of the pull request whose title to check
+        required: true
+        type: number
+
+permissions:
+  pull-requests: read
+
+jobs:
+  conventional-title:
+    name: conventional-title
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check the pull request title
+        if: github.event_name == 'pull_request'
+        uses: amannn/action-semantic-pull-request@2252a14e810aa9b85c2d560bd7070c802206ecf6 # v6.1.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The action reads the title from a pull_request event, so the
+      # dispatched run checks the same default types with a pattern.
+      - name: Check the title of a dispatched pull request
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          IFS=$'\t' read -r title head < <(gh api "repos/${REPO}/pulls/${PR}" --jq '[.title, .head.sha] | @tsv')
+          echo "#${PR}: ${title} (head ${head})"
+          if [ "$head" != "$HEAD_SHA" ]; then
+            echo "::error::pull request #${PR} is at ${head}, this run checked out ${HEAD_SHA}"
+            exit 1
+          fi
+          pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?!?: .+'
+          if ! grep -Eq "$pattern" <<< "$title"; then
+            echo "::error::'${title}' is not a Conventional Commit title"
+            exit 1
+          fi

@@ -1,0 +1,19 @@
+---
+# Trivy filesystem scan, run by the `security` job.
+scan:
+  scanners:
+    - vuln
+    - secret
+    - misconfig
+  skip-dirs:
+    - .bundle
+    - .git
+    - pkg
+    - target
+    - tmp
+    - vendor
+    - bench/fixtures
+
+severity:
+  - HIGH
+  - CRITICAL

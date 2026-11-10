@@ -1,0 +1,170 @@
+---
+name: release
+
+# release-please keeps a release pull request open against main with the
+# next version and CHANGELOG entry, computed from the Conventional Commit
+# messages merged since the last release. Merging that pull request tags
+# vX.Y.Z, creates the GitHub release, and this workflow then builds every gem
+# and publishes it to RubyGems.org through trusted publishing.
+#
+# Pull requests and tags created with GITHUB_TOKEN do not trigger other
+# workflows, so this workflow builds and publishes in the same run, and it
+# dispatches the required checks (ci.yml, pr-title.yml) for the release pull
+# request itself; workflow_dispatch is the documented exception.
+#
+# release-please tags the commit whose push started this run, so every job
+# builds and publishes the commit it checks out by default. If publishing
+# fails partway, re-run the failed jobs of this run: gems RubyGems.org
+# already has are skipped.
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: release-please
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      pr_branch: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).headBranchName || '' }}
+      pr_number: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).number || '' }}
+    steps:
+      - name: Run release-please
+        id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  release-pr-checks:
+    name: release-pr-checks
+    needs: release-please
+    if: needs.release-please.outputs.pr_number != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Run the required checks on the release pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ needs.release-please.outputs.pr_branch }}
+          PR: ${{ needs.release-please.outputs.pr_number }}
+        run: |
+          gh workflow run ci.yml --repo "$REPO" --ref "$BRANCH"
+          gh workflow run pr-title.yml --repo "$REPO" --ref "$BRANCH" -f pr="$PR"
+
+  build-gems:
+    name: build-gems
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build-gems.yml
+
+  publish:
+    name: publish ${{ needs.release-please.outputs.tag_name }}
+    needs: [release-please, build-gems]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: rubygems
+    permissions:
+      contents: write # attach the gems to the GitHub release
+      id-token: write # RubyGems trusted publishing exchanges the OIDC token
+    env:
+      TAG: ${{ needs.release-please.outputs.tag_name }}
+    steps:
+      - name: Checkout the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@b3aaceaef7e0ee231b499e7b5f49c03fc1d32199 # v1.338.0
+        with:
+          ruby-version: .ruby-version
+
+      - name: Download the gems
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: gem-*
+          path: pkg
+          merge-multiple: true
+
+      - name: Check the tag, the version, and the set of gems
+        run: |
+          version=$(ruby -Ilib -rroo/calamine/version -e 'print Roo::Calamine::VERSION')
+          if [ "$TAG" != "v${version}" ]; then
+            echo "::error::tag ${TAG} does not match Roo::Calamine::VERSION ${version}"
+            exit 1
+          fi
+          ls -l pkg
+          for platform in ruby x86_64-linux aarch64-linux x86_64-linux-musl aarch64-linux-musl x86_64-darwin arm64-darwin x64-mingw-ucrt; do
+            name="roo-calamine-${version}-${platform}.gem"
+            [ "$platform" = "ruby" ] && name="roo-calamine-${version}.gem"
+            ls pkg/"${name}" > /dev/null || { echo "::error::${name} is missing"; exit 1; }
+          done
+          if [ "$(find pkg -name '*.gem' | wc -l)" -ne 8 ]; then
+            echo "::error::expected exactly 8 gems"
+            exit 1
+          fi
+
+      # The same exchange as rubygems/configure-rubygems-credentials, plus
+      # `owner`: RubyGems.org only lets a pending trusted publisher create a
+      # new gem when the exchange names the account that will own it, and that
+      # action (v2.1.0) has no input for it. 242690 is the ID of the RubyGems.org
+      # account (sebastiansala) that registered the pending publisher. The key
+      # can only push gems and expires after 15 minutes.
+      - name: Publish to RubyGems.org
+        env:
+          RUBYGEMS_OWNER: "242690"
+        run: |
+          id_token=$(curl --fail-with-body -sS \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=rubygems.org" | jq -r .value)
+          echo "::add-mask::${id_token}"
+          if ! response=$(jq -n --arg jwt "$id_token" --arg owner "$RUBYGEMS_OWNER" '{jwt: $jwt, owner: $owner}' |
+            curl --fail-with-body -sS -X POST \
+              -H 'content-type: application/json' -H 'accept: application/json' \
+              --data @- https://rubygems.org/api/v1/oidc/trusted_publisher/exchange_token); then
+            echo "::error::RubyGems.org trusted publisher token exchange failed: ${response}"
+            exit 1
+          fi
+          api_key=$(jq -r .rubygems_api_key <<< "$response")
+          echo "::add-mask::${api_key}"
+          version="${TAG#v}"
+          # A run that failed partway can be run again: gems RubyGems.org
+          # already has are skipped, because it rejects a second push.
+          published=$(curl -sS https://rubygems.org/api/v1/versions/roo-calamine.json |
+            jq -r --arg v "$version" '.[]? | select(.number == $v) | .platform' || true)
+          # The source gem first: it creates the gem on RubyGems.org.
+          for gem in "pkg/roo-calamine-${version}.gem" pkg/roo-calamine-"${version}"-*.gem; do
+            platform=$(basename "$gem" .gem)
+            platform=${platform#"roo-calamine-${version}"}
+            platform=${platform#-}
+            if grep -qx "${platform:-ruby}" <<< "$published"; then
+              echo "${gem} is already on RubyGems.org"
+              continue
+            fi
+            GEM_HOST_API_KEY="$api_key" gem push "$gem"
+          done
+
+      - name: Attach the gems to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: gh release upload "$TAG" pkg/*.gem --repo "$REPO" --clobber
