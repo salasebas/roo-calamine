@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "English"
+
 module Roo
   module Calamine
     # Prepended to Roo::Excelx. roo's #to_csv writes every slot from the first
@@ -11,30 +13,39 @@ module Roo
       # roo versions whose Roo::Formatters::CSV this reproduces. Under any other
       # version roo writes the CSV itself.
       ROO_VERSIONS = %w[4.0.0].freeze
+      private_constant :ROO_VERSIONS
 
       private
 
       def write_csv_content(file = nil, sheet = nil, separator = ",")
-        return super unless Calamine.enabled? && ROO_VERSIONS.include?(Roo::VERSION)
+        return super unless csv_lines?(separator.to_s)
 
         file ||= STDOUT # rubocop:disable Style/GlobalStdStream
         return unless first_row(sheet)
 
-        write_csv_lines(file, sheet_for(sheet), separator.to_s)
+        write_csv_lines(file, sheet_for(sheet), separator.to_s, last_row(sheet), last_column(sheet))
       end
 
-      # roo prints the separator before every column but the first, then the
-      # field, so after a field raises the file holds the line up to it.
-      def write_csv_lines(file, sheet, separator) # rubocop:disable Metrics
+      # roo prints each field on its own; a line joins them, so the separator
+      # has to join UTF-8 text, and IO#print must add no $\ between fields.
+      def csv_lines?(separator)
+        Calamine.enabled? && ROO_VERSIONS.include?(Roo::VERSION) && $OUTPUT_RECORD_SEPARATOR.nil? &&
+          (separator.ascii_only? || separator.encoding == Encoding::UTF_8)
+      end
+
+      # roo writes rows 1..last_row and columns 1..last_column, and prints the
+      # separator before every column but the first, then the field, so after
+      # a field raises the file holds the line up to it.
+      def write_csv_lines(file, sheet, separator, rows, width) # rubocop:disable Metrics
         first_row = sheet.first_row
         last_row = sheet.last_row
         first_column = sheet.first_column
-        width = last_column = sheet.last_column
+        last_column = sheet.last_column
         separators = Hash.new { |runs, count| runs[count] = separator * count }
         blank_line = "#{separators[width - 1]}\n"
         line = +""
         line_row = written = 0
-        each_csv_cell(sheet.cells, last_row, last_column) do |row, column, cell|
+        each_csv_cell(sheet.cells, rows, width) do |row, column, cell|
           if row != line_row
             file.print(line << separators[width - 1 - written] << "\n") if line_row.positive?
             (row - line_row - 1).times { file.print(blank_line) }
@@ -55,27 +66,27 @@ module Roo
           end
         end
         file.print(line << separators[width - 1 - written] << "\n") if line_row.positive?
-        (last_row - line_row).times { file.print(blank_line) }
+        (line_row + 1).upto(rows) { file.print(blank_line) }
       end
 
       # Yields the cells roo visits, by row and then column: those with an
-      # Integer row in 1..last_row and an Integer column in 1..last_column.
-      def each_csv_cell(cells, last_row, last_column)
+      # Integer row in 1..rows and an Integer column in 1..columns.
+      def each_csv_cell(cells, rows, columns)
         if csv_keys_sorted?(cells)
           cells.each_pair do |(row, column), cell|
-            break if row > last_row
+            break if row > rows
 
-            yield row, column, cell if row.positive? && column.between?(1, last_column)
+            yield row, column, cell if row.positive? && column.between?(1, columns)
           end
         else
-          sorted_csv_keys(cells, last_row, last_column).each { |key| yield key[0], key[1], cells[key] }
+          sorted_csv_keys(cells, rows, columns).each { |key| yield key[0], key[1], cells[key] }
         end
       end
 
-      def sorted_csv_keys(cells, last_row, last_column)
+      def sorted_csv_keys(cells, rows, columns)
         keys = cells.keys.select do |key|
           key.is_a?(Array) && key.size == 2 && key.all?(Integer) &&
-            key[0].between?(1, last_row) && key[1].between?(1, last_column)
+            key[0].between?(1, rows) && key[1].between?(1, columns)
         end
         keys.sort!
       end

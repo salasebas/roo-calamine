@@ -30,7 +30,7 @@ class ToCsvTest < Minitest::Test
       <c r="K2" s="4"><v>0.25</v></c><c r="L2" s="5"><v>3</v></c><c r="M2"><v>-0</v></c></row>
     <row r="4"><c r="B4" s="1"><v>45000</v></c><c r="C4" s="2"><v>45000.5</v></c><c r="D4" s="3"><v>0.25</v></c>
       <c r="E4" s="3"><v>1.5</v></c><c r="F4" t="b"><v>1</v></c><c r="G4" t="b"><v>0</v></c><c r="H4" t="e"><v>#DIV/0!</v></c>
-      <c r="I4" s="6"><v>45000.75</v></c><c r="J4"/><c r="K4" t="s"><v>0</v></c></row>
+      <c r="I4" s="6"><v>45000.75</v></c><c r="J4"/><c r="K4" t="s"><v>0</v></c><c r="O4" t="str"><v></v></c></row>
     <row r="5"><c r="B5"><f>1+1</f><v>2</v></c><c r="C5"><f>5/2</f><v>2.5</v></c><c r="D5"><f>4/2</f><v>2.0</v></c>
       <c r="E5" t="str"><f>"a"&amp;"""b"</f><v>a"b</v></c><c r="F5" t="b"><f>TRUE()</f><v>1</v></c>
       <c r="G5" s="1"><f>TODAY()</f><v>45000</v></c><c r="H5" s="2"><f>NOW()</f><v>45000.5</v></c>
@@ -66,7 +66,9 @@ class ToCsvTest < Minitest::Test
     [args, options, returned, (File.binread(@csv) if File.exist?(@csv))]
   end
 
-  SEPARATORS = [{}, { separator: ";" }, { separator: "::" }, { separator: nil }, { separator: :| }].freeze
+  SEPARATORS = [{}, { separator: ";" }, { separator: "::" }, { separator: nil }, { separator: :| }, { separator: "§" },
+                { separator: "\xA7".b }, { separator: "§".encode("ISO-8859-1") },
+                { separator: "\t".encode("UTF-16LE") }].freeze
 
   def describe_csv(workbook)
     calls = workbook.sheets.flat_map do |sheet|
@@ -185,6 +187,64 @@ class ToCsvTest < Minitest::Test
 
     assert_equal [:ok, ",,\"x\",,\n,,,,\n,,,,1\n", Encoding::US_ASCII], roo.last.find { |call| call[1] == { sheet: "Two" } }[2]
     assert_same_as_roo("written before the bounds", &write)
+  end
+
+  CHANGES_AFTER_THE_BOUNDS = {
+    last_row_deleted: ->(cells) { cells.delete_if { |(row, _), _| row == 7 } },
+    above_the_first_row: ->(cells) { cells[[1, 2]] = cells[[2, 5]] },
+    past_the_last_row: ->(cells) { cells[[9, 2]] = cells[[2, 5]] },
+    past_the_last_row_out_of_order: ->(cells) { cells[[1, 2]] = cells[[9, 2]] = cells[[2, 5]] },
+    past_the_last_row_as_a_float: ->(cells) { cells[[9.0, 2]] = cells[[2, 5]] }
+  }.freeze
+
+  # The types book with its "Types" bounds read, then its cells changed.
+  def changed_after_the_bounds(change)
+    workbook = Roo::Excelx.new(types_book)
+    workbook.first_row("Types")
+    change.call(workbook.sheet_for("Types").cells)
+    workbook
+  end
+
+  def test_cells_changed_after_the_bounds_were_read
+    deleted = CHANGES_AFTER_THE_BOUNDS[:last_row_deleted]
+    roo, = Oracle.read(native: false) { changed_after_the_bounds(deleted).to_csv(sheet: "Types").lines.last }
+
+    assert_equal [:ok, "#{"," * 12}\n"], roo
+    CHANGES_AFTER_THE_BOUNDS.each do |name, change|
+      assert_same_as_roo(name) { describe_csv(changed_after_the_bounds(change)) }
+    end
+  end
+
+  def test_the_workbook_bounds_set_the_rows_and_columns
+    path = types_book
+    [[:last_row, 3], [:last_row, 9], [:last_row, 9.0], [:last_column, 4], [:last_column, 15],
+     [:last_column, 15.0]].each do |name, value|
+      subclass = Class.new(Roo::Excelx) { define_method(name) { |_sheet = nil| value } }
+
+      assert_same_as_roo("#{name} #{value}") { describe_csv(subclass.new(path)) }
+    end
+    wider = Class.new(Roo::Excelx) do
+      def last_row(_sheet = nil) = 9
+      def last_column(_sheet = nil) = 15
+    end
+    assert_same_as_roo("cells past the sheet's own bounds") do
+      workbook = wider.new(path)
+      workbook.first_row("Types")
+      cells = workbook.sheet_for("Types").cells
+      cells[[9, 2]] = cells[[2, 15]] = cells[[2, 5]]
+      describe_csv(workbook)
+    end
+  end
+
+  def test_an_output_record_separator
+    path = types_book
+
+    assert_same_as_roo("$\\") do
+      Oracle.silence { $OUTPUT_RECORD_SEPARATOR = "!" }
+      describe_csv(Roo::Excelx.new(path))
+    ensure
+      Oracle.silence { $OUTPUT_RECORD_SEPARATOR = nil }
+    end
   end
 
   def test_set_before_to_csv

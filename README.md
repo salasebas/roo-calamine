@@ -44,11 +44,13 @@ opening the workbook. Memory is peak RSS.
 | | `parse(headers: true)` | 21.13 s, 3306 MB | 2.16 s, 828 MB | 9.8× | 0.75 s, 283 MB |
 | | `each` | 20.23 s, 3281 MB | 1.83 s, 671 MB | 11.0× | 0.46 s, 178 MB |
 | | 10,000 random `cell(row, col)` | 18.64 s, 3274 MB | 0.86 s, 235 MB | 21.6× | 0.50 s, 249 MB |
+| | `to_csv` | 27.87 s, 3290 MB | 3.90 s, 847 MB | 7.1× | 0.78 s, 178 MB |
 | | values only: `each_row_values` | 14.86 s, 118 MB | 0.79 s, 133 MB | 18.8× | 0.55 s, 178 MB |
 | 100k rows × 10 shared strings | `each_row_streaming` | 5.37 s, 121 MB | 0.41 s, 133 MB | 13.3× | 0.25 s, 113 MB |
 | | `parse(headers: true)` | 6.44 s, 1630 MB | 0.83 s, 397 MB | 7.8× | 0.34 s, 208 MB |
 | | `each` | 5.96 s, 1630 MB | 0.77 s, 322 MB | 7.7× | 0.21 s, 113 MB |
 | | 10,000 random `cell(row, col)` | 5.33 s, 1602 MB | 0.45 s, 160 MB | 11.9× | 0.23 s, 167 MB |
+| | `to_csv` | 8.51 s, 1619 MB | 1.71 s, 379 MB | 5.0× | 0.26 s, 114 MB |
 | | values only: `each_row_values` | 5.21 s, 121 MB | 0.36 s, 166 MB | 14.3× | 0.24 s, 113 MB |
 | 100k rows × 10 unique strings | `each_row_streaming` | 12.03 s, 925 MB | 0.73 s, 546 MB | 16.5× | 0.43 s, 152 MB |
 | | `parse(headers: true)` | 10.61 s, 2330 MB | 1.48 s, 577 MB | 7.2× | 0.50 s, 206 MB |
@@ -59,6 +61,7 @@ opening the workbook. Memory is peak RSS.
 | | `parse(headers: true)` | 13.0 ms, 45 MB | 3.8 ms, 41 MB | 3.4× | 0.8 ms, 27 MB |
 | | `each` | 12.7 ms, 45 MB | 4.0 ms, 41 MB | 3.2× | 0.6 ms, 26 MB |
 | | 10,000 random `cell(row, col)` | 19.8 ms, 46 MB | 10.4 ms, 42 MB | 1.9× | 1.5 ms, 27 MB |
+| | `to_csv` | 17.7 ms, 45 MB | 5.8 ms, 41 MB | 3.1× | 1.0 ms, 27 MB |
 | | values only: `each_row_values` | 16.8 ms, 46 MB | 3.1 ms, 41 MB | 5.4× | 0.7 ms, 27 MB |
 
 For the values-only rows, plain roo runs the `each_row_streaming(pad_cells:
@@ -67,7 +70,8 @@ roo and roo-calamine read the same values.
 
 The calx column is [calx](https://github.com/7a6163/calx) 0.1.0, a Rust
 reader built on calamine that skips roo altogether: `Calx.each_row` for the
-streaming, `each`, and values-only rows, and `Calx.read` for the others. It
+streaming, `each`, and values-only rows, `Calx.read` for the others, and for
+`to_csv` `Calx.each_row` with each row joined by commas, without quoting. It
 shows how fast a reader without roo's rules can go. It is not a drop-in
 replacement: its values follow its own rules (a whole number is an Integer
 whatever the cell's text and format, a date with a time is a local `Time`,
