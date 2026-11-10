@@ -206,11 +206,11 @@ running them; cells with a hyperlink, number text that is not plainly written,
 and other roo versions go through roo's own constructors.
 
 Single-cell reads (`#cell`, `#celltype`, `#formula`, `#excelx_type`,
-`#excelx_value`, `#formatted_value`, `#excelx_format`, `#font`, `#empty?`),
-`#column`, and `#first_row` … `#last_column` build only the cells they read:
-the extension keeps the parsed sheet in compact native records and builds a
-cell the first time it is read. `#row`, `#each` without options, and `#parse`
-without a block read values straight from those records, and build a cell
+`#excelx_value`, `#formatted_value`, `#excelx_format`, `#font`, `#empty?`)
+and `#first_row` … `#last_column` build only the cells they read: the
+extension keeps the parsed sheet in compact native records and builds a cell
+the first time it is read. `#row`, `#column`, `#each` without options, and
+`#parse` without a block read values straight from those records, and build a cell
 only for a value that needs one (a hyperlink, a date with a time, a time). The
 records keep each value they hand out, so a cell built later holds that very
 object, as in roo. Anything that needs the whole `Sheet#cells` hash (`#each`

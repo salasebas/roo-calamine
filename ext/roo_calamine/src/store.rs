@@ -294,6 +294,19 @@ impl Store {
             .binary_search_by_key(&key, |&i| self.records[i as usize].key())
     }
 
+    /// The first position from `start` on in [`Store::index`] whose key is
+    /// `key` or after it, searched in windows that double from `start`.
+    fn position_from(&self, start: usize, key: (u32, u32)) -> usize {
+        let before = |&i: &u32| self.records[i as usize].key() < key;
+        let rest = &self.index[start..];
+        let mut bound = 1;
+        while bound < rest.len() && before(&rest[bound]) {
+            bound *= 2;
+        }
+        let from = bound / 2;
+        start + from + rest[from..rest.len().min(bound + 1)].partition_point(before)
+    }
+
     /// `cells` as `SheetDoc#extract_cells` builds it, holding the cells
     /// built so far and the values handed out. Of the records with a
     /// repeated key, all but the one [`Store::index`] keeps get a cell of
@@ -374,6 +387,36 @@ impl Store {
         Ok(values)
     }
 
+    /// `first_row.upto(last_row).map { |row| cells[[row, column]]&.value }`,
+    /// building only the cells whose value needs one.
+    fn column(
+        ruby: &Ruby,
+        rb_self: &Self,
+        column: Value,
+        first_row: i64,
+        last_row: i64,
+    ) -> Result<RArray, Error> {
+        let height = usize::try_from(last_row - first_row + 1).unwrap_or(0);
+        let values = ruby.ary_new_capa(height);
+        let column = Integer::from_value(column).and_then(|n| n.to_u32().ok());
+        let mut start = 0;
+        for row in first_row..=last_row {
+            let record = match (u32::try_from(row), column) {
+                (Ok(row), Some(column)) => {
+                    start = rb_self.position_from(start, (row, column));
+                    let record = rb_self.index.get(start).copied();
+                    record.filter(|&i| rb_self.records[i as usize].key() == (row, column))
+                }
+                _ => None,
+            };
+            match record {
+                Some(record) => values.push(rb_self.value(ruby, record)?)?,
+                None => values.push(ruby.qnil())?,
+            }
+        }
+        Ok(values)
+    }
+
     /// `fields.each_with_object({}) { |(key, slot), hash| hash[key] = values[slot] }`
     /// for the `values` of [`Store::row`].
     fn hash_row(
@@ -448,6 +491,7 @@ pub fn define(ruby: &Ruby, native: magnus::RModule) -> Result<(), Error> {
     store.define_method("[]", magnus::method!(Store::get, 1))?;
     store.define_method("bounds", magnus::method!(Store::bounds, 0))?;
     store.define_method("row", magnus::method!(Store::row, 3))?;
+    store.define_method("column", magnus::method!(Store::column, 3))?;
     store.define_method("hash_row", magnus::method!(Store::hash_row, 4))?;
     store.define_method("cells", magnus::method!(Store::cells, 0))?;
     Ok(())
