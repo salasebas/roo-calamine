@@ -18,7 +18,6 @@ use magnus::{
 
 use crate::numeric::{create_numeric, plain_number};
 use crate::reader::{parse_index, Body, Kind, Mode, RawCell, RawRow, Reference, Style};
-use crate::store::Store;
 
 fn constant<T: magnus::TryConvert>(ruby: &Ruby, path: &str) -> T {
     ruby.eval(path).expect("roo is loaded before roo/calamine")
@@ -280,7 +279,7 @@ impl Converter {
     }
 
     fn cell_value(&self, ruby: &Ruby, row: &RawRow, raw: &RawCell) -> Result<Value, Error> {
-        match self.cell(ruby, &row.text, raw, 0, 0)? {
+        match self.cell(ruby, &row.text, raw, 0, 0, None)? {
             Some((_, cell)) => cell.funcall("value", ()),
             None => Ok(ruby.qnil().as_value()),
         }
@@ -300,41 +299,24 @@ impl Converter {
     pub fn row_cells(ruby: &Ruby, rb_self: &Self, row: &crate::Row) -> Result<RArray, Error> {
         let cells = ruby.ary_new_capa(row.raw().cells.len());
         for (index, raw) in row.raw().cells.iter().enumerate() {
-            if let Some((_, cell)) = rb_self.cell(ruby, &row.raw().text, raw, 0, index + 1)? {
+            if let Some((_, cell)) = rb_self.cell(ruby, &row.raw().text, raw, 0, index + 1, None)? {
                 cells.push(cell)?;
             }
         }
         Ok(cells)
     }
 
-    /// `SheetDoc#extract_cells` for one row, adding to `cells`. A cell
-    /// `store` built goes in its place instead of a new one.
+    /// `SheetDoc#extract_cells` for one row, adding to `cells`.
     pub fn add_row(
         &self,
         ruby: &Ruby,
         cells: RHash,
         row: &RawRow,
         row_number: usize,
-        store: Option<&Store>,
     ) -> Result<(), Error> {
         for (index, raw) in row.cells.iter().enumerate() {
-            let column = index + 1;
-            let reused = match store {
-                Some(store) if self.empty_cell || raw.body != Body::Empty => {
-                    match raw
-                        .position(row_number, column)
-                        .and_then(|(row, column)| crate::store::key(row, column))
-                    {
-                        Some(key) => store.reused(ruby, cells, key)?,
-                        None => None,
-                    }
-                }
-                _ => None,
-            };
-            if let Some(cell) = reused {
-                cells.aset(cell.funcall::<_, _, Value>("coordinate", ())?, cell)?;
-            } else if let Some((coordinate, cell)) =
-                self.cell(ruby, &row.text, raw, row_number, column)?
+            if let Some((coordinate, cell)) =
+                self.cell(ruby, &row.text, raw, row_number, index + 1, None)?
             {
                 cells.aset(coordinate, cell)?;
             }

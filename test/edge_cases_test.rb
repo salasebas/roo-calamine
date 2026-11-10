@@ -27,8 +27,10 @@ class EdgeCasesTest < Minitest::Test
   def assert_every_path_same_as_roo(path, native_only: true, **open_options)
     assert_same_as_roo("cells", native_only:) { Oracle.describe_cells(Roo::Excelx.new(path, open_options.dup)) }
     assert_same_as_roo("api", native_only:) { Oracle.describe_api(Roo::Excelx.new(path, open_options.dup)) }
-    assert_same_as_roo("lookups", native_only:, lazy: native_only && !open_options[:expand_merged_ranges]) do
-      Oracle.describe_lookups(Roo::Excelx.new(path, open_options.dup))
+    lazy = native_only && !open_options[:expand_merged_ranges]
+    assert_same_as_roo("lookups", native_only:, lazy:) { Oracle.describe_lookups(Roo::Excelx.new(path, open_options.dup)) }
+    assert_same_as_roo("row reads", native_only:, lazy:) do
+      Oracle.describe_row_reads(Roo::Excelx.new(path, open_options.dup))
     end
     Oracle::STREAM_OPTIONS.each do |stream_options|
       assert_same_as_roo("each_row_streaming #{stream_options}", native_only:) do
@@ -174,6 +176,9 @@ class EdgeCasesTest < Minitest::Test
       _, counts = Oracle.read(native: true, &read)
 
       assert_equal 20, counts[:constructors], "every cell and coordinate should come from its constructor"
+      assert_same_as_roo("row reads under another roo") do
+        Oracle.describe_row_reads(Roo::Excelx.new(path, empty_cell: true))
+      end
     end
   end
 
@@ -375,10 +380,15 @@ class EdgeCasesTest < Minitest::Test
 
   def test_a_repeated_coordinate_keeps_the_last_cell_with_a_value
     path = write(%(<row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>5</v></c><c r="A1"><v>2</v></c><c r="B1"/></row>))
+    strings = write(%(<row r="1"><c r="A1" t="str"><v>a</v></c><c r="B1" t="str"><v>b</v></c>
+      <c r="A1" t="str"><v>c</v></c></row><row r="2"><c r="A2" t="str"><v>d</v></c></row>))
 
     assert_equal [2, 5], [roo_cell(path, 1, 1), roo_cell(path, 1, 2)]
-    assert_every_path_same_as_roo(path)
-    assert_every_path_same_as_roo(path, empty_cell: true)
+    assert_equal %w[c b], roo_row(strings, 1)
+    [path, strings].each do |repeated|
+      assert_every_path_same_as_roo(repeated)
+      assert_every_path_same_as_roo(repeated, empty_cell: true)
+    end
   end
 
   def test_empty_strings_are_outside_the_bounds
@@ -392,12 +402,16 @@ class EdgeCasesTest < Minitest::Test
     assert_every_path_same_as_roo(path)
   end
 
-  def test_values_changed_in_place_after_a_read_stay_changed
+  def write_strings_to_edit
     shared = Workbook.shared_strings("<si><r><rPr><b/></rPr><t>bold</t></r></si>")
-    path = write(<<~XML, shared_strings: shared)
+    write(<<~XML, shared_strings: shared)
       <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>0</v></c><c r="C1" t="s"><v> +0</v></c></row>
       <row r="3"><c r="C3"><v>1</v></c></row><row r="4"><c r="D4" t="str"><v>x</v></c></row>
     XML
+  end
+
+  def test_values_changed_in_place_after_a_read_stay_changed
+    path = write_strings_to_edit
     edit = lambda do
       workbook = Roo::Excelx.new(path)
       # roo hands out one string object for both cells of a shared string.
@@ -413,6 +427,22 @@ class EdgeCasesTest < Minitest::Test
     assert_equal [:ok, ["edited", "edited", [1, 3, 1, 3],
                         { [1, 1] => "edited", [1, 2] => "edited", [1, 3] => "edited", [3, 3] => 1, [4, 4] => "" }]],
                  roo
+    assert_equal roo, native
+  end
+
+  # roo's rows hold the cells' own values too.
+  def test_values_changed_in_place_in_rows_stay_changed
+    path = write_strings_to_edit
+    edit_rows = lambda do
+      workbook = Roo::Excelx.new(path)
+      workbook.each { |row| row.grep(String).each { _1 << "!" } }
+      workbook.parse(headers: true).each { |row| row.values.grep(String).each { _1 << "?" } }
+      [workbook.row(4), workbook.cell(1, 2), workbook.sheet_for(nil).cells.transform_values(&:value)]
+    end
+    roo, = Oracle.read(native: false, &edit_rows)
+    native, = Oracle.read(native: true, &edit_rows)
+
+    assert_equal [nil, nil, nil, "x!?"], roo.dig(1, 0)
     assert_equal roo, native
   end
 
@@ -526,8 +556,8 @@ class EdgeCasesTest < Minitest::Test
 
   # The rows each(options) yields, calling `change` after each one with the
   # workbook and how many rows it yielded.
-  def each_with_change(path, change, options = { headers: true })
-    xlsx = Roo::Excelx.new(path)
+  def each_with_change(path, change, options = { headers: true }, open_options = {})
+    xlsx = Roo::Excelx.new(path, open_options)
     seen = []
     # Roo::Excelx#set warns that the Cell it builds is deprecated.
     Oracle.silence do
@@ -555,7 +585,11 @@ class EdgeCasesTest < Minitest::Test
     end
   end
 
-  # Without options, the tests' row index answers from the second row on.
+  # Without options, #each reads the lazy cells, or on a sheet built whole
+  # (here for expand_merged_ranges) the tests' row index from the second row
+  # on.
+  ROW_PATHS = [{}, { expand_merged_ranges: true }].freeze
+
   def test_each_without_options_follows_changes_made_by_its_block
     path = write_header_book
     scenarios = {
@@ -567,8 +601,10 @@ class EdgeCasesTest < Minitest::Test
     roo, = Oracle.read(native: false) { each_with_change(path, scenarios[:set_after_the_index], {}) }
 
     assert_equal 99, roo.dig(1, 3, 1)
-    scenarios.each do |name, change|
-      assert_same_as_roo(name) { Oracle.describe_rows(each_with_change(path, change, {})) }
+    ROW_PATHS.product(scenarios.to_a).each do |open_options, (name, change)|
+      assert_same_as_roo("#{name} #{open_options}") do
+        Oracle.describe_rows(each_with_change(path, change, {}, open_options))
+      end
     end
   end
 
@@ -598,10 +634,11 @@ class EdgeCasesTest < Minitest::Test
 
     short = write(%(<row r="1"><c r="A1"><v>1</v></c></row><row r="2"><c r="A2"><v>2</v></c></row>))
 
-    # roo's Sheet#row answers the first row, and every row of a sheet too
-    # short to repay the index or too sparse to lay out.
+    # On a sheet built whole (here for expand_merged_ranges), roo's
+    # Sheet#row answers the first row, and every row of a sheet too short to
+    # repay the index or too sparse to lay out.
     { dense => 1, short => 2, sparse => 6 }.each do |path, rows_from_roo|
-      _, counts = Oracle.read(native: true) { Roo::Excelx.new(path).each.to_a }
+      _, counts = Oracle.read(native: true) { Roo::Excelx.new(path, expand_merged_ranges: true).each.to_a }
 
       assert_equal rows_from_roo, counts[:sheet_rows]
     end
@@ -623,10 +660,12 @@ class EdgeCasesTest < Minitest::Test
   def test_each_without_options_leaves_out_cells_outside_the_bounds
     OUTSIDE_THE_BOUNDS.each do |name, rows|
       path = write(rows)
-      _, counts = Oracle.read(native: true) { Roo::Excelx.new(path).each.to_a }
+      _, counts = Oracle.read(native: true) { Roo::Excelx.new(path, expand_merged_ranges: true).each.to_a }
 
       assert_equal 1, counts[:sheet_rows], "#{name}: the index did not answer"
-      assert_same_as_roo(name) { Oracle.describe_rows(Roo::Excelx.new(path).each.to_a) }
+      ROW_PATHS.each do |options|
+        assert_same_as_roo("#{name} #{options}") { Oracle.describe_rows(Roo::Excelx.new(path, options).each.to_a) }
+      end
     end
   end
 
@@ -671,6 +710,17 @@ class EdgeCasesTest < Minitest::Test
 
     assert_match(/NoMethodError.*TypeError.*FrozenError.*TypeError.*ArgumentError.*\[\]\].*\[\]\].*headers\W+true\}/, roo)
     assert_equal roo, calamine
+  end
+
+  def test_parse_reads_header_columns_from_the_second_on
+    path = write(<<~XML)
+      <row r="1"><c r="B1" t="str"><v>h1</v></c><c r="C1" t="str"><v>h2</v></c><c r="D1" t="str"><v>h3</v></c></row>
+      <row r="2"><c r="B2"><v>1</v></c><c r="C2"><v>2</v></c><c r="D2"><v>3</v></c></row>
+    XML
+    roo, = Oracle.read(native: false) { Roo::Excelx.new(path).parse(b: "h2", c: "h3") }
+
+    assert_equal [:ok, [{ b: 2, c: 3 }]], roo
+    assert_every_path_same_as_roo(path)
   end
 
   def test_parse_reads_cells_set_before_it

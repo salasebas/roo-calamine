@@ -185,6 +185,56 @@ module Oracle
     end
   end
 
+  # #each and #parse without a block after one single-cell lookup, before
+  # anything builds `cells`, then whether `cells`, built after them, holds
+  # the very values #each and #parse(headers: true) returned. The other
+  # parses look for the first row's last value, so their columns need not
+  # start at the sheet's first.
+  def describe_row_reads(workbook)
+    workbook.sheets.map do |sheet|
+      workbook.default_sheet = sheet
+      bounds = BOUNDS.map { |m| workbook.public_send(m) }
+      workbook.cell(bounds[0], bounds[2]) if bounds[0]
+      searched = describe_header_parses(workbook, bounds[0] && workbook.row(bounds[0]).compact.last)
+      workbook.header_line = 1
+      rows = outcome { workbook.each.to_a }
+      parsed = outcome { workbook.parse(headers: true) }
+      kept = outcome { kept_row_values(workbook.sheet_for(sheet).cells, workbook, bounds[2], rows, parsed) }
+      [sheet, bounds, searched, described_rows(rows), described_rows(parsed), kept]
+    end
+  end
+
+  def described_rows(read)
+    read.first == :ok ? [:ok, describe_rows(read.last)] : read.first
+  end
+
+  def describe_header_parses(workbook, header)
+    [{ header_search: [header] }, { last: header }].map { |options| outcome { describe_rows(workbook.parse(options)) } }
+  end
+
+  def kept_row_values(cells, workbook, first_column, rows, parsed)
+    held = ->(value, line, column) { value.equal?(cells[[line, column]]&.value) }
+    [kept_each_values(held, first_column, rows), kept_parse_values(held, workbook, parsed)].map(&:tally)
+  end
+
+  def kept_each_values(held, first_column, rows)
+    return [] unless rows.first == :ok
+
+    rows.last.each_with_index.flat_map do |row, i|
+      row.each_with_index.map { |value, j| held.call(value, i + 1, first_column + j) }
+    end
+  end
+
+  # parse(headers: true) keeps, for a repeated header, the last column's value.
+  def kept_parse_values(held, workbook, parsed)
+    return [] unless parsed.first == :ok
+
+    columns = workbook.headers.to_h
+    parsed.last.each_with_index.flat_map do |row, i|
+      row.map { |key, value| held.call(value, workbook.header_line + i, columns[key]) }
+    end
+  end
+
   # Every [row, column] from one before the bounds to one after them.
   def keys_around(bounds)
     first_row, last_row, first_column, last_column = bounds.first == :ok && bounds.last[0] ? bounds.last : [1, 1, 1, 1]

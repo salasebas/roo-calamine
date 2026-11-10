@@ -12,7 +12,7 @@ use super::{
     CELL_NUMBER, CELL_STRING, CELL_TIME, COORDINATE, NUMERIC_OR_FORMULA,
 };
 use crate::numeric::{create_numeric, leading_integer};
-use crate::reader::{Body, Kind, Mode, RawCell};
+use crate::reader::{Body, Kind, Mode, RawCell, Reference};
 
 static TIME: Lazy<RClass> = Lazy::new(|r| r.class_time());
 
@@ -68,6 +68,8 @@ impl Converter {
 
     /// Builds the cell `SheetDoc#cell_from_xml` builds for `raw`. `None` means
     /// roo stores no cell (an empty cell without the `empty_cell` option).
+    /// `known` is the value [`Self::known_value`] returned for `raw`, which
+    /// the cell then holds.
     pub fn cell(
         &self,
         ruby: &Ruby,
@@ -75,6 +77,7 @@ impl Converter {
         raw: &RawCell,
         row_number: usize,
         column: usize,
+        known: Option<Value>,
     ) -> Result<Option<(Value, Value)>, Error> {
         let coordinate = self.coordinate(ruby, raw, row_number, column)?;
         let style = self.style(ruby, raw)?;
@@ -100,11 +103,10 @@ impl Converter {
                     ruby.get_inner(&CELL_EMPTY).new_instance((coordinate,))?
                 }
             }
-            Body::Inline(text) => self.string(
-                ruby,
-                ruby.str_new(&buffer[text.clone()]).as_value(),
-                &common,
-            )?,
+            Body::Inline(text) => {
+                let value = known.unwrap_or_else(|| ruby.str_new(&buffer[text.clone()]).as_value());
+                self.string(ruby, value, &common)?
+            }
             // roo looks up the style format for every `v` cell, which raises when
             // the workbook has no styles part, so this does too.
             Body::Value(text) => {
@@ -115,19 +117,64 @@ impl Converter {
                         self.string(ruby, value, &common)?
                     }
                     (Kind::Boolean, _) => self.boolean(ruby, text, &common)?,
-                    (Kind::Str, _) => self.string(ruby, ruby.str_new(text).as_value(), &common)?,
+                    (Kind::Str, _) => {
+                        let value = known.unwrap_or_else(|| ruby.str_new(text).as_value());
+                        self.string(ruby, value, &common)?
+                    }
                     (kind, (format, format_type, number_format)) => {
                         let value_type = if kind == Kind::InlineStr {
                             ValueType::Number
                         } else {
                             format_type
                         };
-                        self.numeric(ruby, text, format, value_type, number_format, &common)?
+                        let read = (value_type, number_format);
+                        self.numeric(ruby, text, format, read, known, &common)?
                     }
                 }
             }
         };
         Ok(Some((coordinate, cell)))
+    }
+
+    /// The `value` of the cell [`Self::cell`] builds for `raw` without its
+    /// constructor, without building it. `None` when that cell would come
+    /// from its constructor, and for a `Cell::DateTime` or `Cell::Time`.
+    pub fn known_value(
+        &self,
+        ruby: &Ruby,
+        buffer: &str,
+        raw: &RawCell,
+    ) -> Result<Option<Value>, Error> {
+        let Reference::At { row, column } = raw.reference else {
+            return Ok(None);
+        };
+        if !self.build_cells || self.has_link(ruby, row, column) {
+            return Ok(None);
+        }
+        let text = match &raw.body {
+            Body::Empty => return Ok(Some(ruby.qnil().as_value())),
+            Body::Inline(text) => return Ok(Some(ruby.str_new(&buffer[text.clone()]).as_value())),
+            Body::Value(text) => &buffer[text.clone()],
+        };
+        let (_, format_type, number_format) = self.style_info(ruby, self.style(ruby, raw)?)?;
+        let numeric = match (raw.kind, format_type) {
+            (Kind::Shared, _) => return Ok(Some(self.shared_string(ruby, text)?)),
+            (Kind::Boolean, _) => {
+                let value = match text {
+                    "0" => Some(false),
+                    "1" => Some(true),
+                    _ => None,
+                };
+                return Ok(value.map(|value| value.into_value_with(ruby)));
+            }
+            (Kind::Str, _) => return Ok(Some(ruby.str_new(text).as_value())),
+            (Kind::InlineStr, _) | (Kind::ByFormat, ValueType::Number) => {
+                NumericCell::Number(number_format)
+            }
+            (Kind::ByFormat, ValueType::Date) => NumericCell::DateFromText,
+            (Kind::ByFormat, ValueType::DateTime | ValueType::Time) => return Ok(None),
+        };
+        Ok(self.computed(ruby, numeric, text)?.map(|(value, _)| value))
     }
 
     /// Whether this cell can be built without its constructor: a link makes
@@ -216,8 +263,8 @@ impl Converter {
         ruby: &Ruby,
         text: &str,
         format: Value,
-        value_type: ValueType,
-        number_format: NumberFormat,
+        (value_type, number_format): (ValueType, NumberFormat),
+        known: Option<Value>,
         common: &Common,
     ) -> Result<Value, Error> {
         let content = ruby.str_new(text);
@@ -258,7 +305,11 @@ impl Converter {
         let excelx_type = ruby.ary_new_from_values(&[numeric_or_formula, format]);
         if self.builds(common) {
             let cell_type = Some(excelx_type);
-            match self.computed(ruby, numeric, text)? {
+            let computed = match known {
+                Some(value) => Some((value, None)),
+                None => self.computed(ruby, numeric, text)?,
+            };
+            match computed {
                 Some((value, None)) => {
                     let rest = [(&FORMAT, format)];
                     return Self::build_cell(

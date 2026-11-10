@@ -127,7 +127,9 @@ roo is the oracle: every check takes roo's own output as the expected result.
   `.xlsx`/`.xlsm` files in roo's `test/files` cell by cell (class, value,
   type, formatted value, every instance variable) across open options,
   streaming options, and the `Roo::Base` API, including `parse` and `each`
-  under nine option sets, with and without a block, and the single-cell reads.
+  under nine option sets, with and without a block, and the single-cell reads,
+  and whether `cells`, built after `each` and `parse`, holds the very values
+  they returned.
 - **Edge cases.** `test/edge_cases_test.rb` pins roo's answer for Integer vs
   Float, random numbers, dates, and times under every number and date style,
   number text only roo's constructors read, the 1904 date system, merged
@@ -148,12 +150,16 @@ Known differences, by design:
   themselves (subclasses work). Under
   roo 4.0.0 so is an override of `initialize` on a `Cell` class or on
   `Roo::Excelx::Coordinate`.
-- Reading the whole sheet after a single-cell read or `#last_row` costs about
-  10–25% more than reading it whole from the start, because the sheet is parsed
-  before any cell is built rather than alongside. `#each` and `#parse` build
-  the whole sheet first, so they are not affected.
-- Inside an `each` block without options, a write straight into
-  `sheet_for(...).cells` (not through `set`) does not show in later rows.
+- Building the whole `Sheet#cells` hash (`#to_csv`, `#set`, `#each` with
+  options, …) after a read that does not need it (a single-cell read,
+  `#last_row`, `#row`, `#each` without options, `#parse` without a block)
+  costs more than building it from the start, because the sheet is parsed
+  before any cell is built rather than alongside: on the 100k-row benchmark
+  files, a single-cell read and then `#to_csv` take about 55% longer than
+  `#to_csv` alone.
+- On a sheet built whole (see [How it works](#how-it-works)), inside an
+  `each` block without options, a write straight into `sheet_for(...).cells`
+  (not through `set`) does not show in later rows.
 - On XML that breaks partway, `each_row_streaming` raises the same
   `Nokogiri::XML::SyntaxError` as roo but yields a few more rows before it.
 - Streaming uses about 15 MB more peak memory.
@@ -171,12 +177,17 @@ and other roo versions go through roo's own constructors.
 
 Single-cell reads (`#cell`, `#celltype`, `#formula`, `#excelx_type`,
 `#excelx_value`, `#formatted_value`, `#excelx_format`, `#font`, `#empty?`),
-`#row`, `#column`, and `#first_row` … `#last_column` build only the cells
-they read: the extension keeps the parsed sheet in compact native records and
-builds a cell the first time it is read. Anything that needs the whole
-`Sheet#cells` hash (`#each`, `#parse`, `#to_csv`, `#set`, …) builds the rest,
-keeping the cells already handed out. A sheet where some cell would raise, or
-opened with `expand_merged_ranges`, is built whole, as before.
+`#column`, and `#first_row` … `#last_column` build only the cells they read:
+the extension keeps the parsed sheet in compact native records and builds a
+cell the first time it is read. `#row`, `#each` without options, and `#parse`
+without a block read values straight from those records, and build a cell
+only for a value that needs one (a hyperlink, a date with a time, a time). The
+records keep each value they hand out, so a cell built later holds that very
+object, as in roo. Anything that needs the whole `Sheet#cells` hash (`#each`
+with options, `#parse` with a block, `#to_csv`, `#set`, …) builds it from the
+records, keeping the cells and values already handed out. A sheet where some
+cell would raise, or opened with `expand_merged_ranges`, is built whole, as
+before.
 
 Everything else stays roo's code: shared strings, styles, number formats,
 the base date, hyperlinks, comments, images, and every open option. It works with
@@ -184,16 +195,19 @@ the base date, hyperlinks, comments, images, and every open option. It works wit
 
 It also prepends `Roo::Excelx#parse` and `#each` for calls with options
 (`headers`, `header_search`, header queries, `clean`). They keep roo's header
-handling and build each row's Hash from the `cells` hash. roo builds it with
-one `#cell` call per value instead. `parse` without a block groups the cells
-by row in one pass. `each`, and `parse` with a block, look up each value
-directly, because the block may change the workbook between rows.
+handling and build each row's Hash with less work than roo's one `#cell` call
+per value. `parse` without a block builds each Hash from the records, or on a
+sheet built whole groups the cells by row in one pass. `each`, and `parse`
+with a block, look up each value in the `cells` hash, because the block may
+change the workbook between rows.
 
-On a sheet of 3,000 rows or more, `each` without options, behind
-`each_with_index`, `to_a`, and `parse` without options, reads the rows past
-the first 1,000 from an index built in one pass over the sheet's cells. It
-hands back to roo's lookups once the block calls `set` or `reload`, or
-changes `default_sheet`.
+`each` without options, behind `each_with_index`, `to_a`, and `parse` without
+options, is roo's own loop over `#row`, so a block that calls `set` or
+`reload`, or changes `default_sheet`, sees the change from the next row on. On
+a sheet built whole of 3,000 rows or more, it reads the rows past the first
+1,000 from an index built in one pass over the sheet's cells, and hands back
+to roo's lookups once the block calls `set` or `reload`, or changes
+`default_sheet`.
 
 When a sheet uses XML the reader does not reproduce exactly the way Nokogiri
 does (a non-UTF-8 encoding, a DTD, custom entities, or malformed XML), it

@@ -22,7 +22,6 @@ use magnus::{function, method, prelude::*, Error, ExceptionClass, RArray, RHash,
 
 use convert::Converter;
 use reader::{Mode, RawRow, SheetReader, Unsupported};
-use store::Store;
 
 static UNSUPPORTED: Lazy<ExceptionClass> = Lazy::new(|r| {
     r.eval("Roo::Calamine::UnsupportedError")
@@ -210,21 +209,19 @@ impl Reader {
         Ok(())
     }
 
-    /// Document mode: adds the next batch of rows to `cells`, reusing the
-    /// cells `store` (a `Native::Store`, or `nil`) built. Returns `false`
-    /// once the sheet is exhausted.
+    /// Document mode: adds the next batch of rows to `cells`. Returns
+    /// `false` once the sheet is exhausted.
     fn fill_cells(
         ruby: &Ruby,
         rb_self: &Self,
         cells: RHash,
         converter: &Converter,
-        store: Option<&Store>,
     ) -> Result<bool, Error> {
         let rows = rb_self.read_batch(ruby)?;
         for row in &rows {
             let row_number = rb_self.rows_read.get() + 1;
             rb_self.rows_read.set(row_number);
-            converter.add_row(ruby, cells, row, row_number, store)?;
+            converter.add_row(ruby, cells, row, row_number)?;
         }
         Ok(!rows.is_empty())
     }
@@ -276,7 +273,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
 
     let reader = native.define_class("Reader", ruby.class_object())?;
     reader.define_singleton_method("new", function!(Reader::new, 3))?;
-    reader.define_method("fill_cells", method!(Reader::fill_cells, 3))?;
+    reader.define_method("fill_cells", method!(Reader::fill_cells, 2))?;
     reader.define_method("next_rows", method!(Reader::next_rows, 0))?;
     reader.define_method("next_values", method!(Reader::next_values, 1))?;
     reader.define_method("close", method!(Reader::close, 0))?;
