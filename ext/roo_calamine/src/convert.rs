@@ -75,6 +75,17 @@ fn has_html_tag(string: &[u8]) -> bool {
     })
 }
 
+/// `Coordinate.new(row, column)`: a frozen `[row, column]` of roo's Array
+/// subclass, built without running its Ruby `initialize`.
+fn new_coordinate<T: IntoValue>(ruby: &Ruby, row: T, column: T) -> Result<Value, Error> {
+    let coordinate = RArray::from_value(ruby.get_inner(&COORDINATE).obj_alloc()?)
+        .expect("Roo::Excelx::Coordinate is an Array");
+    coordinate.push(row)?;
+    coordinate.push(column)?;
+    coordinate.freeze();
+    Ok(coordinate.as_value())
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ValueType {
     Date,
@@ -433,13 +444,12 @@ impl Converter {
         row: usize,
         column: usize,
     ) -> Result<Value, Error> {
-        let coordinate = ruby.get_inner(&COORDINATE);
         match (&raw.reference, self.mode) {
-            (Reference::At { row, column }, _) => coordinate.new_instance((*row, *column)),
+            (Reference::At { row, column }, _) => new_coordinate(ruby, *row, *column),
             (Reference::Invalid(reference), _) => self
                 .context(ruby)
                 .funcall("coordinate", (ruby.str_new(reference),)),
-            (Reference::Missing, Mode::Document) => coordinate.new_instance((row, column)),
+            (Reference::Missing, Mode::Document) => new_coordinate(ruby, row, column),
             (Reference::Missing, Mode::Stream) => {
                 self.context(ruby).funcall("coordinate", (ruby.qnil(),))
             }
