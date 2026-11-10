@@ -38,8 +38,10 @@ roo-calamine prepends `Roo::Excelx::SheetDoc` and replaces the two places
 where roo reads worksheet XML: `#cells` (behind `#cell`, `#row`, `#each`,
 `#parse`, `#to_csv`, …) and `#each_row_streaming`. A Rust extension parses
 the XML with [quick-xml](https://github.com/tafia/quick-xml) on a background
-thread and builds the same `Roo::Excelx::Cell` objects with roo's own
-constructors.
+thread and builds the same `Roo::Excelx::Cell` objects. Under roo 4.0.0 it
+sets each cell's instance variables the way roo's constructors do, without
+running them; cells with a hyperlink, number text that is not plainly written,
+and other roo versions go through roo's own constructors.
 
 Single-cell reads (`#cell`, `#celltype`, `#formula`, `#excelx_type`,
 `#excelx_value`, `#formatted_value`, `#excelx_format`, `#font`, `#empty?`),
@@ -51,7 +53,7 @@ keeping the cells already handed out. A sheet where some cell would raise, or
 opened with `expand_merged_ranges`, is built whole, as before.
 
 Everything else stays roo's code: shared strings, styles, number formats,
-dates, hyperlinks, comments, images, and every open option. It works with
+the base date, hyperlinks, comments, images, and every open option. It works with
 `Roo::Spreadsheet.open`, `Roo::Excelx.new`, and IO streams.
 
 It also prepends `Roo::Excelx#parse` and `#each` for calls with options
@@ -128,9 +130,11 @@ roo is the oracle: every check takes roo's own output as the expected result.
   streaming options, and the `Roo::Base` API, including `parse` and `each`
   under nine option sets, with and without a block, and the single-cell reads.
 - **Edge cases.** `test/edge_cases_test.rb` pins roo's answer for Integer vs
-  Float, dates and the 1904 system, merged ranges, rich text, inline strings,
-  shared formulas, error cells, namespaces, `parse` and `each` after `set`
-  or with a block that changes the workbook, and more.
+  Float, random numbers, dates, and times under every number and date style,
+  number text only roo's constructors read, the 1904 date system, merged
+  ranges, rich text, inline strings, shared formulas, error cells,
+  namespaces, `parse` and `each` after `set` or with a block that changes
+  the workbook, and more.
 - **Values only.** Both suites also compare `Roo::Calamine.each_row_values`
   with the values of roo's `each_row_streaming(pad_cells: true)`, with the
   native reader on and off.
@@ -141,7 +145,9 @@ Known differences, by design:
   `#extract_cells`, `Cell.cell_class`) is bypassed while the reader is on, and
   so are a `Roo::Excelx` subclass's `#cell` or `#each` inside `parse` and
   `each` with options, and redefinitions of the single-cell reads above in
-  `Roo::Excelx` or `Roo::Excelx::Sheet` themselves (subclasses work).
+  `Roo::Excelx` or `Roo::Excelx::Sheet` themselves (subclasses work). Under
+  roo 4.0.0 so is an override of `initialize` on a `Cell` class or on
+  `Roo::Excelx::Coordinate`.
 - Reading the whole sheet after a single-cell read or `#last_row` costs about
   10–25% more than reading it whole from the start, because the sheet is parsed
   before any cell is built rather than alongside. `#each` and `#parse` build

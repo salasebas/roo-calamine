@@ -5,6 +5,7 @@
 //! and [`store`] keeps them to build one cell at a time.
 
 pub mod convert;
+pub mod numeric;
 pub mod reader;
 pub mod store;
 

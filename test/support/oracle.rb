@@ -24,6 +24,16 @@ module Oracle
     end
   end)
 
+  [Roo::Excelx::Coordinate, *%i[Number Date DateTime Time String Boolean Empty].map { Roo::Excelx::Cell.const_get(_1) }]
+    .each do |klass|
+      klass.prepend(Module.new do
+        define_method(:initialize) do |*args|
+          Oracle.counts[:constructors] += 1 if instance_of?(klass)
+          super(*args)
+        end
+      end)
+    end
+
   Roo::Calamine::Native::Reader.singleton_class.prepend(Module.new do
     define_method(:new) do |*args|
       Oracle.counts[:native_readers] += 1
@@ -71,7 +81,7 @@ module Oracle
   def describe_cell(cell)
     return cell if cell.nil?
 
-    state = cell.instance_variables.sort.map { |ivar| [ivar, describe_value(cell.instance_variable_get(ivar))] }
+    state = cell.instance_variables.map { |ivar| [ivar, describe_value(cell.instance_variable_get(ivar))] }
     formatted = outcome { silence { cell.formatted_value } }
     [cell.class, describe_value(cell.value), cell.type, cell.empty?, formatted, state]
   end
