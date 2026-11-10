@@ -224,18 +224,16 @@ class EdgeCasesTest < Minitest::Test
                  shared_strings: shared)
     # roo hands out its own shared-string objects, so changing one in place
     # changes what roo's use_html? sees for the next cell.
-    edit_first = lambda do
-      Roo::Excelx.new(path).each_row_streaming.map do |row|
-        value = row.first.value
-        value.replace("edited") if row.first.coordinate.row == 1
-        value.dup
-      end
-    end
+    edit = ->(value, index) { (index.zero? ? value.replace("edited") : value).dup }
+    edit_first = -> { Roo::Excelx.new(path).each_row_streaming.with_index.map { |row, i| edit.call(row.first.value, i) } }
+    edit_first_value = -> { Roo::Calamine.each_row_values(path).with_index.map { |(value), i| edit.call(value, i) } }
     roo, = Oracle.read(native: false, &edit_first)
     native, = Oracle.read(native: true, &edit_first)
+    native_values, = Oracle.read(native: true, &edit_first_value)
 
     assert_equal [:ok, %w[edited bold]], roo
     assert_equal roo, native
+    assert_equal roo, native_values
   end
 
   # roo hands out the format String of its own styles table, so changing it
@@ -716,6 +714,20 @@ class EdgeCasesTest < Minitest::Test
     assert_equal [:ok, [250, Nokogiri::XML::SyntaxError]], native
     assert_equal 1, counts[:native_readers]
     assert_equal 0, counts[:roo_cells], "roo should not build the 250 rows already yielded again"
+  end
+
+  def test_roo_reads_on_where_the_native_reader_stops
+    rows = (1..300).map { |i| %(<row r="#{i}"><c r="A#{i}"><v>#{i}</v></c></row>) }
+    rows[250] = %(<row r="251"><c r="A251" t="inlineStr"><is><x:t xmlns:x="urn:other">a</x:t><t>251</t></is></c></row>)
+    path = write(rows.join)
+    values = -> { Roo::Calamine.each_row_values(path).map(&:first) }
+    roo, = Oracle.read(native: false, &values)
+    native, counts = Oracle.read(native: true, &values)
+
+    assert_equal [:ok, [*1..250, "251", *252..300]], roo
+    assert_equal roo, native
+    assert_equal 50, counts[:roo_cells], "roo should read on from row 251"
+    assert_every_path_same_as_roo(path, native_only: false)
   end
 
   def test_an_exception_while_waiting_for_a_batch_arrives_as_itself
