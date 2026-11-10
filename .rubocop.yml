@@ -63,3 +63,7 @@ Metrics/CyclomaticComplexity:
 Metrics/ClassLength:
   Exclude:
     - "test/**/*"
+
+Metrics/ModuleLength:
+  Exclude:
+    - "test/**/*"
