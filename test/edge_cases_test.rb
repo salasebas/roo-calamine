@@ -108,6 +108,26 @@ class EdgeCasesTest < Minitest::Test
     assert_every_path_same_as_roo(path, disable_html_wrapper: true)
   end
 
+  def test_rich_text_is_chosen_again_for_every_cell
+    shared = Workbook.shared_strings("<si><r><rPr><b/></rPr><t>bold</t></r></si>")
+    path = write(%(<row r="1"><c r="A1" t="s"><v>0</v></c></row><row r="2"><c r="A2" t="s"><v>0</v></c></row>),
+                 shared_strings: shared)
+    # roo hands out its own shared-string objects, so changing one in place
+    # changes what roo's use_html? sees for the next cell.
+    edit_first = lambda do
+      Roo::Excelx.new(path).each_row_streaming.map do |row|
+        value = row.first.value
+        value.replace("edited") if row.first.coordinate.row == 1
+        value.dup
+      end
+    end
+    roo, = Oracle.read(native: false, &edit_first)
+    native, = Oracle.read(native: true, &edit_first)
+
+    assert_equal [:ok, %w[edited bold]], roo
+    assert_equal roo, native
+  end
+
   def test_formulas_and_their_cached_values
     path = write(<<~XML)
       <row r="1"><c r="A1"><f>1+1</f><v>2</v></c><c r="B1"><f t="shared" ref="B1:B3" si="0">A1*2</f><v>4</v></c></row>
@@ -246,9 +266,15 @@ class EdgeCasesTest < Minitest::Test
                                    sheets: { "Sheet1" => Workbook.sheet(%(<row r="1"><c r="A1" r:t="str"><v>1</v></c></row>)) })
     comment_in_row = write(%(<row r="1"><!-- c --><c r="A1"><v>1</v></c></row>))
     pi_in_value = write(%(<row r="1"><c r="A1" t="str"><v>1<? x?></v></c></row>))
+    nested_row = write(%(<row r="1"><c r="A1"><extLst><row r="2"><c r="B2"><v>5</v></c></row></extLst></c></row>))
+    duplicated_attribute = write(%(<row r="1" r="2"><c r="A1"><v>1</v></c></row>))
+    preserved_space = write(%(<row r="1" xml:space="preserve"> <c r="A1"><v>1</v></c> </row>))
+    unknown_entity = Workbook.write(@dir, "entity",
+                                    sheets: { "Sheet1" => Workbook.sheet(%(<row r="1"><c r="A1"><v>1</v></c></row>),
+                                                                         extra: "<ext>&bogus;</ext>") })
 
     [illegal_reference, illegal_byte, truncated, undeclared_prefix, prefixed_type, comment_in_row,
-     pi_in_value].each do |path|
+     pi_in_value, nested_row, duplicated_attribute, preserved_space, unknown_entity].each do |path|
       assert_every_path_same_as_roo(path, native_only: false)
     end
   end

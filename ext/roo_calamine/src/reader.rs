@@ -175,6 +175,11 @@ pub struct SheetReader<R: BufRead> {
     /// Namespace prefixes declared on open elements, with the depth they were
     /// declared at.
     prefixes: Vec<(usize, String)>,
+    /// `xml:space` values on open elements (`true` for `preserve`), with the
+    /// depth they were set at.
+    space: Vec<(usize, bool)>,
+    /// Stream mode: whether a row is being read.
+    in_row: bool,
     /// An error met after some rows of a batch, returned by the next call.
     pending_error: Option<Unsupported>,
 }
@@ -221,6 +226,8 @@ impl<R: BufRead> SheetReader<R> {
             seen_root: false,
             open_elements: 0,
             prefixes: Vec::new(),
+            space: Vec::new(),
+            in_row: false,
             pending_error: None,
         }
     }
@@ -273,9 +280,11 @@ impl<R: BufRead> SheetReader<R> {
                 Event::Start(e) => {
                     self.depth += 1;
                     if self.is_row(&e) {
-                        let row = self.read_row(buf)?;
+                        self.in_row = true;
+                        let row = self.read_row(buf);
+                        self.in_row = false;
                         self.depth -= 1;
-                        return Ok(Some(row));
+                        return row.map(Some);
                     }
                     self.enter(&e);
                 }
@@ -345,27 +354,55 @@ impl<R: BufRead> SheetReader<R> {
                 },
             }
         }
-        let depth = self.open_elements + 1;
-        if raw.contains(['&', ':']) {
-            for attribute in e.attributes() {
-                let attribute = attribute?;
-                let key = attribute.key.as_ref();
-                if key.contains(':') {
-                    check_name(key)?;
-                }
-                if attribute.value.contains('&') {
-                    check_chars(&attribute.normalized_value(XmlVersion::Implicit1_0)?)?;
-                }
-                if let Some(prefix) = key.strip_prefix("xmlns:") {
-                    self.prefixes.push((depth, prefix.to_owned()));
-                }
+        if self.mode == Mode::Stream && self.in_row {
+            // roo's streaming reader yields a nested `row` as a row of its own,
+            // and matches prefixed names in a row by namespace.
+            if name.as_ref() == "row" || name.as_ref().contains(':') {
+                return Err(Unsupported(format!(
+                    "<{}> inside a streamed row",
+                    name.as_ref()
+                )));
             }
+        }
+        let depth = self.open_elements + 1;
+        // quick-xml reports duplicated attributes only while iterating.
+        for attribute in e.attributes() {
+            let attribute = attribute?;
+            let key = attribute.key.as_ref();
+            if key.contains(':') {
+                check_name(key)?;
+            }
+            if attribute.value.contains('&') {
+                check_chars(&attribute.normalized_value(XmlVersion::Implicit1_0)?)?;
+            }
+            if let Some(prefix) = key.strip_prefix("xmlns:") {
+                if attribute.value.is_empty() {
+                    return Err(Unsupported(format!("an empty namespace for {prefix}")));
+                }
+                self.prefixes.push((depth, prefix.to_owned()));
+            }
+            if key == "xml:space" {
+                self.space
+                    .push((depth, attribute.value.as_ref() == "preserve"));
+            }
+        }
+        if raw.contains(':') {
             for attribute in e.attributes() {
                 let key = attribute?.key;
                 self.check_prefix(key.as_ref())?;
             }
         }
         self.check_prefix(name.as_ref())
+    }
+
+    /// Ends the namespace and `xml:space` scopes of an element at `depth`.
+    fn leave(&mut self, depth: usize) {
+        self.prefixes.retain(|(declared, _)| *declared != depth);
+        self.space.retain(|(declared, _)| *declared != depth);
+    }
+
+    fn preserves_space(&self) -> bool {
+        self.space.last().is_some_and(|(_, preserve)| *preserve)
     }
 
     /// libxml2 keeps an undeclared prefix as part of the name, so roo would
@@ -414,13 +451,11 @@ impl<R: BufRead> SheetReader<R> {
             }
             Event::Empty(e) => {
                 self.check_start(e)?;
-                let depth = self.open_elements + 1;
-                self.prefixes.retain(|(declared, _)| *declared != depth);
+                self.leave(self.open_elements + 1);
             }
             Event::End(_) => {
-                let depth = self.open_elements;
-                self.prefixes.retain(|(declared, _)| *declared != depth);
-                self.open_elements = depth.saturating_sub(1);
+                self.leave(self.open_elements);
+                self.open_elements = self.open_elements.saturating_sub(1);
             }
             Event::Text(t) if t.contains("]]>") => {
                 return Err(Unsupported("`]]>` in text".into()));
@@ -431,11 +466,19 @@ impl<R: BufRead> SheetReader<R> {
                 check_name(pi.target())?;
                 check_chars(pi)?;
             }
-            Event::GeneralRef(r) => {
-                if let Some(c) = r.resolve_char_ref()? {
-                    check_chars(c.encode_utf8(&mut [0; 4]))?;
+            Event::GeneralRef(r) => match r.resolve_char_ref()? {
+                Some(c) => check_chars(c.encode_utf8(&mut [0; 4]))?,
+                None => {
+                    if !matches!(
+                        r.xml10_content().as_ref(),
+                        "lt" | "gt" | "amp" | "apos" | "quot"
+                    ) {
+                        return Err(Unsupported(
+                            "an entity reference XML does not define".into(),
+                        ));
+                    }
                 }
-            }
+            },
             Event::Decl(_) if !first => {
                 return Err(Unsupported("an XML declaration after the start".into()));
             }
@@ -501,7 +544,10 @@ impl<R: BufRead> SheetReader<R> {
                 Event::Eof => return Err(Unsupported("unexpected end of row".into())),
                 // roo's streaming takes every child node of a row as a cell and
                 // fails on one that is not an element.
-                Event::Text(t) if self.mode == Mode::Stream && !t.trim_ascii().is_empty() => {
+                Event::Text(t)
+                    if self.mode == Mode::Stream
+                        && (self.preserves_space() || !t.trim_ascii().is_empty()) =>
+                {
                     return Err(Unsupported("text in a streamed row".into()));
                 }
                 Event::Comment(_) | Event::PI(_) | Event::CData(_) | Event::GeneralRef(_)
@@ -594,7 +640,11 @@ impl<R: BufRead> SheetReader<R> {
             match self.read_event(buf)? {
                 Event::Start(e) => {
                     depth += 1;
-                    if t_depth.is_none() && e.local_name().as_ref() == "t" {
+                    if e.local_name().as_ref() == "t" {
+                        if t_depth.is_some() {
+                            // roo joins the text of every `t`, the nested one twice.
+                            return Err(Unsupported("a `t` inside a `t`".into()));
+                        }
                         t_depth = Some(depth);
                     }
                 }
@@ -1035,6 +1085,26 @@ mod tests {
                     .is_ok(),
                 "{label} in a document"
             );
+        }
+        for (label, xml) in [
+            ("nested t", "<worksheet><sheetData><row><c t=\"inlineStr\"><is><t>a<t>b</t>c</t></is></c></row></sheetData></worksheet>"),
+            ("empty prefix namespace", "<worksheet><sheetData><row r=\"1\" xmlns:x=\"\"><x:c r=\"A1\"><v>1</v></x:c></row></sheetData></worksheet>"),
+            ("duplicated attribute", "<worksheet><sheetData><row r=\"1\" r=\"2\"><c r=\"A1\"><v>1</v></c></row></sheetData></worksheet>"),
+            ("unknown entity in skipped content", "<worksheet><sheetData><row><c r=\"A1\"><v>1</v></c></row></sheetData><ext>&bogus;</ext></worksheet>"),
+        ] {
+            for mode in [Mode::Document, Mode::Stream] {
+                let mut reader = SheetReader::new(xml.as_bytes(), mode);
+                let read: Result<Vec<RawRow>> = std::iter::from_fn(|| reader.next_row().transpose()).collect();
+                assert!(read.is_err(), "{label} ({mode:?})");
+            }
+        }
+        for (label, xml) in [
+            ("nested row", "<worksheet><sheetData><row r=\"1\"><c r=\"A1\"><ext><row r=\"2\"/></ext></c></row></sheetData></worksheet>"),
+            ("prefixed t in a streamed row", "<worksheet><sheetData><row><c t=\"inlineStr\"><is><x:t xmlns:x=\"urn:other\">hi</x:t></is></c></row></sheetData></worksheet>"),
+            ("preserved whitespace in a row", "<worksheet><sheetData><row r=\"1\" xml:space=\"preserve\"> <c r=\"A1\"/> </row></sheetData></worksheet>"),
+        ] {
+            assert!(SheetReader::new(xml.as_bytes(), Mode::Stream).next_rows(9).is_err(), "{label}");
+            assert!(SheetReader::new(xml.as_bytes(), Mode::Document).next_rows(9).is_ok(), "{label} in a document");
         }
         let declared = r#"<x:worksheet xmlns:x="urn:x"><x:sheetData><x:row><x:c r="A1"><x:v>3</x:v></x:c></x:row></x:sheetData></x:worksheet>"#;
         assert_eq!(

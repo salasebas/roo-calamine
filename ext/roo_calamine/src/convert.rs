@@ -7,8 +7,8 @@ use std::cell::{Cell as StdCell, RefCell};
 use magnus::gc::Marker;
 use magnus::value::{Lazy, Opaque, ReprValue};
 use magnus::{
-    prelude::*, DataTypeFunctions, Error, IntoValue, RArray, RClass, RHash, Ruby, StaticSymbol,
-    Symbol, TypedData, Value,
+    prelude::*, DataTypeFunctions, Error, IntoValue, RArray, RClass, RHash, RString, Ruby,
+    StaticSymbol, Symbol, TypedData, Value,
 };
 
 use crate::reader::{parse_index, Body, Kind, Mode, RawCell, RawRow, Reference, Style};
@@ -26,6 +26,16 @@ static CELL_DATETIME: Lazy<RClass> = Lazy::new(|r| constant(r, "Roo::Excelx::Cel
 static CELL_TIME: Lazy<RClass> = Lazy::new(|r| constant(r, "Roo::Excelx::Cell::Time"));
 static CELL_EMPTY: Lazy<RClass> = Lazy::new(|r| constant(r, "Roo::Excelx::Cell::Empty"));
 static NUMERIC_OR_FORMULA: Lazy<StaticSymbol> = Lazy::new(|r| r.sym_new("numeric_or_formula"));
+
+/// `string[/<([biu]|sup|sub)>/]`, the test in `SharedStrings#use_html?`.
+fn has_html_tag(string: &[u8]) -> bool {
+    string.windows(3).enumerate().any(|(i, w)| {
+        w[0] == b'<'
+            && (matches!(w, [_, b'b' | b'i' | b'u', b'>'])
+                || string[i..].starts_with(b"<sup>")
+                || string[i..].starts_with(b"<sub>"))
+    })
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ValueType {
@@ -57,7 +67,10 @@ pub struct Converter {
     /// Format string per style index, filled on first use.
     formats: Opaque<RArray>,
     types: RefCell<Vec<Option<ValueType>>>,
-    shared_strings: StdCell<Option<Opaque<RArray>>>,
+    /// roo's own shared-string arrays: plain text, and the HTML version
+    /// (`nil` when the HTML wrapper is disabled). Fetched on first use.
+    shared_plain: StdCell<Option<Opaque<RArray>>>,
+    shared_html: StdCell<Option<Opaque<Value>>>,
 }
 
 impl DataTypeFunctions for Converter {
@@ -69,8 +82,11 @@ impl DataTypeFunctions for Converter {
         marker.mark(self.base_date);
         marker.mark(self.base_timestamp);
         marker.mark(self.formats);
-        if let Some(shared_strings) = self.shared_strings.get() {
-            marker.mark(shared_strings);
+        if let Some(plain) = self.shared_plain.get() {
+            marker.mark(plain);
+        }
+        if let Some(html) = self.shared_html.get() {
+            marker.mark(html);
         }
     }
 }
@@ -88,7 +104,8 @@ impl Converter {
             base_timestamp: context.funcall::<_, _, Value>("base_timestamp", ())?.into(),
             formats: ruby.ary_new().into(),
             types: RefCell::new(Vec::new()),
-            shared_strings: StdCell::new(None),
+            shared_plain: StdCell::new(None),
+            shared_html: StdCell::new(None),
         })
     }
 
@@ -181,18 +198,35 @@ impl Converter {
         Ok((format, value_type))
     }
 
+    /// `shared_strings.use_html?(i) ? shared_strings.to_html[i] : shared_strings[i]`,
+    /// decided again for every cell, as roo does, since a caller may change a
+    /// shared string in place.
     fn shared_string(&self, ruby: &Ruby, text: &str) -> Result<Value, Error> {
         if let Some(index) = parse_index(text) {
-            let table = match self.shared_strings.get() {
-                Some(table) => ruby.get_inner(table),
-                None => {
-                    let table: RArray = self.context(ruby).funcall("shared_strings", ())?;
-                    self.shared_strings.set(Some(table.into()));
-                    table
+            if self.shared_plain.get().is_none() {
+                let tables: RArray = self.context(ruby).funcall("shared_strings", ())?;
+                let plain: RArray = tables.entry(0)?;
+                let html: Value = tables.entry(1)?;
+                self.shared_plain.set(Some(plain.into()));
+                self.shared_html.set(Some(html.into()));
+            }
+            let plain = ruby.get_inner(self.shared_plain.get().expect("fetched above"));
+            let html = ruby.get_inner(self.shared_html.get().expect("fetched above"));
+            let chosen = match RArray::from_value(html) {
+                None => Some(plain),
+                Some(html) if index < html.len() => {
+                    match RString::from_value(html.entry(index as isize)?) {
+                        Some(string) if has_html_tag(unsafe { string.as_slice() }) => {
+                            return Ok(string.as_value());
+                        }
+                        Some(_) => Some(plain),
+                        None => None,
+                    }
                 }
+                Some(_) => None,
             };
-            if index < table.len() {
-                return table.entry(index as isize);
+            if let Some(plain) = chosen.filter(|plain| index < plain.len()) {
+                return plain.entry(index as isize);
             }
         }
         self.context(ruby)
@@ -306,5 +340,26 @@ impl Converter {
                 }
             };
         Ok(Some((coordinate, cell)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::has_html_tag;
+
+    #[test]
+    fn finds_the_tags_roo_looks_for() {
+        for html in [
+            "<html><b>x</b></html>",
+            "a<i>",
+            "<u>",
+            "x<sup>2</sup>",
+            "<sub>",
+        ] {
+            assert!(has_html_tag(html.as_bytes()), "{html}");
+        }
+        for plain in ["<html>x</html>", "<br>", "<bb>", "b>", "<s>", "<su>", "<"] {
+            assert!(!has_html_tag(plain.as_bytes()), "{plain}");
+        }
     }
 }

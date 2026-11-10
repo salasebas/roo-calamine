@@ -35,10 +35,12 @@ module Roo
         Roo::Utils.extract_coordinate(reference)
       end
 
-      # The value of every shared string, by index.
+      # roo's own memoized shared-string arrays: plain text, and the HTML that
+      # SharedStrings#use_html? tests (nil when the HTML wrapper is disabled).
       def shared_strings
         strings = @shared.shared_strings
-        Array.new(strings.to_a.size) { |index| shared_string_at(strings, index) }
+        html_disabled = strings.instance_variable_get(:@options)[:disable_html_wrapper]
+        [strings.to_a, (strings.to_html unless html_disabled)]
       end
 
       def shared_string(text)
