@@ -32,6 +32,11 @@ Roo::Calamine::Native::Reader.singleton_class.prepend(Module.new do
     super(*args)
   end
 end)
+Roo::Calamine::Native::Store.singleton_class.prepend(Module.new do
+  define_method(:read) do |*args|
+    super(*args).tap { |store| native_reads += 1 if store }
+  end
+end)
 
 check Roo::Calamine.enabled?, "roo-calamine #{Roo::Calamine::VERSION} is enabled on #{RUBY_PLATFORM}, Ruby #{RUBY_VERSION}"
 Dir.mktmpdir do |dir|
