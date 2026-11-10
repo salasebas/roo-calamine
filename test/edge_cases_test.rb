@@ -224,18 +224,16 @@ class EdgeCasesTest < Minitest::Test
                  shared_strings: shared)
     # roo hands out its own shared-string objects, so changing one in place
     # changes what roo's use_html? sees for the next cell.
-    edit_first = lambda do
-      Roo::Excelx.new(path).each_row_streaming.map do |row|
-        value = row.first.value
-        value.replace("edited") if row.first.coordinate.row == 1
-        value.dup
-      end
-    end
+    edit = ->(value, index) { (index.zero? ? value.replace("edited") : value).dup }
+    edit_first = -> { Roo::Excelx.new(path).each_row_streaming.with_index.map { |row, i| edit.call(row.first.value, i) } }
+    edit_first_value = -> { Roo::Calamine.each_row_values(path).with_index.map { |(value), i| edit.call(value, i) } }
     roo, = Oracle.read(native: false, &edit_first)
     native, = Oracle.read(native: true, &edit_first)
+    native_values, = Oracle.read(native: true, &edit_first_value)
 
     assert_equal [:ok, %w[edited bold]], roo
     assert_equal roo, native
+    assert_equal roo, native_values
   end
 
   # roo hands out the format String of its own styles table, so changing it
