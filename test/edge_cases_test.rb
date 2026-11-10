@@ -27,6 +27,9 @@ class EdgeCasesTest < Minitest::Test
   def assert_every_path_same_as_roo(path, native_only: true, **open_options)
     assert_same_as_roo("cells", native_only:) { Oracle.describe_cells(Roo::Excelx.new(path, open_options.dup)) }
     assert_same_as_roo("api", native_only:) { Oracle.describe_api(Roo::Excelx.new(path, open_options.dup)) }
+    assert_same_as_roo("lookups", native_only:, lazy: native_only && !open_options[:expand_merged_ranges]) do
+      Oracle.describe_lookups(Roo::Excelx.new(path, open_options.dup))
+    end
     Oracle::STREAM_OPTIONS.each do |stream_options|
       assert_same_as_roo("each_row_streaming #{stream_options}", native_only:) do
         Oracle.describe_stream(Roo::Excelx.new(path, open_options.dup), stream_options)
@@ -198,6 +201,154 @@ class EdgeCasesTest < Minitest::Test
     end
   end
 
+  # roo builds every cell of the sheet at once, so a cell that raises does so
+  # for a read of any other cell too.
+  def test_a_cell_that_raises_raises_for_every_read
+    linked = %(<hyperlinks><hyperlink ref="B1" r:id="rId1"/></hyperlinks>)
+    paths = [%(<c r="B1"><v>abc</v></c>), %(<c r="A1"><v>abc</v></c><c r="A1"><v>1</v></c>),
+             %(<c r="B1" s="2"><v>1e400</v></c>), %(<c r="B1" s="2"><v>-1e308</v></c>),
+             %(<c r="B1" t="s"><v>5</v></c>)].map do |cells|
+      write(%(<row r="1"><c r="A1"><v>1</v></c>#{cells}</row>), shared_strings: Workbook.shared_strings("<si><t>a</t></si>"))
+    end
+    paths << Workbook.write(
+      @dir, "linked_time", sheets: { "Sheet1" => Workbook.sheet(%(<row r="1"><c r="A1"><v>1</v></c><c r="B1" s="2"><v>45000.5</v></c></row>), extra: linked) },
+                           sheet_rels: { "Sheet1" => HYPERLINK_RELS }
+    )
+
+    paths.each do |path|
+      roo, = Oracle.read(native: false) { Roo::Excelx.new(path).cell(1, 1) }
+
+      assert_equal :error, roo.first, path
+      assert_every_path_same_as_roo(path, native_only: false)
+    end
+  end
+
+  def test_a_repeated_coordinate_keeps_the_last_cell_with_a_value
+    path = write(%(<row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>5</v></c><c r="A1"><v>2</v></c><c r="B1"/></row>))
+
+    assert_equal [2, 5], [roo_cell(path, 1, 1), roo_cell(path, 1, 2)]
+    assert_every_path_same_as_roo(path)
+    assert_every_path_same_as_roo(path, empty_cell: true)
+  end
+
+  def test_empty_strings_are_outside_the_bounds
+    path = write(<<~XML, shared_strings: Workbook.shared_strings("<si><t></t></si>"))
+      <row r="1"><c r="A1" t="str"><v></v></c></row><row r="2"><c r="B2"><v>1</v></c></row>
+      <row r="3"><c r="C3" t="s"><v>0</v></c></row>
+    XML
+    roo, = Oracle.read(native: false) { Roo::Excelx.new(path).then { |w| Oracle::BOUNDS.map { w.public_send(_1) } } }
+
+    assert_equal [:ok, [2, 2, 2, 2]], roo
+    assert_every_path_same_as_roo(path)
+  end
+
+  def test_values_changed_in_place_after_a_read_stay_changed
+    shared = Workbook.shared_strings("<si><r><rPr><b/></rPr><t>bold</t></r></si>")
+    path = write(<<~XML, shared_strings: shared)
+      <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>0</v></c><c r="C1" t="s"><v> +0</v></c></row>
+      <row r="3"><c r="C3"><v>1</v></c></row><row r="4"><c r="D4" t="str"><v>x</v></c></row>
+    XML
+    edit = lambda do
+      workbook = Roo::Excelx.new(path)
+      # roo hands out one string object for both cells of a shared string.
+      workbook.cell(1, 1).replace("edited")
+      workbook.cell(4, 4).clear
+      read = [workbook.cell(1, 2), workbook.cell(1, 3), Oracle::BOUNDS.map { workbook.public_send(_1) }]
+      Roo::Calamine.enabled = false
+      read << workbook.sheet_for(nil).cells.transform_values(&:value)
+    end
+    roo, = Oracle.read(native: false, &edit)
+    native, = Oracle.read(native: true, &edit)
+
+    assert_equal [:ok, ["edited", "edited", [1, 3, 1, 3],
+                        { [1, 1] => "edited", [1, 2] => "edited", [1, 3] => "edited", [3, 3] => 1, [4, 4] => "" }]],
+                 roo
+    assert_equal roo, native
+  end
+
+  def test_a_linked_shared_string_keeps_the_text_it_had_before_any_read
+    sheet = Workbook.sheet(%(<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>0</v></c></row>),
+                           extra: %(<hyperlinks><hyperlink ref="B1" r:id="rId1"/></hyperlinks>))
+    path = Workbook.write(@dir, "linked_shared", sheets: { "Sheet1" => sheet }, sheet_rels: { "Sheet1" => HYPERLINK_RELS },
+                                                 shared_strings: Workbook.shared_strings("<si><t>original</t></si>"))
+    edit = lambda do
+      edited = Roo::Excelx.new(path)
+      edited.cell(1, 1).replace("edited")
+      cleared = Roo::Excelx.new(path)
+      cleared.cell(1, 1).clear
+      [Oracle.describe_value(edited.cell(1, 2)), Oracle::BOUNDS.map { cleared.public_send(_1) }]
+    end
+
+    assert_equal [:ok, [[Roo::Link, false, "original", "https://example.com/"], [1, 1, 2, 2]]], Oracle.read(native: false, &edit).first
+    assert_same_as_roo("linked", lazy: true, &edit)
+  end
+
+  def test_a_number_format_changed_in_place_keeps_the_types_read_before
+    styles = Workbook::STYLES.sub('formatCode="yyyy\\-mm\\-dd hh:mm"', 'formatCode="0"')
+    many_styles = styles.sub("</cellXfs>", "#{%(<xf numFmtId="164" fontId="0"/>) * 69_992}</cellXfs>")
+    [[6, styles], [70_000, many_styles]].product(["0.00", "yyyy-mm-dd"]) do |(style, xfs), format|
+      path = write(%(<row r="1"><c r="A1" s="#{style}"><v>1</v></c><c r="B1" s="#{style}"><v>2</v></c>) +
+                   %(<c r="C1" s="#{style}"><v>#N/A</v></c></row>), styles: xfs)
+      edit = lambda do
+        workbook = Roo::Excelx.new(path)
+        workbook.excelx_format(1, 1).replace(format)
+        [workbook.cell(1, 2).class, workbook.celltype(1, 2), workbook.excelx_format(1, 2), workbook.cell(1, 3),
+         workbook.sheet_for(nil).cells.transform_values { [_1.value.class, _1.value.equal?(_1.cell_value)] }]
+      end
+
+      assert_equal [:ok, [Integer, :float, format, "#N/A",
+                          { [1, 1] => [Integer, false], [1, 2] => [Integer, false], [1, 3] => [String, true] }]],
+                   Oracle.read(native: false, &edit).first, "style #{style}, #{format}"
+      assert_same_as_roo("style #{style}, #{format}", lazy: style == 6, &edit)
+    end
+  end
+
+  def test_hyperlinks_changed_after_a_read_leave_the_cells_roo_built
+    sheet = Workbook.sheet(%(<row r="1"><c r="A1"><v>1</v></c><c r="B1" t="str"><v>x</v></c></row>),
+                           extra: %(<hyperlinks><hyperlink ref="A1" r:id="rId1"/></hyperlinks>))
+    path = Workbook.write(@dir, "links_changed", sheets: { "Sheet1" => sheet }, sheet_rels: { "Sheet1" => HYPERLINK_RELS })
+    edit = lambda do
+      added = Roo::Excelx.new(path)
+      added.cell(1, 1)
+      added.sheet_for(nil).hyperlinks[[1, 2]] = "http://x"
+      cleared = Roo::Excelx.new(path)
+      cleared.cell(1, 2)
+      cleared.sheet_for(nil).hyperlinks.clear
+      [Oracle.describe_value(added.cell(1, 2)), Oracle.describe_value(cleared.cell(1, 1))]
+    end
+
+    assert_equal [:ok, [[String, false, "x"], [Roo::Link, false, "1", "https://example.com/"]]], Oracle.read(native: false, &edit).first
+    assert_same_as_roo("hyperlinks", lazy: true, &edit)
+  end
+
+  def test_single_cell_reads_build_only_the_cells_they_read
+    path = write((1..3).map { |r| %(<row r="#{r}">#{(1..3).map { |c| %(<c r="#{"ABC"[c - 1]}#{r}"><v>#{r * c}</v></c>) }.join}</row>) }.join)
+    workbook = Roo::Excelx.new(path)
+    built = 0
+    counter = TracePoint.new(:call) do |tp|
+      built += 1 if tp.method_id == :initialize && tp.defined_class == Roo::Excelx::Cell::Number
+    end
+    reads = counter.enable { [workbook.last_row, workbook.last_column, workbook.cell(2, 2), workbook.celltype(2, 2), workbook.empty?(3, 1)] }
+
+    assert_equal [3, 3, 4, :float, false], reads
+    assert_equal 2, built
+    assert_equal(9, counter.enable { workbook.sheet_for(nil).cells.size })
+    assert_equal 9, built
+  end
+
+  def test_set_after_single_cell_reads
+    path = write(%(<row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>2</v></c></row>))
+
+    assert_same_as_roo("set") do
+      workbook = Roo::Excelx.new(path)
+      before = [workbook.cell(1, 1), workbook.last_column]
+      workbook.set(1, 1, "x")
+      workbook.set(3, 3, 9)
+      [before, workbook.cell(1, 1), workbook.celltype(1, 1), workbook.cell(3, 3), workbook.cell(1, 2),
+       Oracle.describe_cells(workbook)]
+    end
+  end
+
   def test_multiple_sheets_and_a_missing_shared_strings_part
     sheets = { "One" => Workbook.sheet(%(<row r="1"><c r="A1"><v>1</v></c></row>)),
                "Two" => Workbook.sheet(%(<row r="3"><c r="B3" t="s"><v>0</v></c></row>)) }
@@ -260,6 +411,31 @@ class EdgeCasesTest < Minitest::Test
       xlsx = Roo::Excelx.new(path)
       Oracle.describe_rows(xlsx.each(clean: true).map { |row| xlsx.close || row })
     end
+  end
+
+  # Roo::Calamine.enabled = false still runs roo-calamine's Roo::Excelx#each
+  # and #parse, so this compares with roo in a process without roo-calamine:
+  # roo checks the options and resets the headers before it reads a cell.
+  def test_each_and_parse_fail_as_plain_roo_on_a_sheet_that_raises
+    path = write(%(<row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>abc</v></c></row>))
+    script = <<~RUBY
+      require ARGV[0]
+      calls = [->(x) { x.each(5) {} }, ->(x) { x.each([1]) {} }, ->(x) { x.each({ clean: true }.freeze) {} },
+               ->(x) { x.parse("x") }, ->(x) { x.each(headers: true) {} }, ->(x) { x.parse(headers: true) },
+               ->(x) { x.parse(o = { clean: true, headers: true }) rescue (raise $!, o.inspect) }]
+      p(calls.map do |call|
+        x = Roo::Excelx.new(ARGV[1])
+        call.call(x)
+      rescue StandardError => e
+        [e.class, e.message.lines.first.to_s[0, 60], x.headers]
+      end)
+    RUBY
+    roo, calamine = %w[roo roo/calamine].map do |library|
+      IO.popen([RbConfig.ruby, "-I", File.expand_path("../lib", __dir__), "-e", script, library, path], &:read)
+    end
+
+    assert_match(/NoMethodError.*TypeError.*FrozenError.*TypeError.*ArgumentError.*\[\]\].*\[\]\].*headers\W+true\}/, roo)
+    assert_equal roo, calamine
   end
 
   def test_parse_reads_cells_set_before_it

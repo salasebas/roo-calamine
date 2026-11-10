@@ -1,10 +1,12 @@
 //! Native fast path for `roo-calamine`.
 //!
 //! [`reader`] turns worksheet XML into raw cell records without touching Ruby,
-//! on a thread of its own. [`convert`] turns those records into roo's cells.
+//! on a thread of its own. [`convert`] turns those records into roo's cells,
+//! and [`store`] keeps them to build one cell at a time.
 
 pub mod convert;
 pub mod reader;
+pub mod store;
 
 use std::cell::{Cell as StdCell, RefCell};
 use std::ffi::c_void;
@@ -19,13 +21,14 @@ use magnus::{function, method, prelude::*, Error, ExceptionClass, RArray, RHash,
 
 use convert::Converter;
 use reader::{Mode, RawRow, SheetReader, Unsupported};
+use store::Store;
 
 static UNSUPPORTED: Lazy<ExceptionClass> = Lazy::new(|r| {
     r.eval("Roo::Calamine::UnsupportedError")
         .expect("roo/calamine defines its error before the extension loads")
 });
 
-fn unsupported(ruby: &Ruby, error: Unsupported) -> Error {
+pub(crate) fn unsupported(ruby: &Ruby, error: Unsupported) -> Error {
     Error::new(ruby.get_inner(&UNSUPPORTED), error.0)
 }
 
@@ -34,7 +37,7 @@ fn unsupported(ruby: &Ruby, error: Unsupported) -> Error {
 /// it when it has something to deliver to this thread (`Thread#raise`,
 /// `Timeout`, Ctrl-C). Such an exception comes back as `Err` instead of
 /// unwinding through the caller's Rust frames.
-fn without_gvl<F: FnOnce(&AtomicBool) -> R, R>(work: F) -> Result<R, Error> {
+pub(crate) fn without_gvl<F: FnOnce(&AtomicBool) -> R, R>(work: F) -> Result<R, Error> {
     struct Call<'a, F, R> {
         work: Option<F>,
         interrupted: &'a AtomicBool,
@@ -201,19 +204,21 @@ impl Reader {
         Ok(())
     }
 
-    /// Document mode: adds the next batch of rows to `cells`. Returns `false`
+    /// Document mode: adds the next batch of rows to `cells`, reusing the
+    /// cells `store` (a `Native::Store`, or `nil`) built. Returns `false`
     /// once the sheet is exhausted.
     fn fill_cells(
         ruby: &Ruby,
         rb_self: &Self,
         cells: RHash,
         converter: &Converter,
+        store: Option<&Store>,
     ) -> Result<bool, Error> {
         let rows = rb_self.read_batch(ruby)?;
         for row in &rows {
             let row_number = rb_self.rows_read.get() + 1;
             rb_self.rows_read.set(row_number);
-            converter.add_row(ruby, cells, row, row_number)?;
+            converter.add_row(ruby, cells, row, row_number, store)?;
         }
         Ok(!rows.is_empty())
     }
@@ -241,7 +246,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
 
     let reader = native.define_class("Reader", ruby.class_object())?;
     reader.define_singleton_method("new", function!(Reader::new, 3))?;
-    reader.define_method("fill_cells", method!(Reader::fill_cells, 2))?;
+    reader.define_method("fill_cells", method!(Reader::fill_cells, 3))?;
     reader.define_method("next_rows", method!(Reader::next_rows, 0))?;
     reader.define_method("close", method!(Reader::close, 0))?;
 
@@ -251,5 +256,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     converter.define_singleton_method("new", function!(Converter::new, 2))?;
     converter.define_method("row_cells", method!(Converter::row_cells, 1))?;
     converter.define_method("row_values", method!(Converter::row_values, 1))?;
+
+    store::define(ruby, native)?;
     Ok(())
 }

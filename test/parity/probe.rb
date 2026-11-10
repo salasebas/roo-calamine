@@ -19,6 +19,13 @@ if ENV.fetch("PARITY_MODE") == "plugin"
       super(*args)
     end
   end)
+
+  Roo::Calamine::Native::Store.singleton_class.prepend(Module.new do
+    define_method(:read) do |*args|
+      counts[:native_readers] += 1
+      super(*args)
+    end
+  end)
 end
 
 Roo::Excelx::SheetDoc.prepend(Module.new do

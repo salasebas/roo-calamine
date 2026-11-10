@@ -24,6 +24,13 @@ module Oracle
     end
   end)
 
+  Roo::Calamine::Native::Store.singleton_class.prepend(Module.new do
+    define_method(:read) do |*args|
+      Oracle.counts[:native_readers] += 1
+      super(*args).tap { |store| Oracle.counts[:lazy_stores] += 1 if store }
+    end
+  end)
+
   BOUNDS = %i[first_row last_row first_column last_column].freeze
   STREAM_OPTIONS = [{}, { pad_cells: true }, { offset: 1 }, { max_rows: 2 },
                     { offset: 1, max_rows: 3, pad_cells: true }].freeze
@@ -137,6 +144,39 @@ module Oracle
     rows.map do |row|
       row.is_a?(Hash) ? row.map { |key, value| [describe_value(key), describe_value(value)] } : row.map { |v| describe_value(v) }
     end
+  end
+
+  LOOKUPS = %i[cell celltype formula excelx_type excelx_value formatted_value excelx_format empty?].freeze
+
+  # Roo::Excelx's single-cell lookups over the bounds and one cell around
+  # them, before anything builds `cells`, then whether `cells`, built after
+  # them, holds the very values the lookups returned. Each step is described
+  # on its own, so an error in one does not hide what the others return.
+  def describe_lookups(workbook)
+    workbook.sheets.map do |sheet|
+      bounds = outcome { BOUNDS.map { |m| workbook.public_send(m, sheet) } }
+      values = {}
+      lookups = keys_around(bounds).map do |key|
+        values[key] = outcome { workbook.cell(*key, sheet) }.last
+        [key, describe_lookup(workbook, sheet, *key)]
+      end
+      kept = outcome do
+        cells = workbook.sheet_for(sheet).cells
+        [values.map { |key, value| value.equal?(cells[key]&.value) }, cells.count { |key, cell| !key.equal?(cell.coordinate) }]
+      end
+      [sheet, bounds, lookups, kept]
+    end
+  end
+
+  # Every [row, column] from one before the bounds to one after them.
+  def keys_around(bounds)
+    first_row, last_row, first_column, last_column = bounds.first == :ok && bounds.last[0] ? bounds.last : [1, 1, 1, 1]
+    ((first_row - 1)..(last_row + 1)).to_a.product(((first_column - 1)..(last_column + 1)).to_a)
+  end
+
+  def describe_lookup(workbook, sheet, row, column)
+    described = LOOKUPS.map { |m| outcome { silence { describe_value(workbook.public_send(m, row, column, sheet)) } } }
+    described << outcome { workbook.font(row, column, sheet)&.then { [_1.bold?, _1.italic?, _1.underline?] } }
   end
 
   NULL = File.open(File::NULL, "w")

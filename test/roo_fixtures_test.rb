@@ -50,5 +50,14 @@ class RooFixturesTest < Minitest::Test
         Oracle.describe_api(Roo::Spreadsheet.open(path))
       end
     end
+
+    define_method("test_lookups_#{slug}") do
+      OPEN_OPTIONS.each do |options|
+        lazy = native_only && !options[:expand_merged_ranges]
+        assert_same_as_roo("#{name} lookups #{options}", native_only:, lazy:) do
+          Oracle.describe_lookups(Roo::Excelx.new(path, options.dup))
+        end
+      end
+    end
   end
 end
