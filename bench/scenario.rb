@@ -63,26 +63,29 @@ def values_scenario(library, path, digest)
   end
 end
 
-def calx_scenario(scenario, path, digest)
-  case scenario
-  when "stream", "values"
-    Calx.each_row(path) { |row| row.each { |value| digest << value(value) } }
-  when "each"
-    Calx.each_row(path) { |row| digest << value(row) }
-  when "parse"
-    header, *rows = Calx.read(path)
-    rows.each { |row| digest << value(header.zip(row).to_h.values) }
-  when "csv"
-    Calx.each_row(path) { |row| digest << row.join(",") }
-  when "cell"
-    rows = Calx.read(path)
-    random = Random.new(1)
-    RANDOM_CELLS.times do
-      row = rows[random.rand(rows.size)]
-      digest << value(row[random.rand(row.size)])
-    end
+def calx_random_cells(path, digest)
+  rows = Calx.read(path)
+  random = Random.new(1)
+  RANDOM_CELLS.times do
+    row = rows[random.rand(rows.size)]
+    digest << value(row[random.rand(row.size)])
   end
 end
+
+def calx_parse(path, digest)
+  header, *rows = Calx.read(path)
+  rows.each { |row| digest << value(header.zip(row).to_h.values) }
+end
+
+CALX_VALUES = ->(path, digest) { Calx.each_row(path) { |row| row.each { |cell_value| digest << value(cell_value) } } }
+CALX_SCENARIOS = {
+  "stream" => CALX_VALUES,
+  "values" => CALX_VALUES,
+  "each" => ->(path, digest) { Calx.each_row(path) { |row| digest << value(row) } },
+  "parse" => method(:calx_parse),
+  "cell" => method(:calx_random_cells),
+  "csv" => ->(path, digest) { Calx.each_row(path) { |row| digest << row.join(",") } }
+}.freeze
 
 # Timed runs only touch each value; `<<` on this sink does nothing.
 class Sink
@@ -94,7 +97,7 @@ GC.start
 digest = DIGESTING ? Digest::SHA256.new : Sink.new
 started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 if library == "calx"
-  calx_scenario(scenario, path, digest)
+  CALX_SCENARIOS.fetch(scenario).call(path, digest)
 elsif scenario == "values"
   values_scenario(library, path, digest)
 else
