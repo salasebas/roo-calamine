@@ -1,8 +1,8 @@
 # roo-calamine
 
 Make [roo](https://github.com/roo-rb/roo) read `.xlsx` and `.xlsm` files
-4–22× faster, with identical results and 4–14× less memory outside
-streaming. Your roo code does not change.
+8–22× faster on large sheets, with identical results and 4–14× less memory
+outside streaming. Your roo code does not change.
 
 ```ruby
 # Gemfile
@@ -32,47 +32,46 @@ without Bundler, `require "roo/calamine"`.
 | Other platforms | the source gem compiles with Rust 1.86 or later |
 | JRuby | installs without Rust and stays inert: roo reads every file itself |
 
-## How it works
+## Benchmarks
 
-roo-calamine prepends `Roo::Excelx::SheetDoc` and replaces the two places
-where roo reads worksheet XML: `#cells` (behind `#cell`, `#row`, `#each`,
-`#parse`, `#to_csv`, …) and `#each_row_streaming`. A Rust extension parses
-the XML with [quick-xml](https://github.com/tafia/quick-xml) on a background
-thread and builds the same `Roo::Excelx::Cell` objects. Under roo 4.0.0 it
-sets each cell's instance variables the way roo's constructors do, without
-running them; cells with a hyperlink, number text that is not plainly written,
-and other roo versions go through roo's own constructors.
+Median of 3 runs on an Apple M5 Pro, Ruby 3.4.12, each run a fresh process
+(5 runs for the small file). A run starts after `require`, so it includes
+opening the workbook. Memory is peak RSS.
 
-Single-cell reads (`#cell`, `#celltype`, `#formula`, `#excelx_type`,
-`#excelx_value`, `#formatted_value`, `#excelx_format`, `#font`, `#empty?`),
-`#row`, `#column`, and `#first_row` … `#last_column` build only the cells
-they read: the extension keeps the parsed sheet in compact native records and
-builds a cell the first time it is read. Anything that needs the whole
-`Sheet#cells` hash (`#each`, `#parse`, `#to_csv`, `#set`, …) builds the rest,
-keeping the cells already handed out. A sheet where some cell would raise, or
-opened with `expand_merged_ranges`, is built whole, as before.
+| File | Scenario | roo | roo + roo-calamine | Speedup | calx (reference) |
+|---|---|---:|---:|---:|---:|
+| 100k rows × 20 mixed columns | `each_row_streaming` | 14.49 s, 119 MB | 0.90 s, 133 MB | 16.2× | 0.58 s, 178 MB |
+| | `parse(headers: true)` | 21.13 s, 3306 MB | 2.16 s, 828 MB | 9.8× | 0.75 s, 283 MB |
+| | `each` | 20.23 s, 3281 MB | 1.83 s, 671 MB | 11.0× | 0.46 s, 178 MB |
+| | 10,000 random `cell(row, col)` | 18.64 s, 3274 MB | 0.86 s, 235 MB | 21.6× | 0.50 s, 249 MB |
+| | values only: `each_row_values` | 14.86 s, 118 MB | 0.79 s, 133 MB | 18.8× | 0.55 s, 178 MB |
+| 100k rows × 10 shared strings | `each_row_streaming` | 5.37 s, 121 MB | 0.41 s, 133 MB | 13.3× | 0.25 s, 113 MB |
+| | `parse(headers: true)` | 6.44 s, 1630 MB | 0.83 s, 397 MB | 7.8× | 0.34 s, 208 MB |
+| | `each` | 5.96 s, 1630 MB | 0.77 s, 322 MB | 7.7× | 0.21 s, 113 MB |
+| | 10,000 random `cell(row, col)` | 5.33 s, 1602 MB | 0.45 s, 160 MB | 11.9× | 0.23 s, 167 MB |
+| | values only: `each_row_values` | 5.21 s, 121 MB | 0.36 s, 166 MB | 14.3× | 0.24 s, 113 MB |
+| 100 rows × 20 mixed columns | `each_row_streaming` | 16.6 ms, 45 MB | 3.4 ms, 41 MB | 4.8× | 0.7 ms, 27 MB |
+| | `parse(headers: true)` | 13.0 ms, 45 MB | 3.8 ms, 41 MB | 3.4× | 0.8 ms, 27 MB |
+| | `each` | 12.7 ms, 45 MB | 4.0 ms, 41 MB | 3.2× | 0.6 ms, 26 MB |
+| | 10,000 random `cell(row, col)` | 19.8 ms, 46 MB | 10.4 ms, 42 MB | 1.9× | 1.5 ms, 27 MB |
+| | values only: `each_row_values` | 16.8 ms, 46 MB | 3.1 ms, 41 MB | 5.4× | 0.7 ms, 27 MB |
 
-Everything else stays roo's code: shared strings, styles, number formats,
-the base date, hyperlinks, comments, images, and every open option. It works with
-`Roo::Spreadsheet.open`, `Roo::Excelx.new`, and IO streams.
+For the values-only rows, plain roo runs the `each_row_streaming(pad_cells:
+true)` code [below](#values-only). Before timing, the benchmark checks that
+roo and roo-calamine read the same values.
 
-It also prepends `Roo::Excelx#parse` and `#each` for calls with options
-(`headers`, `header_search`, header queries, `clean`). They keep roo's header
-handling and build each row's Hash from the `cells` hash. roo builds it with
-one `#cell` call per value instead. `parse` without a block groups the cells
-by row in one pass. `each`, and `parse` with a block, look up each value
-directly, because the block may change the workbook between rows.
+The calx column is [calx](https://github.com/7a6163/calx) 0.1.0, a Rust
+reader built on calamine that skips roo altogether: `Calx.each_row` for the
+streaming, `each`, and values-only rows, and `Calx.read` for the others. It
+shows how fast a reader without roo's rules can go. It is not a drop-in
+replacement: its values follow its own rules (a whole number is an Integer
+whatever the cell's text and format, a date with a time is a local `Time`,
+and there are no roo cells or `Roo::Link`s), and it loads the whole sheet
+before it yields the first row.
 
-On a sheet of 3,000 rows or more, `each` without options, behind
-`each_with_index`, `to_a`, and `parse` without options, reads the rows past
-the first 1,000 from an index built in one pass over the sheet's cells. It
-hands back to roo's lookups once the block calls `set` or `reload`, or
-changes `default_sheet`.
-
-When a sheet uses XML the reader does not reproduce exactly the way Nokogiri
-does (a non-UTF-8 encoding, a DTD, custom entities, or malformed XML), it
-hands the sheet back to roo. A stream that hits such a spot continues in roo
-from the next row.
+```sh
+cd bench && bundle install && bundle exec ruby run.rb # optional: number of runs
+```
 
 ## Values only
 
@@ -144,8 +143,9 @@ Known differences, by design:
 - Code that overrides roo's private cell parsing (`SheetDoc#cell_from_xml`,
   `#extract_cells`, `Cell.cell_class`) is bypassed while the reader is on, and
   so are a `Roo::Excelx` subclass's `#cell` or `#each` inside `parse` and
-  `each` with options, and redefinitions of the single-cell reads above in
-  `Roo::Excelx` or `Roo::Excelx::Sheet` themselves (subclasses work). Under
+  `each` with options, and redefinitions of the single-cell reads (see
+  [How it works](#how-it-works)) in `Roo::Excelx` or `Roo::Excelx::Sheet`
+  themselves (subclasses work). Under
   roo 4.0.0 so is an override of `initialize` on a `Cell` class or on
   `Roo::Excelx::Coordinate`.
 - Reading the whole sheet after a single-cell read or `#last_row` costs about
@@ -156,29 +156,49 @@ Known differences, by design:
   `sheet_for(...).cells` (not through `set`) does not show in later rows.
 - On XML that breaks partway, `each_row_streaming` raises the same
   `Nokogiri::XML::SyntaxError` as roo but yields a few more rows before it.
-- Streaming uses about 10 MB more peak memory.
+- Streaming uses about 15 MB more peak memory.
 
-## Benchmarks
+## How it works
 
-Median of 3 runs on an Apple M5 Pro, Ruby 3.4.12. Memory is peak RSS.
+roo-calamine prepends `Roo::Excelx::SheetDoc` and replaces the two places
+where roo reads worksheet XML: `#cells` (behind `#cell`, `#row`, `#each`,
+`#parse`, `#to_csv`, …) and `#each_row_streaming`. A Rust extension parses
+the XML with [quick-xml](https://github.com/tafia/quick-xml) on a background
+thread and builds the same `Roo::Excelx::Cell` objects. Under roo 4.0.0 it
+sets each cell's instance variables the way roo's constructors do, without
+running them; cells with a hyperlink, number text that is not plainly written,
+and other roo versions go through roo's own constructors.
 
-| File | Scenario | roo | roo-calamine | Speedup |
-|---|---|---:|---:|---:|
-| 100k rows × 20 mixed columns | `each_row_streaming` | 14.51 s, 118 MB | 1.43 s, 132 MB | 10.2× |
-| | `parse(headers: true)` | 23.34 s, 3423 MB | 2.91 s, 839 MB | 8.0× |
-| | 10,000 random `cell(row, col)` | 20.28 s, 3272 MB | 0.91 s, 235 MB | 22.2× |
-| | values only: `each_row_values` | 15.80 s, 118 MB | 0.81 s, 128 MB | 19.5× |
-| 100k rows × 10 shared strings | `each_row_streaming` | 6.18 s, 136 MB | 0.46 s, 131 MB | 13.5× |
-| | `parse(headers: true)` | 6.46 s, 1681 MB | 0.97 s, 396 MB | 6.7× |
-| | 10,000 random `cell(row, col)` | 6.12 s, 1598 MB | 0.47 s, 160 MB | 13.2× |
-| | values only: `each_row_values` | 5.91 s, 120 MB | 0.38 s, 165 MB | 15.5× |
+Single-cell reads (`#cell`, `#celltype`, `#formula`, `#excelx_type`,
+`#excelx_value`, `#formatted_value`, `#excelx_format`, `#font`, `#empty?`),
+`#row`, `#column`, and `#first_row` … `#last_column` build only the cells
+they read: the extension keeps the parsed sheet in compact native records and
+builds a cell the first time it is read. Anything that needs the whole
+`Sheet#cells` hash (`#each`, `#parse`, `#to_csv`, `#set`, …) builds the rest,
+keeping the cells already handed out. A sheet where some cell would raise, or
+opened with `expand_merged_ranges`, is built whole, as before.
 
-For the values-only rows, plain roo runs the `each_row_streaming(pad_cells:
-true)` code above.
+Everything else stays roo's code: shared strings, styles, number formats,
+the base date, hyperlinks, comments, images, and every open option. It works with
+`Roo::Spreadsheet.open`, `Roo::Excelx.new`, and IO streams.
 
-```sh
-cd bench && bundle install && bundle exec ruby run.rb
-```
+It also prepends `Roo::Excelx#parse` and `#each` for calls with options
+(`headers`, `header_search`, header queries, `clean`). They keep roo's header
+handling and build each row's Hash from the `cells` hash. roo builds it with
+one `#cell` call per value instead. `parse` without a block groups the cells
+by row in one pass. `each`, and `parse` with a block, look up each value
+directly, because the block may change the workbook between rows.
+
+On a sheet of 3,000 rows or more, `each` without options, behind
+`each_with_index`, `to_a`, and `parse` without options, reads the rows past
+the first 1,000 from an index built in one pass over the sheet's cells. It
+hands back to roo's lookups once the block calls `set` or `reload`, or
+changes `default_sheet`.
+
+When a sheet uses XML the reader does not reproduce exactly the way Nokogiri
+does (a non-UTF-8 encoding, a DTD, custom entities, or malformed XML), it
+hands the sheet back to roo. A stream that hits such a spot continues in roo
+from the next row.
 
 ## Development
 

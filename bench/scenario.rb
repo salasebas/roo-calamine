@@ -34,19 +34,22 @@ def value(object)
   DIGESTING ? object.inspect : object
 end
 
+def random_cells(workbook, digest)
+  random = Random.new(1)
+  rows = workbook.last_row
+  columns = workbook.last_column
+  RANDOM_CELLS.times { digest << value(workbook.cell(random.rand(1..rows), random.rand(1..columns))) }
+end
+
+ROO_SCENARIOS = {
+  "stream" => ->(workbook, digest) { workbook.each_row_streaming { |row| row.each { digest << value(_1&.value) } } },
+  "parse" => ->(workbook, digest) { workbook.parse(headers: true).each { |row| digest << value(row.values) } },
+  "each" => ->(workbook, digest) { workbook.each { |row| digest << value(row) } },
+  "cell" => method(:random_cells)
+}.freeze
+
 def roo_scenario(scenario, path, digest)
-  workbook = Roo::Spreadsheet.open(path)
-  case scenario
-  when "stream"
-    workbook.each_row_streaming { |row| row.each { |cell| digest << value(cell&.value) } }
-  when "parse"
-    workbook.parse(headers: true).each { |row| digest << value(row.values) }
-  when "cell"
-    random = Random.new(1)
-    rows = workbook.last_row
-    columns = workbook.last_column
-    RANDOM_CELLS.times { digest << value(workbook.cell(random.rand(1..rows), random.rand(1..columns))) }
-  end
+  ROO_SCENARIOS.fetch(scenario).call(Roo::Spreadsheet.open(path), digest)
 end
 
 def values_scenario(library, path, digest)
@@ -63,6 +66,8 @@ def calx_scenario(scenario, path, digest)
   case scenario
   when "stream", "values"
     Calx.each_row(path) { |row| row.each { |value| digest << value(value) } }
+  when "each"
+    Calx.each_row(path) { |row| digest << value(row) }
   when "parse"
     header, *rows = Calx.read(path)
     rows.each { |row| digest << value(header.zip(row).to_h.values) }
