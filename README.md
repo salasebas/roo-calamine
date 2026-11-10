@@ -45,6 +45,13 @@ Everything else stays roo's code: shared strings, styles, number formats,
 dates, hyperlinks, comments, images, and every open option. It works with
 `Roo::Spreadsheet.open`, `Roo::Excelx.new`, and IO streams.
 
+It also prepends `Roo::Excelx#parse` and `#each` for calls with options
+(`headers`, `header_search`, header queries, `clean`). They keep roo's header
+handling and build each row's Hash from the `cells` hash. roo builds it with
+one `#cell` call per value instead. `parse` without a block groups the cells
+by row in one pass. `each`, and `parse` with a block, look up each value
+directly, because the block may change the workbook between rows.
+
 When a sheet uses XML the reader does not reproduce exactly the way Nokogiri
 does (a non-UTF-8 encoding, a DTD, custom entities, or malformed XML), it
 hands the sheet back to roo. A stream that hits such a spot continues in roo
@@ -103,10 +110,12 @@ roo is the oracle: every check takes roo's own output as the expected result.
 - **Every roo fixture.** `test/roo_fixtures_test.rb` compares all 84
   `.xlsx`/`.xlsm` files in roo's `test/files` cell by cell (class, value,
   type, formatted value, every instance variable) across open options,
-  streaming options, and the `Roo::Base` API.
+  streaming options, and the `Roo::Base` API, including `parse` and `each`
+  under nine option sets, with and without a block.
 - **Edge cases.** `test/edge_cases_test.rb` pins roo's answer for Integer vs
   Float, dates and the 1904 system, merged ranges, rich text, inline strings,
-  shared formulas, error cells, namespaces, and more.
+  shared formulas, error cells, namespaces, `parse` and `each` after `set`
+  or with a block that changes the workbook, and more.
 - **Values only.** Both suites also compare `Roo::Calamine.each_row_values`
   with the values of roo's `each_row_streaming(pad_cells: true)`, with the
   native reader on and off.
@@ -114,7 +123,9 @@ roo is the oracle: every check takes roo's own output as the expected result.
 Known differences, by design:
 
 - Code that overrides roo's private cell parsing (`SheetDoc#cell_from_xml`,
-  `#extract_cells`, `Cell.cell_class`) is bypassed while the reader is on.
+  `#extract_cells`, `Cell.cell_class`) is bypassed while the reader is on, and
+  so is a `Roo::Excelx` subclass's `#cell` or `#each` inside `parse` and
+  `each` with options.
 - On XML that breaks partway, `each_row_streaming` raises the same
   `Nokogiri::XML::SyntaxError` as roo but yields a few more rows before it.
 - Streaming uses about 10 MB more peak memory.
@@ -125,14 +136,14 @@ Median of 3 runs on an Apple M5 Pro, Ruby 3.4.9. Memory is peak RSS.
 
 | File | Scenario | roo | roo-calamine | Speedup |
 |---|---|---:|---:|---:|
-| 100k rows × 20 mixed columns | `each_row_streaming` | 15.46 s, 122 MB | 1.37 s, 133 MB | 11.3× |
-| | `parse(headers: true)` | 24.42 s, 3295 MB | 3.87 s, 861 MB | 6.3× |
-| | 10,000 random `cell(row, col)` | 19.86 s, 3276 MB | 2.16 s, 673 MB | 9.2× |
-| | values only: `each_row_values` | 16.46 s, 119 MB | 0.78 s, 143 MB | 21.0× |
-| 100k rows × 10 shared strings | `each_row_streaming` | 5.65 s, 123 MB | 0.46 s, 131 MB | 12.4× |
-| | `parse(headers: true)` | 6.49 s, 1680 MB | 1.45 s, 390 MB | 4.5× |
-| | 10,000 random `cell(row, col)` | 5.35 s, 1592 MB | 0.70 s, 306 MB | 7.6× |
-| | values only: `each_row_values` | 6.02 s, 124 MB | 0.39 s, 166 MB | 15.6× |
+| 100k rows × 20 mixed columns | `each_row_streaming` | 16.16 s, 119 MB | 1.41 s, 132 MB | 11.5× |
+| | `parse(headers: true)` | 23.66 s, 3312 MB | 2.96 s, 844 MB | 8.0× |
+| | 10,000 random `cell(row, col)` | 21.01 s, 3287 MB | 2.03 s, 670 MB | 10.4× |
+| | values only: `each_row_values` | 15.56 s, 123 MB | 0.81 s, 130 MB | 19.2× |
+| 100k rows × 10 shared strings | `each_row_streaming` | 5.83 s, 146 MB | 0.47 s, 151 MB | 12.4× |
+| | `parse(headers: true)` | 7.64 s, 1633 MB | 1.07 s, 416 MB | 7.1× |
+| | 10,000 random `cell(row, col)` | 6.11 s, 1637 MB | 0.76 s, 316 MB | 8.0× |
+| | values only: `each_row_values` | 5.86 s, 126 MB | 0.38 s, 165 MB | 15.4× |
 
 For the values-only rows, plain roo runs the `each_row_streaming(pad_cells:
 true)` code above.
