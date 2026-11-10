@@ -1,0 +1,11 @@
+rules:
+  # GitHub accepts `uses: $/...` since July 2026, but actionlint 1.7.12, which
+  # the lint job also runs, rejects it. Revisit when actionlint supports it.
+  self-repository:
+    disable: true
+  # These workflows `gem install` the gem the run just built, the way users
+  # install it; that is the step under test.
+  adhoc-packages:
+    ignore:
+      - build-gems.yml
+      - lint-and-specs.yml

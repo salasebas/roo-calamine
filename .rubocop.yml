@@ -39,6 +39,7 @@ Layout/LineLength:
   Max: 120
   Exclude:
     - "test/**/*"
+    - "script/smoke.rb"
 
 Minitest/MultipleAssertions:
   Max: 6
@@ -46,6 +47,7 @@ Minitest/MultipleAssertions:
 Style/StringConcatenation:
   Exclude:
     - "test/**/*"
+    - "script/smoke.rb"
 
 Metrics/ParameterLists:
   CountKeywordArgs: false

@@ -1,0 +1,184 @@
+---
+name: build-gems
+
+# Builds the source gem and every precompiled platform gem, checks their
+# contents, and installs each platform gem the way users do, without Rust.
+# ci.yml calls it on pull requests (a dry run of the release build) and
+# release.yml calls it before publishing.
+#
+# Adapted from the build-gems.yml workflow of 7a6163/calx
+# (https://github.com/7a6163/calx), Copyright (c) 2026 Zac, MIT License.
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to build; the triggering ref by default
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  # rake-compiler builds one extension per Ruby minor version into each
+  # platform gem, matching required_ruby_version and the test matrix.
+  RUBY_VERSIONS: "3.3,3.4,4.0"
+
+jobs:
+  source-gem:
+    name: source-gem
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@b3aaceaef7e0ee231b499e7b5f49c03fc1d32199 # v1.338.0
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+
+      - name: Build the source gem
+        run: bundle exec rake build
+
+      - name: Check the source gem
+        run: ruby script/check_gem.rb pkg/roo-calamine-*.gem ruby
+
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gem-ruby
+          path: pkg/*.gem
+          if-no-files-found: error
+
+  cross-gem:
+    name: cross-gem (${{ matrix.platform }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - x86_64-linux
+          - aarch64-linux
+          - x86_64-linux-musl
+          - aarch64-linux-musl
+          - x86_64-darwin
+          - arm64-darwin
+          - x64-mingw-ucrt
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@b3aaceaef7e0ee231b499e7b5f49c03fc1d32199 # v1.338.0
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+
+      - name: Cross-compile
+        id: cross-gem
+        uses: oxidize-rb/actions/cross-gem@ec90b4aa48795518d79be3f5cc478d1d7ccd02a8 # v1.5.0
+        with:
+          platform: ${{ matrix.platform }}
+          ruby-versions: ${{ env.RUBY_VERSIONS }}
+
+      - name: Check the platform gem
+        env:
+          GEM_PATH_OUT: ${{ steps.cross-gem.outputs.gem-path }}
+          PLATFORM: ${{ matrix.platform }}
+        run: ruby script/check_gem.rb "$GEM_PATH_OUT" "$PLATFORM" "$RUBY_VERSIONS"
+
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gem-${{ matrix.platform }}
+          path: ${{ steps.cross-gem.outputs.gem-path }}
+          if-no-files-found: error
+
+  install:
+    name: install (${{ matrix.target.platform }}, ruby ${{ matrix.ruby }})
+    needs: cross-gem
+    runs-on: ${{ matrix.target.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - {os: ubuntu-latest, platform: x86_64-linux}
+          - {os: ubuntu-24.04-arm, platform: aarch64-linux}
+          - {os: macos-latest, platform: arm64-darwin}
+          - {os: macos-15-intel, platform: x86_64-darwin}
+          - {os: windows-latest, platform: x64-mingw-ucrt}
+        ruby: ["3.3", "3.4", "4.0"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+          sparse-checkout: script
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@b3aaceaef7e0ee231b499e7b5f49c03fc1d32199 # v1.338.0
+        with:
+          ruby-version: ${{ matrix.ruby }}
+
+      - name: Download
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gem-${{ matrix.target.platform }}
+          path: pkg
+
+      - name: Install without Rust and read a workbook natively
+        shell: bash
+        run: |
+          # Hide any Rust toolchain on the runner: the gem must not need one.
+          export PATH
+          PATH="$(echo "$PATH" | tr ':' '\n' | grep -v -i -e cargo -e rust | paste -sd: -)"
+          if command -v cargo; then echo "::error::cargo is still on PATH"; exit 1; fi
+          gem install pkg/*.gem --no-document
+          ruby script/smoke.rb
+
+  install-musl:
+    name: install (${{ matrix.target.platform }}, ruby ${{ matrix.ruby }}, Alpine)
+    needs: cross-gem
+    runs-on: ${{ matrix.target.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - {os: ubuntu-latest, platform: x86_64-linux-musl}
+          - {os: ubuntu-24.04-arm, platform: aarch64-linux-musl}
+        ruby: ["3.3", "3.4", "4.0"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+          sparse-checkout: script
+
+      - name: Download
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gem-${{ matrix.target.platform }}
+          path: pkg
+
+      # docker run rather than a job container: JavaScript actions do not run
+      # in Alpine containers.
+      - name: Install in the official Alpine Ruby image and read a workbook natively
+        env:
+          RUBY_IMAGE: ruby:${{ matrix.ruby }}-alpine
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work "$RUBY_IMAGE" sh -c \
+            'gem install pkg/*.gem --no-document && ruby script/smoke.rb'

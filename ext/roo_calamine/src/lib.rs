@@ -1,17 +1,16 @@
 //! Native fast path for `roo-calamine`.
 //!
 //! [`reader`] turns worksheet XML into raw cell records without touching Ruby,
-//! with the GVL released. [`convert`] turns those records into roo's cells.
+//! on a thread of its own. [`convert`] turns those records into roo's cells.
 
 pub mod convert;
 pub mod reader;
 
-use std::cell::{Cell as StdCell, RefCell};
+use std::cell::Cell as StdCell;
 use std::ffi::c_void;
-use std::fs::File;
-use std::io::BufReader;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 use magnus::value::Lazy;
 use magnus::{function, method, prelude::*, Error, ExceptionClass, RArray, RHash, Ruby};
@@ -70,40 +69,84 @@ impl Row {
     }
 }
 
+type Batch = Result<Vec<RawRow>, Unsupported>;
+
+/// Reads a worksheet on its own thread, one batch ahead of Ruby: while Ruby
+/// turns one batch into cells, the thread parses the next, without the GVL.
+/// Ruby releases the GVL only when it has to wait for a batch, so a busy Ruby
+/// thread elsewhere does not slow every batch down.
 #[magnus::wrap(class = "Roo::Calamine::Native::Reader", free_immediately, size)]
 struct Reader {
-    sheet: RefCell<SheetReader<BufReader<File>>>,
+    batches: Receiver<Batch>,
+    /// Set while a Ruby thread waits on `batches` without the GVL; the
+    /// receiver must not be used from two threads at once.
+    in_use: StdCell<bool>,
+    done: StdCell<bool>,
     rows_read: StdCell<usize>,
 }
 
 impl Reader {
-    fn new(ruby: &Ruby, path: String, stream: bool) -> Result<Self, Error> {
+    /// `batch` is the number of cells parsed per batch.
+    fn new(ruby: &Ruby, path: String, stream: bool, batch: usize) -> Result<Self, Error> {
         let mode = if stream { Mode::Stream } else { Mode::Document };
-        let sheet = SheetReader::open(Path::new(&path), mode).map_err(|e| unsupported(ruby, e))?;
+        let mut sheet =
+            SheetReader::open(Path::new(&path), mode).map_err(|e| unsupported(ruby, e))?;
+        let (sender, batches) = mpsc::sync_channel::<Batch>(1);
+        std::thread::Builder::new()
+            .name("roo-calamine".into())
+            .spawn(move || loop {
+                let rows = sheet.next_rows(batch);
+                let last = !matches!(&rows, Ok(rows) if !rows.is_empty());
+                // A send fails once the Reader is garbage collected.
+                if sender.send(rows).is_err() || last {
+                    return;
+                }
+            })
+            .map_err(|e| Error::new(ruby.exception_runtime_error(), e.to_string()))?;
         Ok(Self {
-            sheet: RefCell::new(sheet),
+            batches,
+            in_use: StdCell::new(false),
+            done: StdCell::new(false),
             rows_read: StdCell::new(0),
         })
     }
 
-    fn read_batch(&self, ruby: &Ruby, cells: usize) -> Result<Vec<RawRow>, Error> {
-        let mut sheet = self
-            .sheet
-            .try_borrow_mut()
-            .map_err(|_| Error::new(ruby.exception_runtime_error(), "reader is already in use"))?;
-        without_gvl(|| sheet.next_rows(cells)).map_err(|e| unsupported(ruby, e))
+    fn read_batch(&self, ruby: &Ruby) -> Result<Vec<RawRow>, Error> {
+        if self.done.get() {
+            return Ok(Vec::new());
+        }
+        if self.in_use.replace(true) {
+            return Err(Error::new(
+                ruby.exception_runtime_error(),
+                "reader is already in use",
+            ));
+        }
+        let received = match self.batches.try_recv() {
+            Ok(batch) => Ok(batch),
+            Err(TryRecvError::Empty) => {
+                without_gvl(|| self.batches.recv()).map_err(|_| TryRecvError::Disconnected)
+            }
+            Err(error) => Err(error),
+        };
+        self.in_use.set(false);
+        let rows = received
+            .map_err(|_| unsupported(ruby, Unsupported("the reader thread stopped".into())))?
+            .map_err(|e| unsupported(ruby, e))?;
+        if rows.is_empty() {
+            self.done.set(true);
+        }
+        Ok(rows)
     }
 
-    /// Document mode: adds the next rows, about `batch` cells, to `cells`.
-    /// Returns `false` once the sheet is exhausted.
+    /// Document mode: adds the next batch of rows to `cells`. Returns `false`
+    /// once the sheet is exhausted.
     fn fill_cells(
         ruby: &Ruby,
         rb_self: &Self,
         cells: RHash,
         converter: &Converter,
-        batch: usize,
     ) -> Result<bool, Error> {
-        let rows = rb_self.read_batch(ruby, batch)?;
+        let rows = rb_self.read_batch(ruby)?;
         for row in &rows {
             let row_number = rb_self.rows_read.get() + 1;
             rb_self.rows_read.set(row_number);
@@ -112,9 +155,9 @@ impl Reader {
         Ok(!rows.is_empty())
     }
 
-    /// Stream mode: the next rows, about `batch` cells, or `nil` at the end.
-    fn next_rows(ruby: &Ruby, rb_self: &Self, batch: usize) -> Result<Option<RArray>, Error> {
-        let rows = rb_self.read_batch(ruby, batch)?;
+    /// Stream mode: the next batch of rows, or `nil` at the end of the sheet.
+    fn next_rows(ruby: &Ruby, rb_self: &Self) -> Result<Option<RArray>, Error> {
+        let rows = rb_self.read_batch(ruby)?;
         if rows.is_empty() {
             return Ok(None);
         }
@@ -134,9 +177,9 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         .define_module("Native")?;
 
     let reader = native.define_class("Reader", ruby.class_object())?;
-    reader.define_singleton_method("new", function!(Reader::new, 2))?;
-    reader.define_method("fill_cells", method!(Reader::fill_cells, 3))?;
-    reader.define_method("next_rows", method!(Reader::next_rows, 1))?;
+    reader.define_singleton_method("new", function!(Reader::new, 3))?;
+    reader.define_method("fill_cells", method!(Reader::fill_cells, 2))?;
+    reader.define_method("next_rows", method!(Reader::next_rows, 0))?;
 
     native.define_class("Row", ruby.class_object())?;
 

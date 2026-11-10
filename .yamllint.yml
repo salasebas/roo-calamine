@@ -1,0 +1,23 @@
+---
+# The defaults flag GitHub Actions' `on:` key as a truthy value and enforce
+# an 80-column limit that workflow syntax routinely exceeds. Relax both.
+extends: default
+
+rules:
+  truthy:
+    allowed-values: ["true", "false"]
+    check-keys: false
+  line-length:
+    max: 200
+    level: warning
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: disable
+  document-start: disable
+
+ignore: |
+  /tmp/
+  /target/
+  /vendor/
+  /.bundle/
+  /pkg/

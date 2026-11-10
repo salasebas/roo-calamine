@@ -1,0 +1,91 @@
+---
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # Pull requests cancel superseded runs; pushes to main and manual runs
+  # always finish, so every commit on main is fully validated.
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      gems: ${{ steps.detect.outputs.gems }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The platform gem build takes the longest. Pull requests run it when
+      # they touch what goes into a gem or how it is built; pushes to main,
+      # manual runs, and release pull requests always run it.
+      - name: Detect changes that affect the gems
+        id: detect
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "gems=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "$BASE_SHA" "$HEAD_SHA" |
+            grep -E '^(ext/|lib/|script/|Cargo\.(toml|lock)$|Gemfile$|Rakefile$|roo-calamine\.gemspec$|\.ruby-version$|\.github/workflows/)'; then
+            echo "gems=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "gems=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  lint-and-specs:
+    name: lint-and-specs
+    uses: ./.github/workflows/lint-and-specs.yml
+
+  build-gems:
+    name: build-gems
+    needs: changes
+    if: needs.changes.outputs.gems == 'true'
+    uses: ./.github/workflows/build-gems.yml
+
+  ci-done:
+    name: ci-done
+    needs: [changes, lint-and-specs, build-gems]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Report result
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          LINT_AND_SPECS: ${{ needs.lint-and-specs.result }}
+          BUILD_GEMS: ${{ needs.build-gems.result }}
+          GEMS: ${{ needs.changes.outputs.gems }}
+        run: |
+          echo "changes=${CHANGES} lint-and-specs=${LINT_AND_SPECS} build-gems=${BUILD_GEMS} (gems=${GEMS})"
+          if [ "$CHANGES" != "success" ] || [ "$LINT_AND_SPECS" != "success" ]; then
+            echo "::error::a required job did not succeed"
+            exit 1
+          fi
+          if [ "$GEMS" = "true" ] && [ "$BUILD_GEMS" != "success" ]; then
+            echo "::error::build-gems did not succeed (${BUILD_GEMS})"
+            exit 1
+          fi
+          if [ "$GEMS" != "true" ] && [ "$BUILD_GEMS" != "skipped" ]; then
+            echo "::error::build-gems ended as ${BUILD_GEMS} although it was not needed"
+            exit 1
+          fi
+          echo "ci-done: all required jobs succeeded"
