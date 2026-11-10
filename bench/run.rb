@@ -1,12 +1,13 @@
 # frozen_string_literal: true
 
-# Compares plain roo, roo with roo-calamine, and calx (as a reference for a
-# reader that skips roo's cell model) on generated workbooks.
+# Compares plain roo, roo with roo-calamine, and calx (a reader that skips
+# roo's cell model, as a reference) on generated workbooks.
 #
 #   cd bench && bundle install && bundle exec ruby run.rb [RUNS]
 #
 # Each run is a fresh process. The table shows the median wall time and peak
-# RSS of RUNS runs (default 3). roo and roo-calamine must read the same values.
+# RSS of RUNS timed runs (default 3). Before timing, one run of roo and one of
+# roo-calamine hash every value they read; the two hashes must match.
 require "etc"
 require "json"
 require "open3"
@@ -19,47 +20,46 @@ SCENARIOS = {
   "parse" => "`parse(headers: true)`",
   "cell" => "10,000 random `cell(row, col)`"
 }.freeze
+COMPARED = %w[roo roo-calamine].freeze
 FIXTURES = %w[mixed-100k.xlsx shared-strings-100k.xlsx small.xlsx].freeze
+MB = 1024 * 1024
 
 system(RbConfig.ruby, File.join(__dir__, "generate.rb"), exception: true)
 
-def run(library, scenario, path)
-  results = Array.new(RUNS) do
-    out, status = Open3.capture2(RbConfig.ruby, File.join(__dir__, "scenario.rb"), library, scenario, path)
-    raise "#{library} #{scenario} #{path} failed" unless status.success?
+def scenario(*args)
+  out, status = Open3.capture2(RbConfig.ruby, File.join(__dir__, "scenario.rb"), *args)
+  raise "scenario.rb #{args.join(" ")} failed" unless status.success?
 
-    JSON.parse(out.lines.last)
-  end
-  digests = results.map { |r| r["digest"] }.uniq
-  raise "#{library} #{scenario} read different values across runs" unless digests.size == 1
+  JSON.parse(out.lines.last)
+end
 
+def timed(library, name, path)
+  results = Array.new(RUNS) { scenario(library, name, path) }
   median = ->(key) { results.map { |r| r[key] }.sort[RUNS / 2] }
-  { seconds: median.call("seconds"), peak_rss: median.call("peak_rss"), digest: digests.first }
+  { seconds: median.call("seconds"), peak_rss: median.call("peak_rss") }
 end
 
 def cpu
-  if RUBY_PLATFORM.include?("darwin")
-    `sysctl -n machdep.cpu.brand_string`.strip
-  else
-    File.read("/proc/cpuinfo")[/model name\s*:\s*(.+)/, 1]
-  end
+  return `sysctl -n machdep.cpu.brand_string`.strip if RUBY_PLATFORM.include?("darwin")
+
+  File.read("/proc/cpuinfo")[/model name\s*:\s*(.+)/, 1]
+end
+
+def describe(result)
+  format("%<seconds>.2f s, %<mb>d MB", seconds: result[:seconds], mb: result[:peak_rss] / MB)
 end
 
 puts "Ruby #{RUBY_VERSION} (#{RUBY_PLATFORM}), #{`uname -sr`.strip}, #{cpu}, #{Etc.nprocessors} cores, " \
-     "median of #{RUNS} runs\n\n"
-puts "| File | Scenario | roo | roo + roo-calamine | speedup | calx (reference) |"
-puts "|---|---|---:|---:|---:|---:|"
+     "median of #{RUNS} runs", ""
+puts "| File | Scenario | roo | roo + roo-calamine | Speedup | calx (reference) |", "|---|---|---:|---:|---:|---:|"
 FIXTURES.each do |fixture|
   path = File.join(__dir__, "fixtures", fixture)
-  SCENARIOS.each do |scenario, label|
-    results = LIBRARIES.to_h { |library| [library, run(library, scenario, path)] }
-    unless results["roo"][:digest] == results["roo-calamine"][:digest]
-      raise "roo-calamine read different values than roo: #{fixture} #{scenario}"
-    end
+  SCENARIOS.each do |name, label|
+    digests = COMPARED.map { |library| scenario(library, name, path, "digest")["digest"] }
+    raise "roo-calamine read different values than roo: #{fixture} #{name}" unless digests.uniq.size == 1
 
-    cell = ->(r) { format("%.2f s, %d MB", r[:seconds], r[:peak_rss] / 1_048_576) }
-    speedup = results["roo"][:seconds] / results["roo-calamine"][:seconds]
-    puts "| #{fixture} | #{label} | #{cell.call(results['roo'])} | #{cell.call(results['roo-calamine'])} | " \
-         "#{format('%.1f×', speedup)} | #{cell.call(results['calx'])} |"
+    roo, calamine, calx = LIBRARIES.map { |library| timed(library, name, path) }
+    speedup = format("%.1f×", roo[:seconds] / calamine[:seconds])
+    puts "| #{fixture} | #{label} | #{describe(roo)} | #{describe(calamine)} | #{speedup} | #{describe(calx)} |"
   end
 end

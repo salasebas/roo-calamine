@@ -211,17 +211,22 @@ impl<R: BufRead> SheetReader<R> {
         }
     }
 
-    /// Reads up to `limit` rows. An empty vector means the sheet is done. When
-    /// an error stops a batch, the rows before it are returned first and the
-    /// error on the next call.
-    pub fn next_rows(&mut self, limit: usize) -> Result<Vec<RawRow>> {
+    /// Reads rows until they hold about `cells` cells (an empty row counts as
+    /// one). An empty vector means the sheet is done. When an error stops a
+    /// batch, the rows before it are returned first and the error on the next
+    /// call.
+    pub fn next_rows(&mut self, cells: usize) -> Result<Vec<RawRow>> {
         if let Some(error) = self.pending_error.take() {
             return Err(error);
         }
-        let mut rows = Vec::with_capacity(limit.min(1024));
-        while rows.len() < limit {
+        let mut rows = Vec::new();
+        let mut read = 0;
+        while read < cells {
             match self.next_row() {
-                Ok(Some(row)) => rows.push(row),
+                Ok(Some(row)) => {
+                    read += row.cells.len().max(1);
+                    rows.push(row);
+                }
                 Ok(None) => break,
                 Err(error) if rows.is_empty() => return Err(error),
                 Err(error) => {
@@ -692,6 +697,16 @@ mod tests {
         assert_eq!(reader.next_rows(2).unwrap().len(), 2);
         assert_eq!(reader.next_rows(2).unwrap().len(), 1);
         assert!(reader.next_rows(2).unwrap().is_empty());
+
+        let xml = format!(
+            "<worksheet {NS}><sheetData><row><c/><c/><c/></row><row><c/></row></sheetData></worksheet>"
+        );
+        let mut reader = SheetReader::new(xml.as_bytes(), Mode::Document);
+        assert_eq!(
+            reader.next_rows(2).unwrap().len(),
+            1,
+            "a batch ends once it holds enough cells"
+        );
     }
 
     #[test]

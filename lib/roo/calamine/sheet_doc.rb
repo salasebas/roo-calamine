@@ -7,8 +7,10 @@ module Roo
     # Sheet#each_row (#each_row_streaming). Everything else, including roo's
     # padding, offset, and row limits, stays roo's code.
     module SheetDoc
-      DOCUMENT_BATCH_ROWS = 1024
-      STREAM_BATCH_ROWS = 128
+      # Cells parsed per call into the extension, with the GVL released. Fewer,
+      # larger batches mean fewer GVL handoffs, each of which can wait a full
+      # thread time slice when another Ruby thread is busy.
+      BATCH_CELLS = 65_536
 
       def cells(relationships)
         return super if @cells || !@path || !Calamine.enabled?
@@ -16,7 +18,7 @@ module Roo
         cells = {}
         reader = Native::Reader.new(@path, false)
         converter = Native::Converter.new(Context.new(@shared, hyperlinks(relationships), @options[:empty_cell]), false)
-        nil while reader.fill_cells(cells, converter, DOCUMENT_BATCH_ROWS)
+        nil while reader.fill_cells(cells, converter, BATCH_CELLS)
         expand_merged_ranges(cells) if @options[:expand_merged_ranges]
         @cells = cells
       rescue UnsupportedError
@@ -30,7 +32,7 @@ module Roo
 
         yielded = 0
         reader = Native::Reader.new(@path, true)
-        while (rows = reader.next_rows(STREAM_BATCH_ROWS))
+        while (rows = reader.next_rows(BATCH_CELLS))
           rows.each do |row|
             yield row
             yielded += 1

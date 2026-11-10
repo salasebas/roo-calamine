@@ -86,24 +86,24 @@ impl Reader {
         })
     }
 
-    fn read_batch(&self, ruby: &Ruby, limit: usize) -> Result<Vec<RawRow>, Error> {
+    fn read_batch(&self, ruby: &Ruby, cells: usize) -> Result<Vec<RawRow>, Error> {
         let mut sheet = self
             .sheet
             .try_borrow_mut()
             .map_err(|_| Error::new(ruby.exception_runtime_error(), "reader is already in use"))?;
-        without_gvl(|| sheet.next_rows(limit)).map_err(|e| unsupported(ruby, e))
+        without_gvl(|| sheet.next_rows(cells)).map_err(|e| unsupported(ruby, e))
     }
 
-    /// Document mode: adds the cells of up to `limit` rows to `cells`.
+    /// Document mode: adds the next rows, about `batch` cells, to `cells`.
     /// Returns `false` once the sheet is exhausted.
     fn fill_cells(
         ruby: &Ruby,
         rb_self: &Self,
         cells: RHash,
         converter: &Converter,
-        limit: usize,
+        batch: usize,
     ) -> Result<bool, Error> {
-        let rows = rb_self.read_batch(ruby, limit)?;
+        let rows = rb_self.read_batch(ruby, batch)?;
         for row in &rows {
             let row_number = rb_self.rows_read.get() + 1;
             rb_self.rows_read.set(row_number);
@@ -112,9 +112,9 @@ impl Reader {
         Ok(!rows.is_empty())
     }
 
-    /// Stream mode: the next `limit` rows, or `nil` at the end of the sheet.
-    fn next_rows(ruby: &Ruby, rb_self: &Self, limit: usize) -> Result<Option<RArray>, Error> {
-        let rows = rb_self.read_batch(ruby, limit)?;
+    /// Stream mode: the next rows, about `batch` cells, or `nil` at the end.
+    fn next_rows(ruby: &Ruby, rb_self: &Self, batch: usize) -> Result<Option<RArray>, Error> {
+        let rows = rb_self.read_batch(ruby, batch)?;
         if rows.is_empty() {
             return Ok(None);
         }
