@@ -61,6 +61,12 @@ one `#cell` call per value instead. `parse` without a block groups the cells
 by row in one pass. `each`, and `parse` with a block, look up each value
 directly, because the block may change the workbook between rows.
 
+On a sheet of 3,000 rows or more, `each` without options, behind
+`each_with_index`, `to_a`, and `parse` without options, reads the rows past
+the first 1,000 from an index built in one pass over the sheet's cells. It
+hands back to roo's lookups once the block calls `set` or `reload`, or
+changes `default_sheet`.
+
 When a sheet uses XML the reader does not reproduce exactly the way Nokogiri
 does (a non-UTF-8 encoding, a DTD, custom entities, or malformed XML), it
 hands the sheet back to roo. A stream that hits such a spot continues in roo
@@ -140,6 +146,8 @@ Known differences, by design:
   10–25% more than reading it whole from the start, because the sheet is parsed
   before any cell is built rather than alongside. `#each` and `#parse` build
   the whole sheet first, so they are not affected.
+- Inside an `each` block without options, a write straight into
+  `sheet_for(...).cells` (not through `set`) does not show in later rows.
 - On XML that breaks partway, `each_row_streaming` raises the same
   `Nokogiri::XML::SyntaxError` as roo but yields a few more rows before it.
 - Streaming uses about 10 MB more peak memory.

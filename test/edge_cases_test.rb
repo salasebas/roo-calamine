@@ -371,14 +371,14 @@ class EdgeCasesTest < Minitest::Test
     Workbook.write(@dir, "book", sheets: { "One" => one, "Two" => two })
   end
 
-  # The rows each(headers: true) yields, calling `change` after each one with
-  # the workbook and how many rows it yielded.
-  def each_with_change(path, change)
+  # The rows each(options) yields, calling `change` after each one with the
+  # workbook and how many rows it yielded.
+  def each_with_change(path, change, options = { headers: true })
     xlsx = Roo::Excelx.new(path)
     seen = []
     # Roo::Excelx#set warns that the Cell it builds is deprecated.
     Oracle.silence do
-      xlsx.each(headers: true) do |row|
+      xlsx.each(options) do |row|
         seen << row
         change.call(xlsx, seen.size)
       end
@@ -400,6 +400,88 @@ class EdgeCasesTest < Minitest::Test
     scenarios.each do |name, change|
       assert_same_as_roo(name) { Oracle.describe_rows(each_with_change(path, change)) }
     end
+  end
+
+  # Without options, the tests' row index answers from the second row on.
+  def test_each_without_options_follows_changes_made_by_its_block
+    path = write_header_book
+    scenarios = {
+      set_before_the_index: ->(xlsx, n) { xlsx.set(4, 2, 99) if n == 1 },
+      set_after_the_index: ->(xlsx, n) { xlsx.set(4, 2, 99) if n == 2 },
+      switch_sheets: ->(xlsx, n) { xlsx.default_sheet = "Two" if n == 2 },
+      reload: ->(xlsx, n) { xlsx.reload if n == 2 }
+    }
+    roo, = Oracle.read(native: false) { each_with_change(path, scenarios[:set_after_the_index], {}) }
+
+    assert_equal 99, roo.dig(1, 3, 1)
+    scenarios.each do |name, change|
+      assert_same_as_roo(name) { Oracle.describe_rows(each_with_change(path, change, {})) }
+    end
+  end
+
+  def test_each_without_options_on_blank_sparse_and_empty_sheets
+    sheets = {
+      # An empty string is no value for the bounds, but #each still yields it.
+      "Blank first" => Workbook.sheet(%(<row r="1"><c r="A1" t="str"><v></v></c></row><row r="2"><c r="A2"><v>1</v></c></row>)),
+      # Too sparse to lay out by row: roo's own lookups answer.
+      "Sparse" => Workbook.sheet((1..50).map { |i| %(<row r="#{i}"><c r="A#{i}"><v>#{i}</v></c></row>) }.join +
+                                 %(<row r="51"><c r="XFD51"><v>0</v></c></row>)),
+      "Empty" => Workbook.sheet("")
+    }
+    path = Workbook.write(@dir, "book", sheets:)
+
+    assert_every_path_same_as_roo(path)
+    # Switched before the index is built, so it would be built for a sheet
+    # without bounds.
+    assert_same_as_roo("switch to an empty sheet") do
+      Oracle.describe_rows(each_with_change(path, ->(xlsx, n) { xlsx.default_sheet = "Empty" if n == 1 }, {}))
+    end
+  end
+
+  def test_each_without_options_reads_rows_from_the_index
+    rows = (1..5).map { |i| %(<row r="#{i}"><c r="A#{i}"><v>#{i}</v></c><c r="B#{i}"><v>#{i}</v></c></row>) }.join
+    dense = write(rows)
+    sparse = write(rows + %(<row r="6"><c r="XFD6"><v>6</v></c></row>))
+
+    short = write(%(<row r="1"><c r="A1"><v>1</v></c></row><row r="2"><c r="A2"><v>2</v></c></row>))
+
+    # roo's Sheet#row answers the first row, and every row of a sheet too
+    # short to repay the index or too sparse to lay out.
+    { dense => 1, short => 2, sparse => 6 }.each do |path, rows_from_roo|
+      _, counts = Oracle.read(native: true) { Roo::Excelx.new(path).each.to_a }
+
+      assert_equal rows_from_roo, counts[:sheet_rows]
+    end
+  end
+
+  # A blank String is no value for the bounds, so each sheet's blank cell lies
+  # outside them, where the index must not place it.
+  OUTSIDE_THE_BOUNDS = {
+    "above the first row" => %(<row r="1"><c r="B1" t="str"><v></v></c></row>
+      <row r="2"><c r="A2"><v>2</v></c><c r="B2"><v>2</v></c></row>
+      <row r="3"><c r="A3"><v>3</v></c></row><row r="4"><c r="A4"><v>4</v></c></row>),
+    "right of the last column" => %(<row r="2"><c r="A2"><v>2</v></c><c r="B2"><v>2</v></c><c r="C2" t="str"><v></v></c></row>
+      <row r="3"><c r="B3"><v>3</v></c></row><row r="4"><c r="A4"><v>4</v></c><c r="B4"><v>4</v></c></row>),
+    "left of the first column" => %(<row r="2"><c r="B2"><v>2</v></c><c r="C2"><v>2</v></c></row>
+      <row r="3"><c r="A3" t="str"><v></v></c><c r="B3"><v>3</v></c><c r="C3"><v>3</v></c></row>
+      <row r="4"><c r="B4"><v>4</v></c><c r="C4"><v>4</v></c></row>)
+  }.freeze
+
+  def test_each_without_options_leaves_out_cells_outside_the_bounds
+    OUTSIDE_THE_BOUNDS.each do |name, rows|
+      path = write(rows)
+      _, counts = Oracle.read(native: true) { Roo::Excelx.new(path).each.to_a }
+
+      assert_equal 1, counts[:sheet_rows], "#{name}: the index did not answer"
+      assert_same_as_roo(name) { Oracle.describe_rows(Roo::Excelx.new(path).each.to_a) }
+    end
+  end
+
+  def test_each_without_options_uses_a_subclass_row
+    path = write((1..5).map { |i| %(<row r="#{i}"><c r="A#{i}"><v>#{i}</v></c></row>) }.join)
+    subclass = Class.new(Roo::Excelx) { def row(number, sheet = nil) = super.map { |v| "<#{v}>" } }
+
+    assert_same_as_roo("subclass row") { subclass.new(path).each.to_a }
   end
 
   def test_each_without_headers_reads_no_cell

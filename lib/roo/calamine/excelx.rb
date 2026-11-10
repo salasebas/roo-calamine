@@ -6,6 +6,7 @@ module Roo
     # through #cell, which resolves the sheet and looks up an Array key in its
     # cells hash, one cell at a time. These keep roo's header handling (its own
     # private methods) and read the cells hash with less work per cell.
+    # Without options, #each reads its rows through a RowIndex.
     #
     # roo's single-cell lookups read Sheet#cell_at instead of Sheet#cells, so
     # they build only the cells they read. #each and #parse read every cell, so
@@ -14,12 +15,12 @@ module Roo
       NO_CELLS = [].freeze
       private_constant :NO_CELLS
 
-      def each(options = {})
+      def each(options = {}, &)
         return super unless block_given?
 
         if options.empty?
           build_cells
-          return super
+          return row_index? ? each_without_options(&) : super
         end
         return super unless Calamine.enabled?
 
@@ -78,7 +79,22 @@ module Roo
           (row < sheet.first_row || row > sheet.last_row || col < sheet.first_column || col > sheet.last_column)
       end
 
+      def set(...)
+        @calamine_set_calls = (@calamine_set_calls || 0) + 1
+        super
+      end
+
       private
+
+      # Roo::Base#each without options: `1.upto(last_row) { |line| yield row(line) }`.
+      def each_without_options
+        index = RowIndex.new(self)
+        1.upto(last_row) { |line| yield index.row(line, @calamine_set_calls) }
+      end
+
+      def row_index?
+        Calamine.enabled? && method(:row).owner.equal?(::Roo::Excelx)
+      end
 
       # Roo::Base#each, up to its loop over the rows.
       def header_columns(options)
