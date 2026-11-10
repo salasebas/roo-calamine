@@ -86,6 +86,19 @@ pub struct RawCell {
     pub body: Body,
 }
 
+impl RawCell {
+    /// The `[row, column]` key of roo's document-mode `cells` hash for this
+    /// cell, the `index`-th of the `row_number`-th row (both 1-based), or
+    /// `None` when roo raises for its `r`.
+    pub fn position(&self, row_number: usize, index: usize) -> Option<(i64, i64)> {
+        match self.reference {
+            Reference::At { row, column } => Some((row, column)),
+            Reference::Missing => Some((row_number as i64, index as i64)),
+            Reference::Invalid(_) => None,
+        }
+    }
+}
+
 /// A row's cells. Their text lives in one buffer, so a row costs a few
 /// allocations rather than a few per cell.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

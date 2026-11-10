@@ -1,8 +1,8 @@
 # roo-calamine
 
 Make [roo](https://github.com/roo-rb/roo) read `.xlsx` and `.xlsm` files
-4–12× faster, with identical results and 4–5× less memory for whole-sheet
-reads. Your roo code does not change.
+4–22× faster, with identical results and 4–14× less memory outside
+streaming. Your roo code does not change.
 
 ```ruby
 # Gemfile
@@ -40,6 +40,15 @@ where roo reads worksheet XML: `#cells` (behind `#cell`, `#row`, `#each`,
 the XML with [quick-xml](https://github.com/tafia/quick-xml) on a background
 thread and builds the same `Roo::Excelx::Cell` objects with roo's own
 constructors.
+
+Single-cell reads (`#cell`, `#celltype`, `#formula`, `#excelx_type`,
+`#excelx_value`, `#formatted_value`, `#excelx_format`, `#font`, `#empty?`),
+`#row`, `#column`, and `#first_row` … `#last_column` build only the cells
+they read: the extension keeps the parsed sheet in compact native records and
+builds a cell the first time it is read. Anything that needs the whole
+`Sheet#cells` hash (`#each`, `#parse`, `#to_csv`, `#set`, …) builds the rest,
+keeping the cells already handed out. A sheet where some cell would raise, or
+opened with `expand_merged_ranges`, is built whole, as before.
 
 Everything else stays roo's code: shared strings, styles, number formats,
 dates, hyperlinks, comments, images, and every open option. It works with
@@ -111,7 +120,7 @@ roo is the oracle: every check takes roo's own output as the expected result.
   `.xlsx`/`.xlsm` files in roo's `test/files` cell by cell (class, value,
   type, formatted value, every instance variable) across open options,
   streaming options, and the `Roo::Base` API, including `parse` and `each`
-  under nine option sets, with and without a block.
+  under nine option sets, with and without a block, and the single-cell reads.
 - **Edge cases.** `test/edge_cases_test.rb` pins roo's answer for Integer vs
   Float, dates and the 1904 system, merged ranges, rich text, inline strings,
   shared formulas, error cells, namespaces, `parse` and `each` after `set`
@@ -124,15 +133,20 @@ Known differences, by design:
 
 - Code that overrides roo's private cell parsing (`SheetDoc#cell_from_xml`,
   `#extract_cells`, `Cell.cell_class`) is bypassed while the reader is on, and
-  so is a `Roo::Excelx` subclass's `#cell` or `#each` inside `parse` and
-  `each` with options.
+  so are a `Roo::Excelx` subclass's `#cell` or `#each` inside `parse` and
+  `each` with options, and redefinitions of the single-cell reads above in
+  `Roo::Excelx` or `Roo::Excelx::Sheet` themselves (subclasses work).
+- Reading the whole sheet after a single-cell read or `#last_row` costs about
+  10–25% more than reading it whole from the start, because the sheet is parsed
+  before any cell is built rather than alongside. `#each` and `#parse` build
+  the whole sheet first, so they are not affected.
 - On XML that breaks partway, `each_row_streaming` raises the same
   `Nokogiri::XML::SyntaxError` as roo but yields a few more rows before it.
 - Streaming uses about 10 MB more peak memory.
 
 ## Benchmarks
 
-Median of 3 runs on an Apple M5 Pro, Ruby 3.4.9. Memory is peak RSS.
+Median of 3 runs on an Apple M5 Pro, Ruby 3.4.12. Memory is peak RSS.
 
 | File | Scenario | roo | roo-calamine | Speedup |
 |---|---|---:|---:|---:|

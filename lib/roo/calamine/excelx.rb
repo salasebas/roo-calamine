@@ -6,11 +6,16 @@ module Roo
     # through #cell, which resolves the sheet and looks up an Array key in its
     # cells hash, one cell at a time. These keep roo's header handling (its own
     # private methods) and read the cells hash with less work per cell.
+    #
+    # roo's single-cell lookups read Sheet#cell_at instead of Sheet#cells, so
+    # they build only the cells they read. #each and #parse read every cell, so
+    # they build them all at once, as roo does.
     module Excelx
       NO_CELLS = [].freeze
       private_constant :NO_CELLS
 
       def each(options = {})
+        sheet_for(nil).cells if block_given?
         return super if !block_given? || options.empty? || !Calamine.enabled?
 
         headers = header_columns(options)
@@ -28,8 +33,45 @@ module Roo
       def parse(options = {})
         return super if block_given? || options.empty? || !Calamine.enabled?
 
+        sheet_for(nil).cells
         rows = rows_for(header_columns(options))
         options[:headers] == true ? rows : rows.drop(1)
+      end
+
+      def cell(row, col, sheet = nil)
+        safe_send(sheet_for(sheet).cell_at(normalize(row, col)), :value)
+      end
+
+      def formula(row, col, sheet = nil)
+        safe_send(sheet_for(sheet).cell_at(normalize(row, col)), :formula)
+      end
+
+      def font(row, col, sheet = nil)
+        definition_index = safe_send(sheet_for(sheet).cell_at(normalize(row, col)), :style)
+        styles.definitions[definition_index] if definition_index
+      end
+
+      def celltype(row, col, sheet = nil)
+        safe_send(sheet_for(sheet).cell_at(normalize(row, col)), :type)
+      end
+
+      def excelx_type(row, col, sheet = nil)
+        safe_send(sheet_for(sheet).cell_at(normalize(row, col)), :cell_type)
+      end
+
+      def excelx_value(row, col, sheet = nil)
+        safe_send(sheet_for(sheet).cell_at(normalize(row, col)), :cell_value)
+      end
+
+      def formatted_value(row, col, sheet = nil)
+        safe_send(sheet_for(sheet).cell_at(normalize(row, col)), :formatted_value)
+      end
+
+      def empty?(row, col, sheet = nil)
+        sheet = sheet_for(sheet)
+        cell = sheet.cell_at(normalize(row, col))
+        !cell || cell.empty? ||
+          (row < sheet.first_row || row > sheet.last_row || col < sheet.first_column || col > sheet.last_column)
       end
 
       private

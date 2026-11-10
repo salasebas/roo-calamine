@@ -69,6 +69,8 @@ if RUBY_ENGINE == "ruby"
   require_relative "calamine/context"
   require_relative "calamine/sheet_doc"
   require_relative "calamine/excelx"
+  require_relative "calamine/sheet"
   Roo::Excelx::SheetDoc.prepend(Roo::Calamine::SheetDoc)
+  Roo::Excelx::Sheet.prepend(Roo::Calamine::Sheet)
   Roo::Excelx.prepend(Roo::Calamine::Excelx)
 end
