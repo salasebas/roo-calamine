@@ -15,6 +15,10 @@ module Oracle
       Oracle.counts[:roo_cells] += 1
       super(*args)
     end
+
+    define_method(:doc) do
+      super().tap { Oracle.counts[:roo_documents] += 1 }
+    end
   end)
 
   Roo::Excelx::Sheet.prepend(Module.new do
@@ -36,6 +40,13 @@ module Oracle
 
   Roo::Calamine::Native::Reader.singleton_class.prepend(Module.new do
     define_method(:new) do |*args|
+      Oracle.counts[:native_readers] += 1
+      super(*args)
+    end
+  end)
+
+  Roo::Calamine::Native.singleton_class.prepend(Module.new do
+    define_method(:sheet_parts) do |*args|
       Oracle.counts[:native_readers] += 1
       super(*args)
     end
@@ -95,7 +106,7 @@ module Oracle
   def describe_cells(workbook)
     workbook.sheets.map do |sheet|
       cells = workbook.sheet_for(sheet).cells
-      [sheet, cells.map { |key, cell| [key, describe_cell(cell)] }]
+      [sheet, cells.map { |key, cell| [key, describe_cell(cell)] }, workbook.sheet_for(sheet).hyperlinks.to_a]
     end
   end
 

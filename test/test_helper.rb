@@ -19,6 +19,7 @@ module OracleAssertions
 
     assert_operator counts[:native_readers], :>, 0, "#{label}: the native reader did not run"
     assert_equal 0, counts[:roo_cells], "#{label}: roo parsed cells itself"
+    assert_equal 0, counts[:roo_documents], "#{label}: roo parsed the whole worksheet"
     assert_operator counts[:lazy_stores], :>, 0, "#{label}: cells were built all at once" if lazy
   end
 
@@ -47,6 +48,7 @@ module OracleAssertions
 
     assert_operator counts[:native_readers], :>, 0, "#{label}: the native reader did not run"
     assert_equal 0, counts[:roo_cells], "#{label}: roo parsed cells itself"
+    assert_equal 0, counts[:roo_documents], "#{label}: roo parsed the whole worksheet"
   end
 end
 

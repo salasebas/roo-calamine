@@ -9,6 +9,7 @@ pub mod convert;
 pub mod numeric;
 pub mod reader;
 pub mod shared_strings;
+pub mod sheet_parts;
 pub mod store;
 
 use std::cell::{Cell as StdCell, RefCell};
@@ -282,5 +283,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
 
     store::define(ruby, native)?;
     shared_strings::define(native)?;
+    sheet_parts::define(native)?;
     Ok(())
 }
