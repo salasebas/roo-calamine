@@ -20,6 +20,7 @@ SCENARIOS = {
   "parse" => "`parse(headers: true)`",
   "each" => "`each` (one Array of values per row)",
   "cell" => "10,000 random `cell(row, col)`",
+  "csv" => "`to_csv`",
   "values" => "values only: `Roo::Calamine.each_row_values`"
 }.freeze
 COMPARED = %w[roo roo-calamine].freeze

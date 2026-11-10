@@ -146,6 +146,10 @@ roo is the oracle: every check takes roo's own output as the expected result.
   `_x000D_` across text, CDATA, and references; `t` elements outside runs; tag
   order; local names under `/sst/si`; line endings; and each case it leaves to
   roo. The fixture test does the same for every roo fixture.
+- **CSV.** `test/to_csv_test.rb` compares the bytes `to_csv` returns and
+  writes with roo's for every cell type, separator, sheet, and file argument,
+  cells out of order or merged, keys written into the cells hash, `set`
+  before it, and the file roo leaves behind when a cell raises.
 - **Values only.** Both suites also compare `Roo::Calamine.each_row_values`
   with the values of roo's `each_row_streaming(pad_cells: true)`, with the
   native reader on and off.
@@ -161,7 +165,8 @@ Known differences, by design:
   `#extract_cells`, `#extract_hyperlinks`, `#expand_merged_ranges`,
   `Cell.cell_class`) is bypassed while the reader is on, and
   so are a `Roo::Excelx` subclass's `#cell` or `#each` inside `parse` and
-  `each` with options, and redefinitions of the single-cell reads (see
+  `each` with options, its `#cell`, `#celltype`, `#empty?`, or roo's private
+  `#cell_to_csv` inside `to_csv`, and redefinitions of the single-cell reads (see
   [How it works](#how-it-works)) in `Roo::Excelx` or `Roo::Excelx::Sheet`
   themselves (subclasses work). Under
   roo 4.0.0 so is an override of `initialize` on a `Cell` class or on
@@ -230,6 +235,15 @@ per value. `parse` without a block builds each Hash from the records, or on a
 sheet built whole groups the cells by row in one pass. `each`, and `parse`
 with a block, look up each value in the `cells` hash, because the block may
 change the workbook between rows.
+
+Under roo 4.0.0 it also replaces the private writer behind `#to_csv`. roo
+writes every slot from A1 to the last row and column through `#empty?`,
+`#cell`, and `#celltype`, which look the sheet and the cell up again for each
+slot. roo-calamine walks the `cells` hash once, in row and column order, and
+writes a line per row, formatting each cell as roo's `#cell_to_csv` does.
+When the hash is not in that order (merged ranges expanded, rows out of order
+in the XML, or keys written into it), it sorts the keys first. Under other roo
+versions, roo writes the CSV itself.
 
 `each` without options, behind `each_with_index`, `to_a`, and `parse` without
 options, is roo's own loop over `#row`, so a block that calls `set` or

@@ -45,7 +45,8 @@ ROO_SCENARIOS = {
   "stream" => ->(workbook, digest) { workbook.each_row_streaming { |row| row.each { digest << value(_1&.value) } } },
   "parse" => ->(workbook, digest) { workbook.parse(headers: true).each { |row| digest << value(row.values) } },
   "each" => ->(workbook, digest) { workbook.each { |row| digest << value(row) } },
-  "cell" => method(:random_cells)
+  "cell" => method(:random_cells),
+  "csv" => ->(workbook, digest) { digest << workbook.to_csv }
 }.freeze
 
 def roo_scenario(scenario, path, digest)
@@ -71,6 +72,8 @@ def calx_scenario(scenario, path, digest)
   when "parse"
     header, *rows = Calx.read(path)
     rows.each { |row| digest << value(header.zip(row).to_h.values) }
+  when "csv"
+    Calx.each_row(path) { |row| digest << row.join(",") }
   when "cell"
     rows = Calx.read(path)
     random = Random.new(1)
