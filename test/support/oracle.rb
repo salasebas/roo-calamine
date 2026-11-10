@@ -196,6 +196,7 @@ module Oracle
       bounds = BOUNDS.map { |m| workbook.public_send(m) }
       workbook.cell(bounds[0], bounds[2]) if bounds[0]
       searched = describe_header_parses(workbook, bounds[0] && workbook.row(bounds[0]).compact.last)
+      workbook.header_line = 1
       rows = outcome { workbook.each.to_a }
       parsed = outcome { workbook.parse(headers: true) }
       kept = outcome { kept_row_values(workbook.sheet_for(sheet).cells, workbook, bounds[2], rows, parsed) }
