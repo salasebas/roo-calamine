@@ -6,6 +6,11 @@ module Roo
     # one comes from the roo object or method that SheetDoc#cell_from_xml uses,
     # so formats, shared strings, and errors are roo's own.
     class Context
+      # roo versions whose cell constructors the native reader reproduces:
+      # under them it sets each cell's instance variables itself, and under
+      # any other version it calls the constructors.
+      CELL_LAYOUT_ROO_VERSIONS = %w[4.0.0].freeze
+
       attr_reader :hyperlinks, :empty_cell
 
       def initialize(shared, hyperlinks, empty_cell)
@@ -22,9 +27,15 @@ module Roo
         @shared.base_timestamp
       end
 
+      def build_cells?
+        CELL_LAYOUT_ROO_VERSIONS.include?(Roo::VERSION)
+      end
+
+      # The format string, its type, and whether Cell::Number#create_numeric
+      # always calls Float under it (nil when matching it raises).
       def style(index)
         format = @shared.styles.style_format(index)
-        [format.to_s, Roo::Excelx::Format.to_type(format)]
+        [format.to_s, Roo::Excelx::Format.to_type(format), float_format(format.to_s)]
       end
 
       def style_index(text)
@@ -48,6 +59,12 @@ module Roo
       end
 
       private
+
+      def float_format(format)
+        format.match?(/%|\.0/)
+      rescue ArgumentError, EncodingError
+        nil
+      end
 
       def shared_string_at(strings, index)
         strings.use_html?(index) ? strings.to_html[index] : strings[index]

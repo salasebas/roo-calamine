@@ -1,11 +1,13 @@
 //! Builds the `Roo::Excelx::Cell` objects that
-//! `Roo::Excelx::SheetDoc#cell_from_xml` builds, by calling roo's own
-//! constructors with the same arguments, or only the values those cells
-//! return from `#value`.
+//! `Roo::Excelx::SheetDoc#cell_from_xml` builds ([`cells`]), or only the
+//! values those cells return from `#value`.
+
+mod cells;
 
 use std::cell::{Cell as StdCell, RefCell};
 use std::os::raw::c_int;
 
+use magnus::encoding::{self, EncodingCapable};
 use magnus::gc::Marker;
 use magnus::rb_sys::{protect, AsRawValue, FromRawValue};
 use magnus::value::{Lazy, Opaque, ReprValue};
@@ -14,6 +16,7 @@ use magnus::{
     StaticSymbol, Symbol, TypedData, Value,
 };
 
+use crate::numeric::{create_numeric, plain_number};
 use crate::reader::{parse_index, Body, Kind, Mode, RawCell, RawRow, Reference, Style};
 use crate::store::Store;
 
@@ -31,40 +34,6 @@ static CELL_TIME: Lazy<RClass> = Lazy::new(|r| constant(r, "Roo::Excelx::Cell::T
 static CELL_EMPTY: Lazy<RClass> = Lazy::new(|r| constant(r, "Roo::Excelx::Cell::Empty"));
 static NUMERIC_OR_FORMULA: Lazy<StaticSymbol> = Lazy::new(|r| r.sym_new("numeric_or_formula"));
 
-/// Text that `Float()` and `Integer(text, 10)` both read as a finite number,
-/// and `String#to_f` reads whole: `-?digits(.digits)?([eE][-+]?digits)?`.
-fn plain_number(text: &str) -> bool {
-    fn digits(bytes: &[u8]) -> usize {
-        bytes.iter().take_while(|b| b.is_ascii_digit()).count()
-    }
-    let bytes = text.as_bytes();
-    let mut at = usize::from(bytes.first() == Some(&b'-'));
-    let whole = digits(&bytes[at..]);
-    if whole == 0 {
-        return false;
-    }
-    at += whole;
-    if bytes.get(at) == Some(&b'.') {
-        let fraction = digits(&bytes[at + 1..]);
-        if fraction == 0 {
-            return false;
-        }
-        at += 1 + fraction;
-    }
-    if matches!(bytes.get(at), Some(b'e' | b'E')) {
-        at += 1;
-        if matches!(bytes.get(at), Some(b'-' | b'+')) {
-            at += 1;
-        }
-        let exponent = digits(&bytes[at..]);
-        if exponent == 0 {
-            return false;
-        }
-        at += exponent;
-    }
-    at == bytes.len() && text.parse::<f64>().is_ok_and(f64::is_finite)
-}
-
 /// `string[/<([biu]|sup|sub)>/]`, the test in `SharedStrings#use_html?`.
 fn has_html_tag(string: &[u8]) -> bool {
     string.windows(3).enumerate().any(|(i, w)| {
@@ -73,17 +42,6 @@ fn has_html_tag(string: &[u8]) -> bool {
                 || string[i..].starts_with(b"<sup>")
                 || string[i..].starts_with(b"<sub>"))
     })
-}
-
-/// `Coordinate.new(row, column)`: a frozen `[row, column]` of roo's Array
-/// subclass, built without running its Ruby `initialize`.
-fn new_coordinate<T: IntoValue>(ruby: &Ruby, row: T, column: T) -> Result<Value, Error> {
-    let coordinate = RArray::from_value(ruby.get_inner(&COORDINATE).obj_alloc()?)
-        .expect("Roo::Excelx::Coordinate is an Array");
-    coordinate.push(row)?;
-    coordinate.push(column)?;
-    coordinate.freeze();
-    Ok(coordinate.as_value())
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -96,12 +54,34 @@ enum ValueType {
     Number,
 }
 
-/// Whether a format string matches `/%/` or `/\.0/`, which makes
-/// `Cell::Number#create_numeric` read every number as a Float.
-fn reads_as_float(format: Value) -> Result<bool, Error> {
-    let format = RString::try_convert(format)?;
-    let format = unsafe { format.as_slice() };
-    Ok(format.contains(&b'%') || format.windows(2).any(|pair| pair == b".0"))
+/// How `Cell::Number#create_numeric` reads text under a format.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NumberFormat {
+    /// The format matches `/%/` or `/\.0/`: always `Float(text)`.
+    Float,
+    /// The text decides between `Float` and `Integer`.
+    ByText,
+    /// Matching the format raises, so roo's constructor runs.
+    Unmatchable,
+}
+
+/// What a style index means for a value cell, kept with the text and encoding
+/// of its format as first read.
+#[derive(Clone)]
+struct StyleInfo {
+    format_text: Vec<u8>,
+    format_encoding: encoding::Index,
+    value_type: ValueType,
+    number_format: NumberFormat,
+}
+
+impl StyleInfo {
+    /// Whether `format` still has the text and encoding this was read from.
+    fn read_from(&self, format: Value) -> bool {
+        RString::from_value(format).is_some_and(|text| {
+            text.enc_get() == self.format_encoding && unsafe { text.as_slice() } == self.format_text
+        })
+    }
 }
 
 /// `/\A[-+]?\d+E[-+]?\d+\z/i`, the exponent test in `Cell::Number#create_numeric`.
@@ -149,15 +129,17 @@ fn ruby_float(ruby: &Ruby, text: &str) -> Result<Value, Error> {
 pub struct Converter {
     mode: Mode,
     empty_cell: bool,
+    /// Whether this roo's cells may be built without their constructors.
+    build_cells: bool,
     context: Opaque<Value>,
     hyperlinks: Option<Opaque<RHash>>,
     base_date: Opaque<Value>,
     base_timestamp: Opaque<Value>,
+    /// `base_timestamp`, when it is an integer a double holds exactly.
+    base_seconds: Option<i64>,
     /// Format string per style index, filled on first use.
     formats: Opaque<RArray>,
-    /// A frozen copy of each of those as first used.
-    formats_read: Opaque<RArray>,
-    types: RefCell<Vec<Option<ValueType>>>,
+    styles: RefCell<Vec<Option<StyleInfo>>>,
     /// roo's own shared-string arrays: plain text, and the HTML version
     /// (`nil` when the HTML wrapper is disabled). Fetched on first use.
     shared_plain: StdCell<Option<Opaque<RArray>>>,
@@ -180,7 +162,6 @@ impl DataTypeFunctions for Converter {
         marker.mark(self.base_date);
         marker.mark(self.base_timestamp);
         marker.mark(self.formats);
-        marker.mark(self.formats_read);
         if let Some(plain) = self.shared_plain.get() {
             marker.mark(plain);
         }
@@ -197,16 +178,22 @@ impl Converter {
     /// `context` is a `Roo::Calamine::Context`.
     pub fn new(ruby: &Ruby, context: Value, stream: bool) -> Result<Self, Error> {
         let hyperlinks: RHash = context.funcall("hyperlinks", ())?;
+        let base_timestamp: Value = context.funcall("base_timestamp", ())?;
         Ok(Self {
             mode: if stream { Mode::Stream } else { Mode::Document },
             empty_cell: context.funcall::<_, _, Value>("empty_cell", ())?.to_bool(),
+            build_cells: context
+                .funcall::<_, _, Value>("build_cells?", ())?
+                .to_bool(),
             context: context.into(),
             hyperlinks: (!hyperlinks.is_empty()).then(|| hyperlinks.into()),
             base_date: context.funcall::<_, _, Value>("base_date", ())?.into(),
-            base_timestamp: context.funcall::<_, _, Value>("base_timestamp", ())?.into(),
+            base_timestamp: base_timestamp.into(),
+            base_seconds: i64::try_convert(base_timestamp)
+                .ok()
+                .filter(|seconds| seconds.unsigned_abs() < 1 << 53),
             formats: ruby.ary_new().into(),
-            formats_read: ruby.ary_new().into(),
-            types: RefCell::new(Vec::new()),
+            styles: RefCell::new(Vec::new()),
             shared_plain: StdCell::new(None),
             shared_html: StdCell::new(None),
             error_values: ruby.eval("Roo::Excelx::ERROR_VALUES.to_a")?,
@@ -252,7 +239,7 @@ impl Converter {
             Body::Inline(text) => return Ok((column, ruby.str_new(row.text(text)).as_value())),
             Body::Value(text) => row.text(text),
         };
-        let (format, format_type) = self.style_info(ruby, self.style(ruby, raw)?)?;
+        let (_, format_type, number_format) = self.style_info(ruby, self.style(ruby, raw)?)?;
         let value = match (raw.kind, format_type) {
             (Kind::Shared, _) => self.shared_string(ruby, text)?,
             (Kind::Boolean, _) => {
@@ -260,9 +247,11 @@ impl Converter {
                 one.into_value_with(ruby)
             }
             (Kind::Str, _) => ruby.str_new(text).as_value(),
-            (Kind::InlineStr, _) | (Kind::ByFormat, ValueType::Number) => {
-                self.number(ruby, text, reads_as_float(format)?)?
-            }
+            (Kind::InlineStr, _) | (Kind::ByFormat, ValueType::Number) => match number_format {
+                NumberFormat::Float => self.number(ruby, text, true)?,
+                NumberFormat::ByText => self.number(ruby, text, false)?,
+                NumberFormat::Unmatchable => self.cell_value(ruby, row, raw)?,
+            },
             (Kind::ByFormat, ValueType::Date) => ruby
                 .get_inner(self.base_date)
                 .funcall("+", (ruby_integer(ruby, text, false)?,))?,
@@ -280,6 +269,9 @@ impl Converter {
         }
         if text.is_empty() {
             return Ok(ruby.qnil().as_value());
+        }
+        if let Some(number) = create_numeric(text, float_format) {
+            return Ok(number.into_value_with(ruby));
         }
         if float_format || text.contains('.') || is_exponent_number(text) {
             ruby_float(ruby, text)
@@ -368,17 +360,19 @@ impl Converter {
         if cacheable(style).is_none() {
             return false;
         }
-        let Ok((_, format_type)) = self.style_info(ruby, style) else {
+        let Ok((_, format_type, number_format)) = self.style_info(ruby, style) else {
             return false;
         };
+        let number_builds =
+            || number_format != NumberFormat::Unmatchable && self.number_builds(text);
         match raw.kind {
             Kind::Shared => self
                 .shared_string(ruby, text)
                 .is_ok_and(|value| RString::from_value(value).is_some()),
             Kind::Boolean | Kind::Str => true,
-            Kind::InlineStr => self.number_builds(text),
+            Kind::InlineStr => number_builds(),
             Kind::ByFormat => match format_type {
-                ValueType::Number => self.number_builds(text),
+                ValueType::Number => number_builds(),
                 ValueType::Date => true,
                 // roo raises for a hyperlink here: `Roo::Link.new` gets a Float,
                 // and for a day count whose seconds overflow to infinity.
@@ -445,11 +439,11 @@ impl Converter {
         column: usize,
     ) -> Result<Value, Error> {
         match (&raw.reference, self.mode) {
-            (Reference::At { row, column }, _) => new_coordinate(ruby, *row, *column),
+            (Reference::At { row, column }, _) => self.new_coordinate(ruby, *row, *column),
             (Reference::Invalid(reference), _) => self
                 .context(ruby)
                 .funcall("coordinate", (ruby.str_new(reference),)),
-            (Reference::Missing, Mode::Document) => new_coordinate(ruby, row, column),
+            (Reference::Missing, Mode::Document) => self.new_coordinate(ruby, row, column),
             (Reference::Missing, Mode::Stream) => {
                 self.context(ruby).funcall("coordinate", (ruby.qnil(),))
             }
@@ -465,78 +459,61 @@ impl Converter {
         }
     }
 
-    /// `[format.to_s, Excelx::Format.to_type(format)]` for a style index.
-    fn style_info(&self, ruby: &Ruby, style: Value) -> Result<(Value, ValueType), Error> {
+    /// The format string of a style index, its value type, and how
+    /// `Cell::Number` reads text under it. roo reads the format again for
+    /// every cell, so a stream reads a format changed in place again. A
+    /// document keeps what each format first read: roo builds every cell
+    /// before a caller can change one.
+    fn style_info(
+        &self,
+        ruby: &Ruby,
+        style: Value,
+    ) -> Result<(Value, ValueType, NumberFormat), Error> {
         let formats = ruby.get_inner(self.formats);
         let cacheable = cacheable(style);
         if let Some(index) = cacheable {
-            if let Some(Some(value_type)) = self.types.borrow().get(index) {
-                return Ok((formats.entry(index as isize)?, *value_type));
+            if let Some(Some(info)) = self.styles.borrow().get(index) {
+                let format: Value = formats.entry(index as isize)?;
+                if self.mode == Mode::Document || info.read_from(format) {
+                    return Ok((format, info.value_type, info.number_format));
+                }
             }
         }
         let info: RArray = self.context(ruby).funcall("style", (style,))?;
         let format: Value = info.entry(0)?;
         let type_symbol: Symbol = info.entry(1)?;
+        let float_format: Option<bool> = info.entry(2)?;
         let value_type = match type_symbol.name()?.as_ref() {
             "date" => ValueType::Date,
             "datetime" => ValueType::DateTime,
             "time" => ValueType::Time,
             _ => ValueType::Number,
         };
-        if let Some(index) = cacheable {
+        let number_format = match float_format {
+            Some(true) => NumberFormat::Float,
+            Some(false) => NumberFormat::ByText,
+            None => NumberFormat::Unmatchable,
+        };
+        if let (Some(index), Some(text)) = (cacheable, RString::from_value(format)) {
             formats.store(index as isize, format)?;
-            let read: Value = format.funcall("dup", ())?;
-            ruby.get_inner(self.formats_read)
-                .store(index as isize, read.funcall::<_, _, Value>("freeze", ())?)?;
-            let mut types = self.types.borrow_mut();
-            if types.len() <= index {
-                types.resize(index + 1, None);
+            let mut styles = self.styles.borrow_mut();
+            if styles.len() <= index {
+                styles.resize(index + 1, None);
             }
-            types[index] = Some(value_type);
+            styles[index] = Some(StyleInfo {
+                format_text: unsafe { text.as_slice() }.to_vec(),
+                format_encoding: text.enc_get(),
+                value_type,
+                number_format,
+            });
         }
-        Ok((format, value_type))
+        Ok((format, value_type, number_format))
     }
 
-    /// Document mode: roo builds every cell before a caller can change a
-    /// format string in place, and `Cell::Number#create_numeric` reads it,
-    /// so a cell built later gets the value the format first read gives.
-    fn keep_number_as_read(
-        &self,
-        ruby: &Ruby,
-        style: Value,
-        format: Value,
-        content: RString,
-        cell: Value,
-    ) -> Result<(), Error> {
-        if self.mode != Mode::Document {
-            return Ok(());
-        }
-        let Some(index) = cacheable(style) else {
-            return Ok(());
-        };
-        let as_read: Value = ruby.get_inner(self.formats_read).entry(index as isize)?;
-        let (Some(now), Some(then)) = (RString::from_value(format), RString::from_value(as_read))
-        else {
-            return Ok(());
-        };
-        if unsafe { now.as_slice() == then.as_slice() } {
-            return Ok(());
-        }
-        let excelx_type =
-            ruby.ary_new_from_values(&[ruby.get_inner(&NUMERIC_OR_FORMULA).as_value(), as_read]);
-        let value: Value = ruby
-            .get_inner(&CELL_NUMBER)
-            .new_instance((
-                content,
-                ruby.qnil(),
-                excelx_type,
-                style,
-                ruby.qnil(),
-                ruby.qnil(),
-            ))?
-            .funcall("value", ())?;
-        cell.funcall::<_, _, Value>("value=", (value,))?;
-        Ok(())
+    /// The style a document read first for a style index.
+    fn style_as_read(&self, style: Value) -> Option<StyleInfo> {
+        let index = cacheable(style)?;
+        self.styles.borrow().get(index).cloned().flatten()
     }
 
     /// `shared_strings.use_html?(i) ? shared_strings.to_html[i] : shared_strings[i]`.
@@ -597,121 +574,6 @@ impl Converter {
         }
         self.context(ruby)
             .funcall("shared_string", (ruby.str_new(text),))
-    }
-
-    /// Builds the cell `SheetDoc#cell_from_xml` builds for `raw`. `None` means
-    /// roo stores no cell (an empty cell without the `empty_cell` option).
-    pub fn cell(
-        &self,
-        ruby: &Ruby,
-        buffer: &str,
-        raw: &RawCell,
-        row_number: usize,
-        column: usize,
-    ) -> Result<Option<(Value, Value)>, Error> {
-        let coordinate = self.coordinate(ruby, raw, row_number, column)?;
-        let style = self.style(ruby, raw)?;
-        let link = self.link(ruby, coordinate);
-        let formula = raw
-            .formula
-            .as_ref()
-            .map(|f| ruby.str_new(&buffer[f.clone()]));
-        let cell: Value = match &raw.body {
-            Body::Empty => {
-                if !self.empty_cell {
-                    return Ok(None);
-                }
-                ruby.get_inner(&CELL_EMPTY).new_instance((coordinate,))?
-            }
-            Body::Inline(text) => ruby.get_inner(&CELL_STRING).new_instance((
-                ruby.str_new(&buffer[text.clone()]),
-                formula,
-                style,
-                link,
-                coordinate,
-            ))?,
-            // roo looks up the style format for every `v` cell, which raises when
-            // the workbook has no styles part, so this does too.
-            Body::Value(text) => {
-                let text = &buffer[text.clone()];
-                match (raw.kind, self.style_info(ruby, style)?) {
-                    (Kind::Shared, _) => {
-                        let value = self.shared_string(ruby, text)?;
-                        ruby.get_inner(&CELL_STRING)
-                            .new_instance((value, formula, style, link, coordinate))?
-                    }
-                    (Kind::Boolean, _) => ruby.get_inner(&CELL_BOOLEAN).new_instance((
-                        ruby.str_new(text),
-                        formula,
-                        style,
-                        link,
-                        coordinate,
-                    ))?,
-                    (Kind::Str, _) => ruby.get_inner(&CELL_STRING).new_instance((
-                        ruby.str_new(text),
-                        formula,
-                        style,
-                        link,
-                        coordinate,
-                    ))?,
-                    (kind, (format, format_type)) => {
-                        let value_type = if kind == Kind::InlineStr {
-                            ValueType::Number
-                        } else {
-                            format_type
-                        };
-                        let numeric_or_formula = ruby.get_inner(&NUMERIC_OR_FORMULA).as_value();
-                        let excelx_type = ruby.ary_new_from_values(&[numeric_or_formula, format]);
-                        let content = ruby.str_new(text);
-                        match value_type {
-                            ValueType::Number => {
-                                let cell = ruby.get_inner(&CELL_NUMBER).new_instance((
-                                    content,
-                                    formula,
-                                    excelx_type,
-                                    style,
-                                    link,
-                                    coordinate,
-                                ))?;
-                                if link.is_nil() {
-                                    self.keep_number_as_read(ruby, style, format, content, cell)?;
-                                }
-                                cell
-                            }
-                            ValueType::Date => ruby.get_inner(&CELL_DATE).new_instance((
-                                content,
-                                formula,
-                                excelx_type,
-                                style,
-                                link,
-                                ruby.get_inner(self.base_date),
-                                coordinate,
-                            ))?,
-                            ValueType::DateTime | ValueType::Time => {
-                                let number: f64 = content.funcall("to_f", ())?;
-                                let (class, base) = if number < 1.0 {
-                                    (&CELL_TIME, self.base_timestamp)
-                                } else if (number - number.floor()).abs() > 0.000001 {
-                                    (&CELL_DATETIME, self.base_timestamp)
-                                } else {
-                                    (&CELL_DATE, self.base_date)
-                                };
-                                ruby.get_inner(class).new_instance((
-                                    ruby.float_from_f64(number),
-                                    formula,
-                                    excelx_type,
-                                    style,
-                                    link,
-                                    ruby.get_inner(base),
-                                    coordinate,
-                                ))?
-                            }
-                        }
-                    }
-                }
-            }
-        };
-        Ok(Some((coordinate, cell)))
     }
 }
 

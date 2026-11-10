@@ -45,6 +45,13 @@ class EdgeCasesTest < Minitest::Test
     Roo::Calamine.enabled = true
   end
 
+  def roo_row(path, row)
+    Roo::Calamine.enabled = false
+    Roo::Excelx.new(path).row(row)
+  ensure
+    Roo::Calamine.enabled = true
+  end
+
   def test_integer_or_float_follows_the_written_text
     path = write(<<~XML)
       <row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>1.0</v></c><c r="C1"><v>1E3</v></c>
@@ -79,6 +86,105 @@ class EdgeCasesTest < Minitest::Test
 
     assert_equal Date.new(1904, 1, 2), roo_cell(path, 1, 1)
     assert_every_path_same_as_roo(path)
+  end
+
+  NUMBER_STYLES = [0, 4, 5, 7, 8].freeze
+  DATE_STYLES = [1, 2, 3, 6].freeze
+  UNUSUAL_TEXTS = ["", " 1", "1 ", "+5", "1_000", "0x1A", "1.", ".5", "1e400", "-1e400", "1e-400", "4.9e-324",
+                   "2e-320", "9223372036854775807", "9223372036854775808", "-9223372036854775809", "#N/A", "abc",
+                   "TRUE", "12855504354071923631583389444689181878463593399757479065157632.5"].freeze
+
+  def random_digits(random, lengths)
+    Array.new(random.rand(lengths)) { random.rand(10) }.join
+  end
+
+  def written_numbers(random, count)
+    Array.new(count) do
+      sign = random.rand(4).zero? ? "-" : ""
+      fraction = random.rand(2).zero? ? "" : ".#{random_digits(random, 1..25)}"
+      exponent = random.rand(4).zero? ? "#{%w[e E].sample(random:)}#{["", "+", "-"].sample(random:)}#{random.rand(280)}" : ""
+      "#{sign}#{random_digits(random, 1..22)}#{fraction}#{exponent}"
+    end
+  end
+
+  def written_serials(random, count)
+    Array.new(count) do
+      case random.rand(3)
+      when 0 then format("%.#{random.rand(0..17)}f", (random.rand * 200_000) - 1000)
+      when 1 then format("%.17g", random.rand(-1000..100_000) + ((random.rand(86_400) + 0.5) / 86_400))
+      else format("%.17g", random.rand)
+      end
+    end
+  end
+
+  def cells_xml(texts, styles, row: 1)
+    cells = texts.product(styles).each_with_index.map do |(text, style), index|
+      type = style == :inline ? %( t="inlineStr") : %( s="#{style}")
+      formula = (index % 7).zero? ? "<f>A1</f>" : ""
+      %(<c r="#{Roo::Utils.number_to_letter(index + 1)}#{row}"#{type}>#{formula}<v>#{text}</v></c>)
+    end
+    %(<row r="#{row}">#{cells.join}</row>)
+  end
+
+  def booleans_xml(row:)
+    cells = %w[0 1 2 01 -1 TRUE].each_with_index.map do |text, index|
+      %(<c r="#{Roo::Utils.number_to_letter(index + 1)}#{row}" t="b"><v>#{text}</v></c>)
+    end
+    %(<row r="#{row}">#{cells.join}</row>)
+  end
+
+  def test_written_numbers_dates_and_times
+    random = Random.new(4)
+    numbers = write(cells_xml(written_numbers(random, 400), NUMBER_STYLES + [:inline]) + booleans_xml(row: 2))
+    dates = write(cells_xml(written_serials(random, 300) + %w[0 -0 1 0.5 1.0000001 45000.9999999], DATE_STYLES))
+
+    assert_equal [Float, Integer], roo_row(numbers, 1).map(&:class).uniq.sort_by(&:name)
+    assert_equal [Date, DateTime, Integer], roo_row(dates, 1).map(&:class).uniq.sort_by(&:name)
+    assert_every_path_same_as_roo(numbers)
+    assert_every_path_same_as_roo(dates)
+  end
+
+  def test_unusual_number_text_gets_roos_answer
+    UNUSUAL_TEXTS.each do |text|
+      [NUMBER_STYLES + [:inline], DATE_STYLES].each do |styles|
+        path = write(cells_xml([text], styles))
+
+        assert_same_as_roo("#{text.inspect} under styles #{styles}", native_only: false) do
+          Oracle.describe_cells(Roo::Excelx.new(path))
+        end
+      end
+    end
+  end
+
+  def test_cells_are_built_without_their_constructors_only_under_a_known_roo
+    path = write(<<~XML)
+      <row r="1"><c r="A1"><v>12</v></c><c r="B1" s="5"><v>1.5</v></c><c r="C1" s="1"><v>45000</v></c>
+        <c r="D1" s="2"><v>45000.5</v></c><c r="E1" s="3"><v>0.25</v></c><c r="F1" t="b"><v>1</v></c>
+        <c r="G1" t="str"><v>x</v></c><c r="H1" t="inlineStr"><is><t>y</t></is></c><c r="I1" s="4"><f>A1</f><v>0.5</v></c>
+        <c r="J1"/></row>
+    XML
+    read = -> { Oracle.describe_cells(Roo::Excelx.new(path, empty_cell: true)) }
+    (_, cells), counts = Oracle.read(native: true, &read)
+
+    assert_equal 10, cells.first.last.size
+    assert_equal 0, counts[:constructors]
+
+    with_roo_version("4.1.0") do
+      assert_same_as_roo("cells under another roo", &read)
+      _, counts = Oracle.read(native: true, &read)
+
+      assert_equal 20, counts[:constructors], "every cell and coordinate should come from its constructor"
+    end
+  end
+
+  def with_roo_version(version)
+    original = Roo::VERSION
+    Roo.send(:remove_const, :VERSION)
+    Roo.const_set(:VERSION, version)
+    yield
+  ensure
+    Roo.send(:remove_const, :VERSION)
+    Roo.const_set(:VERSION, original)
   end
 
   def test_booleans_errors_and_typed_strings
@@ -129,6 +235,52 @@ class EdgeCasesTest < Minitest::Test
     native, = Oracle.read(native: true, &edit_first)
 
     assert_equal [:ok, %w[edited bold]], roo
+    assert_equal roo, native
+  end
+
+  # roo hands out the format String of its own styles table, so changing it
+  # in place changes how roo reads the next cell with that style.
+  def stream_editing_the_format(texts = %w[2 2 2])
+    styles = %(<styleSheet xmlns="#{Workbook::MAIN}"><numFmts count="1"><numFmt numFmtId="164" formatCode="0"/></numFmts>) +
+             %(<cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="164"/></cellXfs></styleSheet>)
+    rows = texts.each_with_index.map { |text, i| %(<row r="#{i + 1}"><c r="A#{i + 1}" s="1"><v>#{text}</v></c></row>) }
+    path = write(rows.join, styles:)
+    stream = lambda do
+      Roo::Excelx.new(path).each_row_streaming.map do |row|
+        yield row.first
+        row.first.value
+      end
+    end
+    [Oracle.read(native: false, &stream).first, Oracle.read(native: true, &stream).first]
+  end
+
+  def test_a_format_changed_in_place_is_read_again_for_the_next_cell
+    edits = { 1 => "0.00", 2 => "yyyy-mm-dd" }
+    roo, native = stream_editing_the_format do |cell|
+      cell.format.replace(edits[cell.coordinate.row]) if edits.key?(cell.coordinate.row)
+    end
+
+    assert_equal [:ok, [2, 2.0, Date.new(1900, 1, 1)]], roo
+    assert_equal roo, native
+  end
+
+  def test_a_format_whose_match_raises_is_left_to_roo
+    break_format = ->(cell) { cell.format.replace("#\xff").force_encoding(Encoding::US_ASCII) }
+    roo, native = stream_editing_the_format(["2", "#N/A", ""], &break_format)
+
+    assert_equal [:ok, [2, "#N/A", nil]], roo
+    assert_equal roo, native
+
+    roo, native = stream_editing_the_format(%w[2 2], &break_format)
+
+    assert_equal [:error, ArgumentError], roo.first(2)
+    assert_equal roo, native
+  end
+
+  def test_a_format_given_another_encoding_is_read_again_for_the_next_cell
+    roo, native = stream_editing_the_format { |cell| cell.format.force_encoding(Encoding::UTF_16LE) }
+
+    assert_equal :error, roo.first
     assert_equal roo, native
   end
 
@@ -321,19 +473,22 @@ class EdgeCasesTest < Minitest::Test
     assert_same_as_roo("hyperlinks", lazy: true, &edit)
   end
 
+  def number_cells = ObjectSpace.each_object(Roo::Excelx::Cell::Number).count
+
   def test_single_cell_reads_build_only_the_cells_they_read
     path = write((1..3).map { |r| %(<row r="#{r}">#{(1..3).map { |c| %(<c r="#{"ABC"[c - 1]}#{r}"><v>#{r * c}</v></c>) }.join}</row>) }.join)
     workbook = Roo::Excelx.new(path)
-    built = 0
-    counter = TracePoint.new(:call) do |tp|
-      built += 1 if tp.method_id == :initialize && tp.defined_class == Roo::Excelx::Cell::Number
-    end
-    reads = counter.enable { [workbook.last_row, workbook.last_column, workbook.cell(2, 2), workbook.celltype(2, 2), workbook.empty?(3, 1)] }
+    GC.disable
+    before = number_cells
+    built = -> { number_cells - before }
+    reads = [workbook.last_row, workbook.last_column, workbook.cell(2, 2), workbook.celltype(2, 2), workbook.empty?(3, 1)]
 
     assert_equal [3, 3, 4, :float, false], reads
-    assert_equal 2, built
-    assert_equal(9, counter.enable { workbook.sheet_for(nil).cells.size })
-    assert_equal 9, built
+    assert_equal 2, built.call
+    assert_equal 9, workbook.sheet_for(nil).cells.size
+    assert_equal 9, built.call
+  ensure
+    GC.enable
   end
 
   def test_set_after_single_cell_reads
