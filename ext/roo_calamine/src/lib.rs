@@ -2,11 +2,13 @@
 //!
 //! [`reader`] turns worksheet XML into raw cell records without touching Ruby,
 //! on a thread of its own. [`convert`] turns those records into roo's cells,
-//! and [`store`] keeps them to build one cell at a time.
+//! and [`store`] keeps them to build one cell at a time. [`shared_strings`]
+//! reads a workbook's shared strings the way roo does.
 
 pub mod convert;
 pub mod numeric;
 pub mod reader;
+pub mod shared_strings;
 pub mod store;
 
 use std::cell::{Cell as StdCell, RefCell};
@@ -285,5 +287,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     converter.define_method("row_cells", method!(Converter::row_cells, 1))?;
 
     store::define(ruby, native)?;
+    shared_strings::define(native)?;
     Ok(())
 }

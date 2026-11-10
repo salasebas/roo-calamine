@@ -22,6 +22,20 @@ module OracleAssertions
     assert_operator counts[:lazy_stores], :>, 0, "#{label}: cells were built all at once" if lazy
   end
 
+  # Asserts that roo's SharedStrings#to_a and #to_html, read in either order,
+  # return what roo returns, and whether the native extension built them.
+  def assert_shared_strings_same_as_roo(label, path, native:, **options)
+    [%i[to_a to_html], %i[to_html to_a]].each do |order|
+      read = -> { Oracle.describe_shared_strings(Roo::Excelx.new(path, options.dup), order) }
+      roo, = Oracle.read(native: false, &read)
+      ours, counts = Oracle.read(native: true, &read)
+
+      assert_equal roo, ours, "#{label} #{order}: roo-calamine's shared strings differ from roo's"
+      assert_equal native, counts[:native_shared_strings].positive?,
+                   "#{label} #{order}: the native extension #{native ? "did not build" : "built"} the shared strings"
+    end
+  end
+
   def assert_values_same_as_roo(label, path, options = {}, native_only: true)
     roo, = Oracle.read(native: false) { Oracle.describe_streamed_values(Roo::Excelx.new(path, options.dup)) }
     fallback, = Oracle.read(native: false) { Oracle.describe_each_row_values(path, options) }

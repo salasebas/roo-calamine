@@ -71,7 +71,9 @@ if RUBY_ENGINE == "ruby"
   require_relative "calamine/excelx"
   require_relative "calamine/row_index"
   require_relative "calamine/sheet"
+  require_relative "calamine/shared_strings"
   Roo::Excelx::SheetDoc.prepend(Roo::Calamine::SheetDoc)
   Roo::Excelx::Sheet.prepend(Roo::Calamine::Sheet)
   Roo::Excelx.prepend(Roo::Calamine::Excelx)
+  Roo::Excelx::SharedStrings.prepend(Roo::Calamine::SharedStrings)
 end

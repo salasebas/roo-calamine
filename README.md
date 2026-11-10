@@ -1,7 +1,7 @@
 # roo-calamine
 
 Make [roo](https://github.com/roo-rb/roo) read `.xlsx` and `.xlsm` files
-8–22× faster on large sheets, with identical results and 4–14× less memory
+7–22× faster on large sheets, with identical results and 4–14× less memory
 outside streaming. Your roo code does not change.
 
 ```ruby
@@ -50,6 +50,11 @@ opening the workbook. Memory is peak RSS.
 | | `each` | 5.96 s, 1630 MB | 0.77 s, 322 MB | 7.7× | 0.21 s, 113 MB |
 | | 10,000 random `cell(row, col)` | 5.33 s, 1602 MB | 0.45 s, 160 MB | 11.9× | 0.23 s, 167 MB |
 | | values only: `each_row_values` | 5.21 s, 121 MB | 0.36 s, 166 MB | 14.3× | 0.24 s, 113 MB |
+| 100k rows × 10 unique strings | `each_row_streaming` | 12.03 s, 925 MB | 0.73 s, 546 MB | 16.5× | 0.43 s, 152 MB |
+| | `parse(headers: true)` | 10.61 s, 2330 MB | 1.48 s, 577 MB | 7.2× | 0.50 s, 206 MB |
+| | `each` | 10.52 s, 2272 MB | 1.27 s, 500 MB | 8.3× | 0.36 s, 152 MB |
+| | 10,000 random `cell(row, col)` | 9.71 s, 2213 MB | 1.01 s, 380 MB | 9.6× | 0.38 s, 205 MB |
+| | values only: `each_row_values` | 11.80 s, 926 MB | 0.66 s, 530 MB | 18.0× | 0.40 s, 152 MB |
 | 100 rows × 20 mixed columns | `each_row_streaming` | 16.6 ms, 45 MB | 3.4 ms, 41 MB | 4.8× | 0.7 ms, 27 MB |
 | | `parse(headers: true)` | 13.0 ms, 45 MB | 3.8 ms, 41 MB | 3.4× | 0.8 ms, 27 MB |
 | | `each` | 12.7 ms, 45 MB | 4.0 ms, 41 MB | 3.2× | 0.6 ms, 26 MB |
@@ -136,12 +141,22 @@ roo is the oracle: every check takes roo's own output as the expected result.
   ranges, rich text, inline strings, shared formulas, error cells,
   namespaces, `parse` and `each` after `set` or with a block that changes
   the workbook, and more.
+- **Shared strings.** `test/shared_strings_test.rb` compares
+  `SharedStrings#to_a` and `#to_html`, read in either order, with roo's for
+  `_x000D_` across text, CDATA, and references; `t` elements outside runs; tag
+  order; local names under `/sst/si`; line endings; and each case it leaves to
+  roo. The fixture test does the same for every roo fixture.
 - **Values only.** Both suites also compare `Roo::Calamine.each_row_values`
   with the values of roo's `each_row_streaming(pad_cells: true)`, with the
   native reader on and off.
 
 Known differences, by design:
 
+- Code that overrides roo's private shared-string parsing
+  (`SharedStrings#extract_shared_strings`, `#extract_html`,
+  `#fix_invalid_shared_strings`, `#create_html`) is bypassed while the reader
+  is on, under roo 4.0.0. Other roo versions build their shared strings
+  themselves.
 - Code that overrides roo's private cell parsing (`SheetDoc#cell_from_xml`,
   `#extract_cells`, `Cell.cell_class`) is bypassed while the reader is on, and
   so are a `Roo::Excelx` subclass's `#cell` or `#each` inside `parse` and
@@ -189,8 +204,17 @@ records, keeping the cells and values already handed out. A sheet where some
 cell would raise, or opened with `expand_merged_ranges`, is built whole, as
 before.
 
-Everything else stays roo's code: shared strings, styles, number formats,
-the base date, hyperlinks, comments, images, and every open option. It works with
+It also prepends `Roo::Excelx::SharedStrings#to_a` and `#to_html`. The first
+time either is called, the extension reads `sharedStrings.xml` with quick-xml
+and builds both arrays the way roo does, `_x000D_` fix and rich-text HTML
+included, then leaves them where roo memoizes them. roo's code and the native
+reader then use the same strings. `disable_html_wrapper` skips the HTML array
+until something asks for it. If the file uses XML that Nokogiri reads
+differently (see below), or a `vertAlign` without `val` (roo raises on it),
+roo builds the arrays itself.
+
+Everything else stays roo's code: styles, number formats, the base date,
+hyperlinks, comments, images, and every open option. It works with
 `Roo::Spreadsheet.open`, `Roo::Excelx.new`, and IO streams.
 
 It also prepends `Roo::Excelx#parse` and `#each` for calls with options
@@ -212,7 +236,9 @@ to roo's lookups once the block calls `set` or `reload`, or changes
 When a sheet uses XML the reader does not reproduce exactly the way Nokogiri
 does (a non-UTF-8 encoding, a DTD, custom entities, or malformed XML), it
 hands the sheet back to roo. A stream that hits such a spot continues in roo
-from the next row.
+from the next row. Shared strings follow the same rules, and also go back to
+roo when the part holds a processing instruction or a `<t>` holds markup
+other than text and CDATA.
 
 ## Development
 

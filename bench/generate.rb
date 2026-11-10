@@ -31,13 +31,14 @@ def write_mixed(path, rows)
   package.serialize(path)
 end
 
-def write_shared_strings(path, rows)
+# Each cell holds a word and `suffix`: by default 500 strings in all.
+def write_shared_strings(path, rows, suffix: ->(index, col) { (index * col) % 50 })
   package = Axlsx::Package.new
   package.use_shared_strings = true
   package.workbook.add_worksheet(name: "Data") do |sheet|
     sheet.add_row((1..10).map { |i| "col#{i}" })
     rows.times do |index|
-      sheet.add_row((0...10).map { |col| "#{WORDS[(index + col) % 10]} #{(index * col) % 50}" })
+      sheet.add_row((0...10).map { |col| "#{WORDS[(index + col) % 10]} #{suffix.call(index, col)}" })
     end
   end
   package.serialize(path)
@@ -47,6 +48,10 @@ FileUtils.mkdir_p(DIR)
 {
   "mixed-100k.xlsx" => -> { write_mixed(File.join(DIR, "mixed-100k.xlsx"), 100_000) },
   "shared-strings-100k.xlsx" => -> { write_shared_strings(File.join(DIR, "shared-strings-100k.xlsx"), 100_000) },
+  "unique-strings-100k.xlsx" => lambda {
+    write_shared_strings(File.join(DIR, "unique-strings-100k.xlsx"), 100_000,
+                         suffix: ->(index, col) { "#{index}-#{col}" })
+  },
   "small.xlsx" => -> { write_mixed(File.join(DIR, "small.xlsx"), 100) }
 }.each do |name, write|
   next if File.exist?(File.join(DIR, name))

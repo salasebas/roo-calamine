@@ -23,7 +23,7 @@ SCENARIOS = {
   "values" => "values only: `Roo::Calamine.each_row_values`"
 }.freeze
 COMPARED = %w[roo roo-calamine].freeze
-FIXTURES = %w[mixed-100k.xlsx shared-strings-100k.xlsx small.xlsx].freeze
+FIXTURES = %w[mixed-100k.xlsx shared-strings-100k.xlsx unique-strings-100k.xlsx small.xlsx].freeze
 MB = 1024 * 1024
 
 system(RbConfig.ruby, File.join(__dir__, "generate.rb"), exception: true)

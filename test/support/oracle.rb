@@ -48,6 +48,12 @@ module Oracle
     end
   end)
 
+  Roo::Calamine::Native.singleton_class.prepend(Module.new do
+    define_method(:shared_strings) do |*args|
+      super(*args).tap { Oracle.counts[:native_shared_strings] += 1 }
+    end
+  end)
+
   BOUNDS = %i[first_row last_row first_column last_column].freeze
   STREAM_OPTIONS = [{}, { pad_cells: true }, { offset: 1 }, { max_rows: 2 },
                     { offset: 1, max_rows: 3, pad_cells: true }].freeze
@@ -120,6 +126,18 @@ module Oracle
       end
       [sheet, rows]
     end
+  end
+
+  # roo's two shared-string arrays, read in `order`, with the encoding of
+  # each string and whether every string is an object of its own.
+  def describe_shared_strings(workbook, order)
+    strings = workbook.shared_strings
+    arrays = order.map { |method| outcome { strings.public_send(method) } }
+    objects = arrays.filter_map { |status, value| value if status == :ok }.flatten(1)
+    described = arrays.map do |status, *rest|
+      status == :ok ? [status, rest.first.map { |string| [*describe_value(string), string.encoding] }] : [status, *rest]
+    end
+    [order, described, objects.map(&:object_id).uniq.size == objects.size]
   end
 
   # The Roo::Base API on top of the cells: bounds, rows, columns, formulas,
