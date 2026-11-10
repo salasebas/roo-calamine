@@ -182,9 +182,10 @@ Known differences, by design:
   before any cell is built rather than alongside: on the 100k-row benchmark
   files, a single-cell read and then `#to_csv` take about 55% longer than
   `#to_csv` alone.
-- A cell value set by hand to a String in an encoding other than UTF-8, with
-  non-ASCII text, makes `to_csv` raise `Encoding::CompatibilityError` where
-  roo writes it. Cells read from a file are always UTF-8.
+- A cell value set by hand to non-ASCII text in an encoding other than UTF-8
+  can make `to_csv` raise `Encoding::CompatibilityError`, where roo writes it,
+  when its line also holds non-ASCII UTF-8 text. Cells read from a file are
+  always UTF-8.
 - On a sheet built whole (see [How it works](#how-it-works)), inside an
   `each` block without options, a write straight into `sheet_for(...).cells`
   (not through `set`) does not show in later rows.
