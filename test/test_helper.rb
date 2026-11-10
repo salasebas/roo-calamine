@@ -34,7 +34,7 @@ module OracleAssertions
   end
 end
 
-# roo answers the first row of each #each call and the row index the rest, so
-# the tests' small sheets cover both and the hand-over between them.
+# On sheets of 3 rows or more, roo answers the first row of each #each call
+# and the row index the rest, so small sheets cover both and the hand-over.
 Roo::Calamine::RowIndex.send(:remove_const, :ROO_ROWS)
 Roo::Calamine::RowIndex.const_set(:ROO_ROWS, 1)

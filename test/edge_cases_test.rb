@@ -292,12 +292,37 @@ class EdgeCasesTest < Minitest::Test
     dense = write(rows)
     sparse = write(rows + %(<row r="6"><c r="XFD6"><v>6</v></c></row>))
 
+    short = write(%(<row r="1"><c r="A1"><v>1</v></c></row><row r="2"><c r="A2"><v>2</v></c></row>))
+
     # roo's Sheet#row answers the first row, and every row of a sheet too
-    # sparse to lay out.
-    { dense => 1, sparse => 6 }.each do |path, rows_from_roo|
+    # short to repay the index or too sparse to lay out.
+    { dense => 1, short => 2, sparse => 6 }.each do |path, rows_from_roo|
       _, counts = Oracle.read(native: true) { Roo::Excelx.new(path).each.to_a }
 
       assert_equal rows_from_roo, counts[:sheet_rows]
+    end
+  end
+
+  # A blank String is no value for the bounds, so each sheet's blank cell lies
+  # outside them, where the index must not place it.
+  OUTSIDE_THE_BOUNDS = {
+    "above the first row" => %(<row r="1"><c r="B1" t="str"><v></v></c></row>
+      <row r="2"><c r="A2"><v>2</v></c><c r="B2"><v>2</v></c></row>
+      <row r="3"><c r="A3"><v>3</v></c></row><row r="4"><c r="A4"><v>4</v></c></row>),
+    "right of the last column" => %(<row r="2"><c r="A2"><v>2</v></c><c r="B2"><v>2</v></c><c r="C2" t="str"><v></v></c></row>
+      <row r="3"><c r="B3"><v>3</v></c></row><row r="4"><c r="A4"><v>4</v></c><c r="B4"><v>4</v></c></row>),
+    "left of the first column" => %(<row r="2"><c r="B2"><v>2</v></c><c r="C2"><v>2</v></c></row>
+      <row r="3"><c r="A3" t="str"><v></v></c><c r="B3"><v>3</v></c><c r="C3"><v>3</v></c></row>
+      <row r="4"><c r="B4"><v>4</v></c><c r="C4"><v>4</v></c></row>)
+  }.freeze
+
+  def test_each_without_options_leaves_out_cells_outside_the_bounds
+    OUTSIDE_THE_BOUNDS.each do |name, rows|
+      path = write(rows)
+      _, counts = Oracle.read(native: true) { Roo::Excelx.new(path).each.to_a }
+
+      assert_equal 1, counts[:sheet_rows], "#{name}: the index did not answer"
+      assert_same_as_roo(name) { Oracle.describe_rows(Roo::Excelx.new(path).each.to_a) }
     end
   end
 

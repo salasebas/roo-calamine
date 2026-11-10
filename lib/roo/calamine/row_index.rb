@@ -19,9 +19,8 @@ module Roo
         @requests = 0
       end
 
-      # `writes` is how many times Excelx#set has run on the workbook.
-      def row(line, writes)
-        offset = offset(line) if current?(writes)
+      def row(line, set_calls)
+        offset = offset(line) if current?(set_calls)
         return @workbook.row(line) unless offset
 
         @cells[offset, @width].map! { |cell| cell&.value }
@@ -33,17 +32,17 @@ module Roo
         (line - @first_row) * @width if line.is_a?(Integer) && line.between?(@first_row, @last_row)
       end
 
-      def current?(writes)
+      def current?(set_calls)
         return false if (@requests += 1) <= ROO_ROWS
 
         sheet = @workbook.sheet_for(nil)
-        build(sheet, writes) unless @sheet
-        @cells && @sheet.equal?(sheet) && @writes == writes
+        build(sheet, set_calls) unless @sheet
+        @cells && @sheet.equal?(sheet) && @set_calls == set_calls
       end
 
-      def build(sheet, writes)
+      def build(sheet, set_calls)
         @sheet = sheet
-        @writes = writes
+        @set_calls = set_calls
         return unless sheet.first_row && sheet.last_row >= 3 * ROO_ROWS
 
         @first_row = sheet.first_row
