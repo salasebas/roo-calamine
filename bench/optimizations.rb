@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Measurements behind the optimization notes in the README.
+# Measures the GVL handoff, shared-string reuse, and lazy row conversion.
 #
 #   cd bench && bundle exec ruby optimizations.rb (gvl|strings|lazy) LIBRARY
 #
