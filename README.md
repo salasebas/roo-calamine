@@ -44,24 +44,25 @@ opening the workbook. Memory is peak RSS.
 | | `parse(headers: true)` | 21.13 s, 3306 MB | 2.16 s, 828 MB | 9.8× | 0.75 s, 283 MB |
 | | `each` | 20.23 s, 3281 MB | 1.83 s, 671 MB | 11.0× | 0.46 s, 178 MB |
 | | 10,000 random `cell(row, col)` | 18.64 s, 3274 MB | 0.86 s, 235 MB | 21.6× | 0.50 s, 249 MB |
-| | `to_csv` | 27.52 s, 3369 MB | 3.26 s, 842 MB | 8.4× | 0.72 s, 178 MB |
+| | `to_csv` | 25.20 s, 3367 MB | 3.14 s, 834 MB | 8.0× | 0.71 s, 178 MB |
 | | values only: `each_row_values` | 14.86 s, 118 MB | 0.79 s, 133 MB | 18.8× | 0.55 s, 178 MB |
 | 100k rows × 10 shared strings | `each_row_streaming` | 5.37 s, 121 MB | 0.41 s, 133 MB | 13.3× | 0.25 s, 113 MB |
 | | `parse(headers: true)` | 6.44 s, 1630 MB | 0.83 s, 397 MB | 7.8× | 0.34 s, 208 MB |
 | | `each` | 5.96 s, 1630 MB | 0.77 s, 322 MB | 7.7× | 0.21 s, 113 MB |
 | | 10,000 random `cell(row, col)` | 5.33 s, 1602 MB | 0.45 s, 160 MB | 11.9× | 0.23 s, 167 MB |
-| | `to_csv` | 8.05 s, 1619 MB | 1.41 s, 376 MB | 5.7× | 0.25 s, 114 MB |
+| | `to_csv` | 7.54 s, 1619 MB | 1.34 s, 356 MB | 5.6× | 0.24 s, 114 MB |
 | | values only: `each_row_values` | 5.21 s, 121 MB | 0.36 s, 166 MB | 14.3× | 0.24 s, 113 MB |
 | 100k rows × 10 unique strings | `each_row_streaming` | 12.03 s, 925 MB | 0.73 s, 546 MB | 16.5× | 0.43 s, 152 MB |
 | | `parse(headers: true)` | 10.61 s, 2330 MB | 1.48 s, 577 MB | 7.2× | 0.50 s, 206 MB |
 | | `each` | 10.52 s, 2272 MB | 1.27 s, 500 MB | 8.3× | 0.36 s, 152 MB |
 | | 10,000 random `cell(row, col)` | 9.71 s, 2213 MB | 1.01 s, 380 MB | 9.6× | 0.38 s, 205 MB |
+| | `to_csv` | 11.49 s, 2368 MB | 1.87 s, 619 MB | 6.2× | 0.39 s, 153 MB |
 | | values only: `each_row_values` | 11.80 s, 926 MB | 0.66 s, 530 MB | 18.0× | 0.40 s, 152 MB |
 | 100 rows × 20 mixed columns | `each_row_streaming` | 16.6 ms, 45 MB | 3.4 ms, 41 MB | 4.8× | 0.7 ms, 27 MB |
 | | `parse(headers: true)` | 13.0 ms, 45 MB | 3.8 ms, 41 MB | 3.4× | 0.8 ms, 27 MB |
 | | `each` | 12.7 ms, 45 MB | 4.0 ms, 41 MB | 3.2× | 0.6 ms, 26 MB |
 | | 10,000 random `cell(row, col)` | 19.8 ms, 46 MB | 10.4 ms, 42 MB | 1.9× | 1.5 ms, 27 MB |
-| | `to_csv` | 16.8 ms, 45 MB | 5.4 ms, 41 MB | 3.1× | 0.9 ms, 27 MB |
+| | `to_csv` | 16.9 ms, 45 MB | 4.5 ms, 41 MB | 3.8× | 0.9 ms, 27 MB |
 | | values only: `each_row_values` | 16.8 ms, 46 MB | 3.1 ms, 41 MB | 5.4× | 0.7 ms, 27 MB |
 
 For the values-only rows, plain roo runs the `each_row_streaming(pad_cells:
@@ -180,8 +181,8 @@ Known differences, by design:
   `#last_row`, `#row`, `#each` without options, `#parse` without a block)
   costs more than building it from the start, because the sheet is parsed
   before any cell is built rather than alongside: on the 100k-row benchmark
-  files, a single-cell read and then `#to_csv` take about 55% longer than
-  `#to_csv` alone.
+  files, a single-cell read and then `#each(headers: true)` take about 20%
+  longer than `#each(headers: true)` alone.
 - A cell value set by hand to non-ASCII text in an encoding other than UTF-8
   can make `to_csv` raise `Encoding::CompatibilityError`, where roo writes it,
   when its line also holds non-ASCII UTF-8 text. Cells read from a file are
