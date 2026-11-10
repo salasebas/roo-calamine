@@ -185,7 +185,7 @@ class ToCsvTest < Minitest::Test
     end
     roo, = Oracle.read(native: false, &write)
 
-    assert_equal [:ok, ",,\"x\",,\n,,,,\n,,,,1\n", Encoding::US_ASCII], roo.last.find { |call| call[1] == { sheet: "Two" } }[2]
+    assert_equal [:ok, ",,\"x\",,\n,,,,\n,,,,1\n"], roo.last.find { |call| call[1] == { sheet: "Two" } }[2].first(2)
     assert_same_as_roo("written before the bounds", &write)
   end
 
@@ -247,6 +247,14 @@ class ToCsvTest < Minitest::Test
     end
   end
 
+  def assert_roo_raises_on_the_set_cell(call)
+    args, options, (outcome, error, message), written = call
+
+    assert_equal [[@csv], { sheet: "Sheet1" }, :error, NoMethodError, "1,2,\n3,"], [args, options, outcome, error, written]
+    # Ruby 3.3 quotes the method name as `empty?', later versions as 'empty?'.
+    assert_match(/undefined method .empty\?' for an instance of Roo::Excelx::Cell/, message)
+  end
+
   def test_set_before_to_csv
     rows = %(<row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>2</v></c></row>) +
            %(<row r="2"><c r="A2"><v>3</v></c><c r="C2"><v>4</v></c></row>)
@@ -259,8 +267,7 @@ class ToCsvTest < Minitest::Test
     end
     roo, = Oracle.read(native: false) { set.call([2, 2]) }
 
-    assert_equal [[@csv], { sheet: "Sheet1" }, [:error, NoMethodError, "undefined method 'empty?' for an instance of Roo::Excelx::Cell"],
-                  "1,2,\n3,"], roo.last[1]
+    assert_roo_raises_on_the_set_cell(roo.last[1])
     [[[2, 2]], [[1, 1]], [[9, 9]], [[3, 1], [9, 9]]].each do |cells|
       assert_same_as_roo("set #{cells}") { set.call(*cells) }
     end
