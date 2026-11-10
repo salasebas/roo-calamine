@@ -15,6 +15,7 @@ class RooFixturesTest < Minitest::Test
     "Pfand_from_windows_phone.xlsm" => "worksheets are UTF-16"
   }.freeze
 
+  SHARED_STRINGS_OPTIONS = [{}, { disable_html_wrapper: true }].freeze
   OPEN_OPTIONS = [{}, { expand_merged_ranges: true }, { empty_cell: true },
                   { disable_html_wrapper: true }, { no_hyperlinks: true }].freeze
 
@@ -42,6 +43,18 @@ class RooFixturesTest < Minitest::Test
     define_method("test_each_row_values_#{slug}") do
       OPEN_OPTIONS.each do |options|
         assert_values_same_as_roo("#{name} each_row_values #{options}", path, options, native_only:)
+      end
+    end
+
+    define_method("test_shared_strings_#{slug}") do
+      has_part = Oracle.outcome do
+        workbook = Roo::Excelx.new(path)
+        workbook.shared_strings.send(:doc_exists?)
+      end
+      native = has_part == [:ok, true] && native_only
+
+      SHARED_STRINGS_OPTIONS.each do |options|
+        assert_shared_strings_same_as_roo("#{name} shared strings #{options}", path, native:, **options)
       end
     end
 

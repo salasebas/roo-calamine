@@ -134,12 +134,22 @@ roo is the oracle: every check takes roo's own output as the expected result.
   ranges, rich text, inline strings, shared formulas, error cells,
   namespaces, `parse` and `each` after `set` or with a block that changes
   the workbook, and more.
+- **Shared strings.** `test/shared_strings_test.rb` compares
+  `SharedStrings#to_a` and `#to_html`, read in either order, with roo's for
+  `_x000D_` across text, CDATA, and references; `t` elements outside runs; tag
+  order; local names under `/sst/si`; line endings; and each case it leaves to
+  roo. The fixture test does the same for every roo fixture.
 - **Values only.** Both suites also compare `Roo::Calamine.each_row_values`
   with the values of roo's `each_row_streaming(pad_cells: true)`, with the
   native reader on and off.
 
 Known differences, by design:
 
+- Code that overrides roo's private shared-string parsing
+  (`SharedStrings#extract_shared_strings`, `#extract_html`,
+  `#fix_invalid_shared_strings`, `#create_html`) is bypassed while the reader
+  is on, under roo 4.0.0. Other roo versions build their shared strings
+  themselves.
 - Code that overrides roo's private cell parsing (`SheetDoc#cell_from_xml`,
   `#extract_cells`, `Cell.cell_class`) is bypassed while the reader is on, and
   so are a `Roo::Excelx` subclass's `#cell` or `#each` inside `parse` and
@@ -178,8 +188,17 @@ builds a cell the first time it is read. Anything that needs the whole
 keeping the cells already handed out. A sheet where some cell would raise, or
 opened with `expand_merged_ranges`, is built whole, as before.
 
-Everything else stays roo's code: shared strings, styles, number formats,
-the base date, hyperlinks, comments, images, and every open option. It works with
+It also prepends `Roo::Excelx::SharedStrings#to_a` and `#to_html`. The first
+time either is called, the extension reads `sharedStrings.xml` with quick-xml
+and builds both arrays the way roo does, `_x000D_` fix and rich-text HTML
+included, then leaves them where roo memoizes them. roo's code and the native
+reader then use the same strings. `disable_html_wrapper` skips the HTML array
+until something asks for it. If the file uses XML that Nokogiri reads
+differently (see below), or a `vertAlign` without `val` (roo raises on it),
+roo builds the arrays itself.
+
+Everything else stays roo's code: styles, number formats, the base date,
+hyperlinks, comments, images, and every open option. It works with
 `Roo::Spreadsheet.open`, `Roo::Excelx.new`, and IO streams.
 
 It also prepends `Roo::Excelx#parse` and `#each` for calls with options
@@ -198,7 +217,8 @@ changes `default_sheet`.
 When a sheet uses XML the reader does not reproduce exactly the way Nokogiri
 does (a non-UTF-8 encoding, a DTD, custom entities, or malformed XML), it
 hands the sheet back to roo. A stream that hits such a spot continues in roo
-from the next row.
+from the next row. Shared strings follow the same rules, and also go back to
+roo when a `<t>` holds markup other than text and CDATA.
 
 ## Development
 
