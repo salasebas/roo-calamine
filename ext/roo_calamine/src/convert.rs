@@ -11,7 +11,7 @@ use magnus::{
     Symbol, TypedData, Value,
 };
 
-use crate::reader::{Body, Mode, RawCell, RawRow};
+use crate::reader::{parse_index, Body, Kind, Mode, RawCell, RawRow, Reference, Style};
 
 fn constant<T: magnus::TryConvert>(ruby: &Ruby, path: &str) -> T {
     ruby.eval(path).expect("roo is loaded before roo/calamine")
@@ -35,36 +35,6 @@ enum ValueType {
     /// `:float`, `:percentage`, and any other format type roo builds a
     /// `Cell::Number` for.
     Number,
-}
-
-/// `Roo::Utils.extract_coordinate` for well-formed references. `None` means
-/// roo raises, so the caller lets roo's own method produce the error.
-pub fn parse_reference(reference: &str) -> Option<(i64, i64)> {
-    let (mut column, mut row) = (0i64, 0i64);
-    let mut digits = false;
-    for byte in reference.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' if !digits => {
-                column = column
-                    .checked_mul(26)?
-                    .checked_add(i64::from(byte & 0x1f))?;
-            }
-            b'0'..=b'9' => {
-                digits = true;
-                row = row.checked_mul(10)?.checked_add(i64::from(byte - b'0'))?;
-            }
-            _ => return None,
-        }
-    }
-    (column != 0 && digits).then_some((row, column))
-}
-
-/// `String#to_i` for plain decimal digits; `None` defers to Ruby.
-pub fn parse_index(text: &str) -> Option<usize> {
-    if text.is_empty() || text.len() > 18 || !text.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    text.parse().ok()
 }
 
 /// Turns raw rows into roo cells for one worksheet. The Ruby objects it keeps
@@ -122,15 +92,11 @@ impl Converter {
         })
     }
 
-    pub fn mode(&self) -> Mode {
-        self.mode
-    }
-
     /// `SheetDoc#each_cell` for a streamed row: every cell, empty ones too.
     pub fn row_cells(ruby: &Ruby, rb_self: &Self, row: &crate::Row) -> Result<RArray, Error> {
         let cells = ruby.ary_new_capa(row.raw().cells.len());
         for (index, raw) in row.raw().cells.iter().enumerate() {
-            if let Some((_, cell)) = rb_self.cell(ruby, raw, 0, index + 1)? {
+            if let Some((_, cell)) = rb_self.cell(ruby, row.raw(), raw, 0, index + 1)? {
                 cells.push(cell)?;
             }
         }
@@ -146,7 +112,7 @@ impl Converter {
         row_number: usize,
     ) -> Result<(), Error> {
         for (index, raw) in row.cells.iter().enumerate() {
-            if let Some((coordinate, cell)) = self.cell(ruby, raw, row_number, index + 1)? {
+            if let Some((coordinate, cell)) = self.cell(ruby, row, raw, row_number, index + 1)? {
                 cells.aset(coordinate, cell)?;
             }
         }
@@ -165,27 +131,24 @@ impl Converter {
         column: usize,
     ) -> Result<Value, Error> {
         let coordinate = ruby.get_inner(&COORDINATE);
-        match (&raw.r, self.mode) {
-            (Some(reference), _) => match parse_reference(reference) {
-                Some((row, column)) => coordinate.new_instance((row, column)),
-                None => self
-                    .context(ruby)
-                    .funcall("coordinate", (ruby.str_new(reference),)),
-            },
-            (None, Mode::Document) => coordinate.new_instance((row, column)),
-            (None, Mode::Stream) => self.context(ruby).funcall("coordinate", (ruby.qnil(),)),
+        match (&raw.reference, self.mode) {
+            (Reference::At { row, column }, _) => coordinate.new_instance((*row, *column)),
+            (Reference::Invalid(reference), _) => self
+                .context(ruby)
+                .funcall("coordinate", (ruby.str_new(reference),)),
+            (Reference::Missing, Mode::Document) => coordinate.new_instance((row, column)),
+            (Reference::Missing, Mode::Stream) => {
+                self.context(ruby).funcall("coordinate", (ruby.qnil(),))
+            }
         }
     }
 
     fn style(&self, ruby: &Ruby, raw: &RawCell) -> Result<Value, Error> {
-        match raw.s.as_deref() {
-            None => Ok(0i64.into_value_with(ruby)),
-            Some(text) => match parse_index(text).filter(|i| *i < 1 << 30) {
-                Some(index) => Ok((index as i64).into_value_with(ruby)),
-                None => self
-                    .context(ruby)
-                    .funcall("style_index", (ruby.str_new(text),)),
-            },
+        match &raw.style {
+            Style::Index(index) => Ok(index.into_value_with(ruby)),
+            Style::Other(text) => self
+                .context(ruby)
+                .funcall("style_index", (ruby.str_new(text),)),
         }
     }
 
@@ -241,11 +204,12 @@ impl Converter {
     fn cell(
         &self,
         ruby: &Ruby,
+        row: &RawRow,
         raw: &RawCell,
-        row: usize,
+        row_number: usize,
         column: usize,
     ) -> Result<Option<(Value, Value)>, Error> {
-        let coordinate = self.coordinate(ruby, raw, row, column)?;
+        let coordinate = self.coordinate(ruby, raw, row_number, column)?;
         let style = self.style(ruby, raw)?;
         let link = match self.hyperlinks {
             Some(hyperlinks) => ruby
@@ -254,7 +218,7 @@ impl Converter {
                 .unwrap_or_else(|| ruby.qnil().as_value()),
             None => ruby.qnil().as_value(),
         };
-        let formula = raw.formula.as_deref().map(|f| ruby.str_new(f));
+        let formula = raw.formula.as_ref().map(|f| ruby.str_new(row.text(f)));
         let cell: Value =
             match &raw.body {
                 Body::Empty => {
@@ -264,7 +228,7 @@ impl Converter {
                     ruby.get_inner(&CELL_EMPTY).new_instance((coordinate,))?
                 }
                 Body::Inline(text) => ruby.get_inner(&CELL_STRING).new_instance((
-                    ruby.str_new(text),
+                    ruby.str_new(row.text(text)),
                     formula,
                     style,
                     link,
@@ -273,20 +237,21 @@ impl Converter {
                 // roo looks up the style format for every `v` cell, which raises when
                 // the workbook has no styles part, so this does too.
                 Body::Value(text) => {
-                    match (raw.t.as_deref(), self.style_info(ruby, style)?) {
-                        (Some("s"), _) => {
+                    let text = row.text(text);
+                    match (raw.kind, self.style_info(ruby, style)?) {
+                        (Kind::Shared, _) => {
                             let value = self.shared_string(ruby, text)?;
                             ruby.get_inner(&CELL_STRING)
                                 .new_instance((value, formula, style, link, coordinate))?
                         }
-                        (Some("b"), _) => ruby.get_inner(&CELL_BOOLEAN).new_instance((
+                        (Kind::Boolean, _) => ruby.get_inner(&CELL_BOOLEAN).new_instance((
                             ruby.str_new(text),
                             formula,
                             style,
                             link,
                             coordinate,
                         ))?,
-                        (Some("str"), _) => ruby.get_inner(&CELL_STRING).new_instance((
+                        (Kind::Str, _) => ruby.get_inner(&CELL_STRING).new_instance((
                             ruby.str_new(text),
                             formula,
                             style,
@@ -294,7 +259,7 @@ impl Converter {
                             coordinate,
                         ))?,
                         (kind, (format, format_type)) => {
-                            let value_type = if kind == Some("inlineStr") {
+                            let value_type = if kind == Kind::InlineStr {
                                 ValueType::Number
                             } else {
                                 format_type
@@ -341,30 +306,5 @@ impl Converter {
                 }
             };
         Ok(Some((coordinate, cell)))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_references_like_roo() {
-        assert_eq!(parse_reference("A1"), Some((1, 1)));
-        assert_eq!(parse_reference("aa10"), Some((10, 27)));
-        assert_eq!(parse_reference("XFD1048576"), Some((1048576, 16384)));
-        assert_eq!(parse_reference("1A"), None);
-        assert_eq!(parse_reference("A"), None);
-        assert_eq!(parse_reference("A1B"), None);
-        assert_eq!(parse_reference("$A$1"), None);
-    }
-
-    #[test]
-    fn parses_only_plain_indexes() {
-        assert_eq!(parse_index("12"), Some(12));
-        assert_eq!(parse_index("007"), Some(7));
-        assert_eq!(parse_index(""), None);
-        assert_eq!(parse_index("+1"), None);
-        assert_eq!(parse_index(" 1"), None);
     }
 }

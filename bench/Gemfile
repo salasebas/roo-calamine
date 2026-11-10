@@ -1,0 +1,8 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+gem "calx", "0.1.0"
+gem "caxlsx", "~> 4.5"
+gem "roo", "~> 4.0"
+gem "roo-calamine", path: ".."
