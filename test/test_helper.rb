@@ -8,8 +8,9 @@ require_relative "support/workbook"
 
 module OracleAssertions
   # Asserts that roo-calamine returns what roo returns for `description`, and
-  # that the native reader, not roo's parser, produced it.
-  def assert_same_as_roo(label, native_only: true, &)
+  # that the native reader, not roo's parser, produced it; with `lazy`, that
+  # it built cells one at a time as they were read.
+  def assert_same_as_roo(label, native_only: true, lazy: false, &)
     roo, = Oracle.read(native: false, &)
     native, counts = Oracle.read(native: true, &)
 
@@ -18,6 +19,7 @@ module OracleAssertions
 
     assert_operator counts[:native_readers], :>, 0, "#{label}: the native reader did not run"
     assert_equal 0, counts[:roo_cells], "#{label}: roo parsed cells itself"
+    assert_operator counts[:lazy_stores], :>, 0, "#{label}: cells were built all at once" if lazy
   end
 
   def assert_values_same_as_roo(label, path, options = {}, native_only: true)

@@ -7,13 +7,22 @@ module Roo
     # cells hash, one cell at a time. These keep roo's header handling (its own
     # private methods) and read the cells hash with less work per cell.
     # Without options, #each reads its rows through a RowIndex.
+    #
+    # roo's single-cell lookups read Sheet#cell_at instead of Sheet#cells, so
+    # they build only the cells they read. #each and #parse read every cell, so
+    # they build them all at once, as roo does.
     module Excelx
       NO_CELLS = [].freeze
       private_constant :NO_CELLS
 
       def each(options = {}, &)
-        return super if !block_given? || !Calamine.enabled?
-        return (roos_row? ? each_without_options(&) : super) if options.empty?
+        return super unless block_given?
+
+        if options.empty?
+          build_cells
+          return row_index? ? each_without_options(&) : super
+        end
+        return super unless Calamine.enabled?
 
         headers = header_columns(options)
         @header_line.upto(last_row) do |line|
@@ -34,6 +43,42 @@ module Roo
         options[:headers] == true ? rows : rows.drop(1)
       end
 
+      def cell(row, col, sheet = nil)
+        safe_send(sheet_for(sheet).cell_at(normalize(row, col)), :value)
+      end
+
+      def formula(row, col, sheet = nil)
+        safe_send(sheet_for(sheet).cell_at(normalize(row, col)), :formula)
+      end
+
+      def font(row, col, sheet = nil)
+        definition_index = safe_send(sheet_for(sheet).cell_at(normalize(row, col)), :style)
+        styles.definitions[definition_index] if definition_index
+      end
+
+      def celltype(row, col, sheet = nil)
+        safe_send(sheet_for(sheet).cell_at(normalize(row, col)), :type)
+      end
+
+      def excelx_type(row, col, sheet = nil)
+        safe_send(sheet_for(sheet).cell_at(normalize(row, col)), :cell_type)
+      end
+
+      def excelx_value(row, col, sheet = nil)
+        safe_send(sheet_for(sheet).cell_at(normalize(row, col)), :cell_value)
+      end
+
+      def formatted_value(row, col, sheet = nil)
+        safe_send(sheet_for(sheet).cell_at(normalize(row, col)), :formatted_value)
+      end
+
+      def empty?(row, col, sheet = nil)
+        sheet = sheet_for(sheet)
+        cell = sheet.cell_at(normalize(row, col))
+        !cell || cell.empty? ||
+          (row < sheet.first_row || row > sheet.last_row || col < sheet.first_column || col > sheet.last_column)
+      end
+
       def set(...)
         @calamine_set_calls = (@calamine_set_calls || 0) + 1
         super
@@ -47,15 +92,24 @@ module Roo
         1.upto(last_row) { |line| yield index.row(line, @calamine_set_calls) }
       end
 
-      def roos_row?
-        method(:row).owner.equal?(::Roo::Excelx)
+      def row_index?
+        Calamine.enabled? && method(:row).owner.equal?(::Roo::Excelx)
       end
 
       # Roo::Base#each, up to its loop over the rows.
       def header_columns(options)
         clean_sheet_if_need(options)
+        build_cells
         search_or_set_header(options)
         @headers || (first_column..last_column).to_h { |column| [cell(@header_line, column), column] }
+      end
+
+      # Builds every cell before roo's next step, which reads them all. When
+      # that raises, roo's own read raises the same error where roo raises it.
+      def build_cells
+        sheet_for(nil).cells
+      rescue StandardError
+        nil
       end
 
       def rows_for(headers)
