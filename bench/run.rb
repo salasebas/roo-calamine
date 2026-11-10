@@ -18,6 +18,7 @@ LIBRARIES = %w[roo roo-calamine calx].freeze
 SCENARIOS = {
   "stream" => "`Roo::Spreadsheet.open` + `each_row_streaming`",
   "parse" => "`parse(headers: true)`",
+  "each" => "`each` (one Array of values per row)",
   "cell" => "10,000 random `cell(row, col)`",
   "values" => "values only: `Roo::Calamine.each_row_values`"
 }.freeze
@@ -47,7 +48,9 @@ def cpu
 end
 
 def describe(result)
-  format("%<seconds>.2f s, %<mb>d MB", seconds: result[:seconds], mb: result[:peak_rss] / MB)
+  seconds = result[:seconds]
+  time = seconds < 0.1 ? format("%.1f ms", seconds * 1000) : format("%.2f s", seconds)
+  "#{time}, #{result[:peak_rss] / MB} MB"
 end
 
 puts "Ruby #{RUBY_VERSION} (#{RUBY_PLATFORM}), #{`uname -sr`.strip}, #{cpu}, #{Etc.nprocessors} cores, " \
