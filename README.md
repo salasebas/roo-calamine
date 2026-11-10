@@ -50,11 +50,13 @@ It also prepends `Roo::Excelx#parse` and `#each` for calls with options
 handling and build each row's Hash from the `cells` hash. roo builds it with
 one `#cell` call per value instead. `parse` without a block groups the cells
 by row in one pass. `each`, and `parse` with a block, look up each value
-directly, because the block may change the workbook between rows. On a
-sheet of 3,000 rows or more, `each` without options, behind
-`each_with_index`, `to_a`, and `parse` without options, reads rows past the
-first 1,000 from an index built in one pass over the sheet's cells, and hands back to roo's lookups once the block calls
-`set`, `reload`, or changes `default_sheet`.
+directly, because the block may change the workbook between rows.
+
+On a sheet of 3,000 rows or more, `each` without options, behind
+`each_with_index`, `to_a`, and `parse` without options, reads the rows past
+the first 1,000 from an index built in one pass over the sheet's cells. It
+hands back to roo's lookups once the block calls `set` or `reload`, or
+changes `default_sheet`.
 
 When a sheet uses XML the reader does not reproduce exactly the way Nokogiri
 does (a non-UTF-8 encoding, a DTD, custom entities, or malformed XML), it

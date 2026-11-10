@@ -35,7 +35,7 @@ module Roo
       end
 
       def set(...)
-        @calamine_writes = (@calamine_writes || 0) + 1
+        @calamine_set_calls = (@calamine_set_calls || 0) + 1
         super
       end
 
@@ -44,7 +44,7 @@ module Roo
       # Roo::Base#each without options: `1.upto(last_row) { |line| yield row(line) }`.
       def each_without_options
         index = RowIndex.new(self)
-        1.upto(last_row) { |line| yield index.row(line, @calamine_writes) }
+        1.upto(last_row) { |line| yield index.row(line, @calamine_set_calls) }
       end
 
       def roos_row?
