@@ -123,7 +123,9 @@ roo is the oracle: every check takes roo's own output as the expected result.
 Known differences, by design:
 
 - Code that overrides roo's private cell parsing (`SheetDoc#cell_from_xml`,
-  `#extract_cells`, `Cell.cell_class`) is bypassed while the reader is on.
+  `#extract_cells`, `Cell.cell_class`) is bypassed while the reader is on, and
+  so is a `Roo::Excelx` subclass's `#cell` or `#each` inside `parse` and
+  `each` with options.
 - On XML that breaks partway, `each_row_streaming` raises the same
   `Nokogiri::XML::SyntaxError` as roo but yields a few more rows before it.
 - Streaming uses about 10 MB more peak memory.

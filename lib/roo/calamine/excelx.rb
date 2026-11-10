@@ -25,8 +25,6 @@ module Roo
         end
       end
 
-      # Without a block, no other code runs while the rows are built, so one
-      # pass over the cells hash replaces a lookup per value.
       def parse(options = {})
         return super if block_given? || options.empty? || !Calamine.enabled?
 
