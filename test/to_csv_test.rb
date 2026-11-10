@@ -217,7 +217,7 @@ class ToCsvTest < Minitest::Test
 
   def test_the_workbook_bounds_set_the_rows_and_columns
     path = types_book
-    [[:last_row, 3], [:last_row, 9], [:last_row, 9.0], [:last_column, 4], [:last_column, 15],
+    [[:last_row, 3], [:last_row, 9], [:last_row, 9.0], [:last_column, 0], [:last_column, 4], [:last_column, 15],
      [:last_column, 15.0]].each do |name, value|
       subclass = Class.new(Roo::Excelx) { define_method(name) { |_sheet = nil| value } }
 

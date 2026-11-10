@@ -42,7 +42,7 @@ module Roo
         first_column = sheet.first_column
         last_column = sheet.last_column
         separators = Hash.new { |runs, count| runs[count] = separator * count }
-        blank_line = "#{separators[width - 1]}\n"
+        blank_line = "#{separators[[width - 1, 0].max]}\n"
         line = +""
         line_row = written = 0
         each_csv_cell(sheet.cells, rows, width) do |row, column, cell|
