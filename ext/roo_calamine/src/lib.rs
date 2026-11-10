@@ -6,7 +6,7 @@
 pub mod convert;
 pub mod reader;
 
-use std::cell::Cell as StdCell;
+use std::cell::{Cell as StdCell, RefCell};
 use std::ffi::c_void;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
@@ -77,7 +77,8 @@ type Batch = Result<Vec<RawRow>, Unsupported>;
 /// thread elsewhere does not slow every batch down.
 #[magnus::wrap(class = "Roo::Calamine::Native::Reader", free_immediately, size)]
 struct Reader {
-    batches: Receiver<Batch>,
+    /// `None` once closed.
+    batches: RefCell<Option<Receiver<Batch>>>,
     /// Set while a Ruby thread waits on `batches` without the GVL; the
     /// receiver must not be used from two threads at once.
     in_use: StdCell<bool>,
@@ -104,7 +105,7 @@ impl Reader {
             })
             .map_err(|e| Error::new(ruby.exception_runtime_error(), e.to_string()))?;
         Ok(Self {
-            batches,
+            batches: RefCell::new(Some(batches)),
             in_use: StdCell::new(false),
             done: StdCell::new(false),
             rows_read: StdCell::new(0),
@@ -121,12 +122,15 @@ impl Reader {
                 "reader is already in use",
             ));
         }
-        let received = match self.batches.try_recv() {
-            Ok(batch) => Ok(batch),
-            Err(TryRecvError::Empty) => {
-                without_gvl(|| self.batches.recv()).map_err(|_| TryRecvError::Disconnected)
-            }
-            Err(error) => Err(error),
+        let received = match self.batches.borrow().as_ref() {
+            None => Ok(Ok(Vec::new())),
+            Some(batches) => match batches.try_recv() {
+                Ok(batch) => Ok(batch),
+                Err(TryRecvError::Empty) => {
+                    without_gvl(|| batches.recv()).map_err(|_| TryRecvError::Disconnected)
+                }
+                Err(error) => Err(error),
+            },
         };
         self.in_use.set(false);
         let rows = received
@@ -136,6 +140,20 @@ impl Reader {
             self.done.set(true);
         }
         Ok(rows)
+    }
+
+    /// Stops the reading thread, which closes the file and frees the rows it
+    /// read ahead, without waiting for garbage collection.
+    fn close(ruby: &Ruby, rb_self: &Self) -> Result<(), Error> {
+        if rb_self.in_use.get() {
+            return Err(Error::new(
+                ruby.exception_runtime_error(),
+                "reader is already in use",
+            ));
+        }
+        rb_self.batches.borrow_mut().take();
+        rb_self.done.set(true);
+        Ok(())
     }
 
     /// Document mode: adds the next batch of rows to `cells`. Returns `false`
@@ -180,6 +198,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     reader.define_singleton_method("new", function!(Reader::new, 3))?;
     reader.define_method("fill_cells", method!(Reader::fill_cells, 2))?;
     reader.define_method("next_rows", method!(Reader::next_rows, 0))?;
+    reader.define_method("close", method!(Reader::close, 0))?;
 
     native.define_class("Row", ruby.class_object())?;
 

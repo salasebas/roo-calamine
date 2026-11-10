@@ -251,7 +251,7 @@ impl<R: BufRead> SheetReader<R> {
         }
         loop {
             buf.clear();
-            match self.xml.read_event_into(buf)? {
+            match self.read_event(buf)? {
                 Event::Start(e) => {
                     self.depth += 1;
                     if self.is_row(&e) {
@@ -276,6 +276,9 @@ impl<R: BufRead> SheetReader<R> {
                     self.depth -= 1;
                 }
                 Event::Decl(decl) => check_encoding(&decl)?,
+                Event::Eof if self.depth != 0 => {
+                    return Err(Unsupported("unexpected end of the sheet".into()));
+                }
                 Event::Eof => {
                     self.done = true;
                     return Ok(None);
@@ -283,6 +286,24 @@ impl<R: BufRead> SheetReader<R> {
                 _ => {}
             }
         }
+    }
+
+    /// The next event, rejecting characters XML does not allow, which
+    /// Nokogiri does not accept and quick-xml does not check.
+    fn read_event<'b>(&mut self, buf: &'b mut Vec<u8>) -> Result<Event<'b>> {
+        let event = self.xml.read_event_into(buf)?;
+        match &event {
+            Event::Start(e) | Event::Empty(e) => check_attributes(e)?,
+            Event::Text(t) | Event::Comment(t) => check_chars(t)?,
+            Event::CData(t) => check_chars(&t.xml10_content())?,
+            Event::GeneralRef(r) => {
+                if let Some(c) = r.resolve_char_ref()? {
+                    check_chars(c.encode_utf8(&mut [0; 4]))?;
+                }
+            }
+            _ => {}
+        }
+        Ok(event)
     }
 
     /// Tracks the `/worksheet/sheetData` path for document mode. `self.depth`
@@ -321,7 +342,7 @@ impl<R: BufRead> SheetReader<R> {
         let mut row = RawRow::default();
         loop {
             buf.clear();
-            match self.xml.read_event_into(buf)? {
+            match self.read_event(buf)? {
                 Event::Start(e) => {
                     if self.is_cell(&e) {
                         let cell = cell_attributes(&e)?;
@@ -347,7 +368,7 @@ impl<R: BufRead> SheetReader<R> {
         let mut decided = false;
         loop {
             buf.clear();
-            let (child, empty) = match self.xml.read_event_into(buf)? {
+            let (child, empty) = match self.read_event(buf)? {
                 Event::Start(e) => (child(&e), false),
                 Event::Empty(e) => (child(&e), true),
                 Event::End(_) => break,
@@ -400,7 +421,7 @@ impl<R: BufRead> SheetReader<R> {
         let mut depth = 0usize;
         loop {
             buf.clear();
-            match self.xml.read_event_into(buf)? {
+            match self.read_event(buf)? {
                 Event::Start(_) => depth += 1,
                 Event::End(_) if depth == 0 => return Ok(()),
                 Event::End(_) => depth -= 1,
@@ -419,7 +440,7 @@ impl<R: BufRead> SheetReader<R> {
         let mut t_depth: Option<usize> = None;
         loop {
             buf.clear();
-            match self.xml.read_event_into(buf)? {
+            match self.read_event(buf)? {
                 Event::Start(e) => {
                     depth += 1;
                     if t_depth.is_none() && e.local_name().as_ref() == "t" {
@@ -447,7 +468,7 @@ impl<R: BufRead> SheetReader<R> {
         let mut depth = 0usize;
         loop {
             buf.clear();
-            match self.xml.read_event_into(buf)? {
+            match self.read_event(buf)? {
                 Event::Start(_) => depth += 1,
                 Event::End(_) if depth == 0 => return Ok(()),
                 Event::End(_) => depth -= 1,
@@ -497,6 +518,29 @@ fn cell_attributes(e: &BytesStart<'_>) -> Result<RawCell> {
         }
     }
     Ok(cell)
+}
+
+/// XML 1.0 `Char`: tab, line feed, carriage return, and U+0020 up, except
+/// U+FFFE and U+FFFF (Rust strings hold no surrogates).
+fn check_chars(text: &str) -> Result<()> {
+    let control = text
+        .bytes()
+        .any(|b| b < 0x20 && !matches!(b, b'\t' | b'\n' | b'\r'));
+    if control || text.contains(['\u{FFFE}', '\u{FFFF}']) {
+        return Err(Unsupported("a character XML does not allow".into()));
+    }
+    Ok(())
+}
+
+fn check_attributes(e: &BytesStart<'_>) -> Result<()> {
+    let raw = e.attributes_raw();
+    check_chars(raw)?;
+    if raw.contains("&#") {
+        for attribute in e.attributes() {
+            check_chars(&attribute?.normalized_value(XmlVersion::Implicit1_0)?)?;
+        }
+    }
+    Ok(())
 }
 
 fn push_reference(text: &mut String, reference: &BytesRef<'_>) -> Result<()> {
@@ -672,12 +716,35 @@ mod tests {
         assert!(SheetReader::new(latin1.as_bytes(), Mode::Document)
             .next_row()
             .is_err());
-        let entity = format!(
-            "<worksheet {NS}><sheetData><row><c><v>&custom;</v></c></row></sheetData></worksheet>"
+        for body in [
+            "<v>&custom;</v>",
+            "<v>a&#1;b</v>",
+            "<v>a\u{1}b</v>",
+            "<v>\u{FFFE}</v>",
+        ] {
+            let xml = format!(
+                "<worksheet {NS}><sheetData><row><c>{body}</c></row></sheetData></worksheet>"
+            );
+            assert!(
+                SheetReader::new(xml.as_bytes(), Mode::Document)
+                    .next_row()
+                    .is_err(),
+                "{body:?}"
+            );
+        }
+        let attribute = format!(
+            r#"<worksheet {NS}><sheetData><row><c r="A&#2;1"/></row></sheetData></worksheet>"#
         );
-        assert!(SheetReader::new(entity.as_bytes(), Mode::Document)
+        assert!(SheetReader::new(attribute.as_bytes(), Mode::Document)
             .next_row()
             .is_err());
+        let truncated = format!("<worksheet {NS}><sheetData><row><c><v>1</v></c></row>");
+        let mut reader = SheetReader::new(truncated.as_bytes(), Mode::Document);
+        assert!(reader.next_row().unwrap().is_some());
+        assert!(
+            reader.next_row().is_err(),
+            "a sheet that ends with open elements"
+        );
     }
 
     #[test]

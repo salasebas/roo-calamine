@@ -11,7 +11,7 @@ module Roo
       BATCH_CELLS = 16_384
 
       def cells(relationships)
-        return super if @cells || !@path || !Calamine.enabled?
+        return super if @cells || !native?
 
         cells = {}
         reader = Native::Reader.new(@path, false, BATCH_CELLS)
@@ -21,12 +21,14 @@ module Roo
         @cells = cells
       rescue UnsupportedError
         super
+      ensure
+        reader&.close
       end
 
       # Yields Native::Row objects; #each_cell turns one into cells when roo
       # asks for it, so rows roo skips are never converted, as in roo.
       def each_row_streaming(&)
-        return super unless @path && Calamine.enabled?
+        return super unless native?
 
         yielded = 0
         reader = Native::Reader.new(@path, true, BATCH_CELLS)
@@ -41,6 +43,9 @@ module Roo
         # roo reads the sheet again; skip the rows already yielded.
         skip = yielded
         super { |row| skip.zero? ? yield(row) : skip -= 1 }
+      ensure
+        # Also when the caller stops early, as roo does for max_rows.
+        reader&.close
       end
 
       def each_cell(row_xml, &)
@@ -49,6 +54,12 @@ module Roo
         @calamine_stream_converter ||= Native::Converter.new(Context.new(@shared, hyperlinks(@relationships), true),
                                                              true)
         @calamine_stream_converter.row_cells(row_xml).each(&)
+      end
+
+      private
+
+      def native?
+        @path && Calamine.enabled?
       end
     end
   end

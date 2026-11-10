@@ -200,6 +200,17 @@ class EdgeCasesTest < Minitest::Test
     assert_equal 50, counts[:roo_cells], "roo should parse only rows 251 to 300"
   end
 
+  def test_xml_libxml2_rejects_goes_to_roo
+    illegal_reference = write(%(<row r="1"><c r="A1" t="inlineStr"><is><t>a&#1;b</t></is></c><c r="B1"><v>2</v></c></row>))
+    illegal_byte = write(%(<row r="1"><c r="A1" t="str"><v>a\u0001b</v></c></row>))
+    truncated = Workbook.write(@dir, "truncated",
+                               sheets: { "Sheet1" => Workbook.sheet(%(<row r="1"><c r="A1"><v>1</v></c></row>))[0...-30] })
+
+    [illegal_reference, illegal_byte, truncated].each do |path|
+      assert_every_path_same_as_roo(path, native_only: false)
+    end
+  end
+
   def test_kill_switch_restores_roo
     path = write(%(<row r="1"><c r="A1"><v>1</v></c></row>))
 

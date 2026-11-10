@@ -158,9 +158,19 @@ jobs:
           api_key=$(jq -r .rubygems_api_key <<< "$response")
           echo "::add-mask::${api_key}"
           version="${TAG#v}"
+          # A run that failed partway can be run again: gems RubyGems.org
+          # already has are skipped, because it rejects a second push.
+          published=$(curl -sS https://rubygems.org/api/v1/versions/roo-calamine.json |
+            jq -r --arg v "$version" '.[]? | select(.number == $v) | .platform' || true)
           # The source gem first: it creates the gem on RubyGems.org.
-          GEM_HOST_API_KEY="$api_key" gem push "pkg/roo-calamine-${version}.gem"
-          for gem in pkg/roo-calamine-"${version}"-*.gem; do
+          for gem in "pkg/roo-calamine-${version}.gem" pkg/roo-calamine-"${version}"-*.gem; do
+            platform=$(basename "$gem" .gem)
+            platform=${platform#"roo-calamine-${version}"}
+            platform=${platform#-}
+            if grep -qx "${platform:-ruby}" <<< "$published"; then
+              echo "${gem} is already on RubyGems.org"
+              continue
+            fi
             GEM_HOST_API_KEY="$api_key" gem push "$gem"
           done
 

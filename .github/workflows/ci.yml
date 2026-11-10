@@ -44,8 +44,9 @@ jobs:
             echo "gems=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if git diff --name-only "$BASE_SHA" "$HEAD_SHA" |
-            grep -E '^(ext/|lib/|script/|Cargo\.(toml|lock)$|Gemfile$|Rakefile$|roo-calamine\.gemspec$|\.ruby-version$|\.github/workflows/)'; then
+          # A failing git diff stops the step instead of reading as "no changes".
+          files=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+          if grep -E '^(ext/|lib/|script/|Cargo\.(toml|lock)$|Gemfile$|Rakefile$|roo-calamine\.gemspec$|\.ruby-version$|\.github/workflows/)' <<< "$files"; then
             echo "gems=true" >> "$GITHUB_OUTPUT"
           else
             echo "gems=false" >> "$GITHUB_OUTPUT"
