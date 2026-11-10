@@ -36,10 +36,23 @@ jobs:
       - name: Cache Rust
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
-      - name: Install actionlint and zizmor
+      - name: Install zizmor
         uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
-          tool: actionlint,zizmor
+          tool: zizmor
+
+      # install-action does not package actionlint.
+      - name: Install actionlint
+        env:
+          VERSION: 1.7.12
+          SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          archive="actionlint_${VERSION}_linux_amd64.tar.gz"
+          curl -sSfL -o "$archive" "https://github.com/rhysd/actionlint/releases/download/v${VERSION}/${archive}"
+          echo "${SHA256}  ${archive}" | sha256sum --check
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf "$archive" -C "$HOME/.local/bin" actionlint
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Lint — Ruby
         run: bundle exec rubocop
@@ -126,6 +139,16 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: ruby-${{ matrix.ruby }}
+
+      # bindgen's clang targets MSVC unless pointed at Ruby's MSYS2 devkit.
+      # Same settings as oxidize-rb/actions/setup-ruby-and-rust; the -D flags
+      # work around https://github.com/rust-lang/rust-bindgen/issues/2500.
+      - name: Configure bindgen for MSYS2
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          msys_root="${RI_DEVKIT//\\//}${MSYSTEM_PREFIX}"
+          echo "BINDGEN_EXTRA_CLANG_ARGS=--target=x86_64-pc-windows-gnu --sysroot=${msys_root} -D__AVX512VLFP16INTRIN_H -D__AVX512FP16INTRIN_H" >> "$GITHUB_ENV"
 
       - name: Build the extension
         run: bundle exec rake compile

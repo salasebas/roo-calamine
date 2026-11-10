@@ -12,18 +12,14 @@ name: release
 # dispatches the required checks (ci.yml, pr-title.yml) for the release pull
 # request itself; workflow_dispatch is the documented exception.
 #
-# workflow_dispatch with `tag` publishes an existing release tag again, for
-# when a publish failed after the tag was created. It never bumps a version.
+# release-please tags the commit whose push started this run, so every job
+# builds and publishes the commit it checks out by default. If publishing
+# fails partway, re-run the failed jobs of this run: gems RubyGems.org
+# already has are skipped.
 
 on:
   push:
     branches: [main]
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Existing release tag to publish, for example v0.0.1
-        required: true
-        type: string
 
 permissions: {}
 
@@ -34,7 +30,6 @@ concurrency:
 jobs:
   release-please:
     name: release-please
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -76,19 +71,14 @@ jobs:
   build-gems:
     name: build-gems
     needs: release-please
-    if: >-
-      !cancelled() &&
-      (needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch')
+    if: needs.release-please.outputs.release_created == 'true'
     permissions:
       contents: read
     uses: ./.github/workflows/build-gems.yml
-    with:
-      ref: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
 
   publish:
-    name: publish ${{ inputs.tag || needs.release-please.outputs.tag_name }}
+    name: publish ${{ needs.release-please.outputs.tag_name }}
     needs: [release-please, build-gems]
-    if: ${{ !cancelled() && needs.build-gems.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: rubygems
@@ -96,12 +86,11 @@ jobs:
       contents: write # attach the gems to the GitHub release
       id-token: write # RubyGems trusted publishing exchanges the OIDC token
     env:
-      TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
+      TAG: ${{ needs.release-please.outputs.tag_name }}
     steps:
-      - name: Checkout the release tag
+      - name: Checkout the tagged commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ env.TAG }}
           persist-credentials: false
 
       - name: Setup Ruby

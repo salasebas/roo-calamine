@@ -11,11 +11,6 @@ name: build-gems
 
 on:
   workflow_call:
-    inputs:
-      ref:
-        description: Git ref to build; the triggering ref by default
-        type: string
-        default: ""
 
 permissions:
   contents: read
@@ -34,7 +29,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref }}
           persist-credentials: false
 
       - name: Setup Ruby
@@ -75,7 +69,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref }}
           persist-credentials: false
 
       - name: Setup Ruby
@@ -123,7 +116,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref }}
           persist-credentials: false
           sparse-checkout: script
 
@@ -164,7 +156,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref }}
           persist-credentials: false
           sparse-checkout: script
 

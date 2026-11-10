@@ -1,7 +1,8 @@
 # roo-calamine
 
 Add one line to your Gemfile and [roo](https://github.com/roo-rb/roo) reads
-`.xlsx` and `.xlsm` files 6–8× faster, with less memory and the same results.
+`.xlsx` and `.xlsm` files 4–12× faster, with the same results, and with a
+quarter of the memory for anything that loads a whole sheet.
 Your roo code does not change.
 
 ```ruby
@@ -173,13 +174,25 @@ design:
   same `Nokogiri::XML::SyntaxError` as roo, but yields every row before the
   bad spot; roo stops a little earlier, where libxml2's read-ahead reaches
   it (241 of 250 good rows in `test/edge_cases_test.rb`).
-- Resource use changes (see [Benchmarks](#benchmarks)): peak memory is 3–5×
-  lower for `cells`-based reads and a little higher for streaming, and each
+- Resource use changes (see [Benchmarks](#benchmarks)): peak memory is 4–5×
+  lower for `cells`-based reads and about 10 MB higher for streaming, and each
   sheet read starts a short-lived native thread that parses ahead of Ruby.
 
 ## Benchmarks
 
-BENCHMARK_TABLE
+Ruby 3.4.9 (arm64-darwin23), Darwin 25.6.0, Apple M5 Pro, 18 cores, median of 3 runs
+
+| File | Scenario | roo | roo + roo-calamine | Speedup | calx (reference) |
+|---|---|---:|---:|---:|---:|
+| mixed-100k.xlsx | `Roo::Spreadsheet.open` + `each_row_streaming` | 14.26 s, 122 MB | 1.31 s, 135 MB | 10.9× | 0.54 s, 187 MB |
+| mixed-100k.xlsx | `parse(headers: true)` | 20.96 s, 3431 MB | 3.48 s, 860 MB | 6.0× | 0.74 s, 298 MB |
+| mixed-100k.xlsx | 10,000 random `cell(row, col)` | 20.74 s, 3267 MB | 1.94 s, 660 MB | 10.7× | 0.52 s, 258 MB |
+| shared-strings-100k.xlsx | `Roo::Spreadsheet.open` + `each_row_streaming` | 5.25 s, 124 MB | 0.43 s, 133 MB | 12.3× | 0.24 s, 122 MB |
+| shared-strings-100k.xlsx | `parse(headers: true)` | 6.27 s, 1663 MB | 1.47 s, 396 MB | 4.3× | 0.36 s, 201 MB |
+| shared-strings-100k.xlsx | 10,000 random `cell(row, col)` | 5.40 s, 1598 MB | 0.70 s, 307 MB | 7.8× | 0.25 s, 176 MB |
+| small.xlsx | `Roo::Spreadsheet.open` + `each_row_streaming` | 0.02 s, 48 MB | 0.00 s, 43 MB | 4.5× | 0.00 s, 35 MB |
+| small.xlsx | `parse(headers: true)` | 0.01 s, 48 MB | 0.01 s, 43 MB | 2.1× | 0.00 s, 35 MB |
+| small.xlsx | 10,000 random `cell(row, col)` | 0.02 s, 48 MB | 0.01 s, 45 MB | 1.7× | 0.00 s, 35 MB |
 
 `bench/run.rb` generates the workbooks with
 [caxlsx](https://github.com/caxlsx/caxlsx): 100,000 rows × 20 columns of
