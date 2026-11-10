@@ -7,10 +7,11 @@ name: release
 # vX.Y.Z, creates the GitHub release, and this workflow then builds every gem
 # and publishes it to RubyGems.org through trusted publishing.
 #
-# Pull requests and tags created with GITHUB_TOKEN do not trigger other
-# workflows, so this workflow builds and publishes in the same run, and it
-# dispatches the required checks (ci.yml, pr-title.yml) for the release pull
-# request itself; workflow_dispatch is the documented exception.
+# release-please acts as the repository's GitHub App (the RELEASE_APP_CLIENT_ID
+# variable and the RELEASE_APP_PRIVATE_KEY secret), not GITHUB_TOKEN, because
+# GitHub holds the pull_request runs of a pull request opened with GITHUB_TOKEN
+# until a maintainer approves them, and the release pull request needs its
+# required checks to run on their own.
 #
 # release-please tags the commit whose push started this run, so every job
 # builds and publishes the commit it checks out by default. If publishing
@@ -32,41 +33,28 @@ jobs:
     name: release-please
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
+    permissions: {}
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
-      pr_branch: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).headBranchName || '' }}
-      pr_number: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).number || '' }}
     steps:
+      - name: Create a GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+
       - name: Run release-please
         id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
+          token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-
-  release-pr-checks:
-    name: release-pr-checks
-    needs: release-please
-    if: needs.release-please.outputs.pr_number != ''
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      actions: write
-    steps:
-      - name: Run the required checks on the release pull request
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          BRANCH: ${{ needs.release-please.outputs.pr_branch }}
-          PR: ${{ needs.release-please.outputs.pr_number }}
-        run: |
-          gh workflow run ci.yml --repo "$REPO" --ref "$BRANCH"
-          gh workflow run pr-title.yml --repo "$REPO" --ref "$BRANCH" -f pr="$PR"
 
   build-gems:
     name: build-gems
