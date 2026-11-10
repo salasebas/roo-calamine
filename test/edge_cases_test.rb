@@ -83,7 +83,9 @@ class EdgeCasesTest < Minitest::Test
         <c r="F1" t="str"><v><![CDATA[<raw>]]></v></c><c r="G1" t="n"><v>3</v></c></row>
     XML
 
-    assert_equal [true, false, "#DIV/0!", "a & b <c> ☺"], ((1..4).map { |c| roo_cell(path, 1, c) })
+    values = (1..4).map { |c| roo_cell(path, 1, c) }
+
+    assert_equal [true, false, "#DIV/0!", "a & b <c> ☺"], values
     assert_every_path_same_as_roo(path)
   end
 
