@@ -1,0 +1,11 @@
+/.bundle/
+/pkg/
+/tmp/
+/target/
+/bench/fixtures/
+/bench/Gemfile.lock
+*.bundle
+*.so
+*.dll
+Gemfile.lock.bak
+/Gemfile.lock

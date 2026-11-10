@@ -1,0 +1,18 @@
+[package]
+name = "roo_calamine"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+magnus = "0.9.3"
+quick-xml = "0.42.0"
+rb-sys = "0.9.130"
+
+[dev-dependencies]
+# Links libruby so `cargo test` can build this extension crate.
+magnus = { version = "0.9.3", features = ["embed"] }
