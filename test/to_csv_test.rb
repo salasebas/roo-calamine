@@ -250,7 +250,9 @@ class ToCsvTest < Minitest::Test
   def assert_roo_raises_on_the_set_cell(call)
     args, options, (outcome, error, message), written = call
 
-    assert_equal [[@csv], { sheet: "Sheet1" }, :error, NoMethodError, "1,2,\n3,"], [args, options, outcome, error, written]
+    # roo writes the file in text mode, so on Windows its lines end in \r\n.
+    assert_equal [[@csv], { sheet: "Sheet1" }, :error, NoMethodError, "1,2,\n3,"],
+                 [args, options, outcome, error, written.gsub("\r\n", "\n")]
     # Ruby 3.3 quotes the method name as `empty?', later versions as 'empty?'.
     assert_match(/undefined method .empty\?' for an instance of Roo::Excelx::Cell/, message)
   end
