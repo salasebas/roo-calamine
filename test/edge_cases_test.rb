@@ -20,7 +20,8 @@ class EdgeCasesTest < Minitest::Test
   end
 
   def write(rows, **)
-    Workbook.write(@dir, "book", sheets: { "Sheet1" => Workbook.sheet(rows) }, **)
+    @books = (@books || 0) + 1
+    Workbook.write(@dir, "book#{@books}", sheets: { "Sheet1" => Workbook.sheet(rows) }, **)
   end
 
   def assert_every_path_same_as_roo(path, native_only: true, **open_options)
@@ -208,32 +209,27 @@ class EdgeCasesTest < Minitest::Test
     assert_equal 0, counts[:roo_cells], "roo should not build the 250 rows already yielded again"
   end
 
-  # A sheet doc whose worksheet is a FIFO that a writer holds open without
-  # writing, until `release` gets a value, so a reader waits for a batch.
-  def waiting_sheet_doc(release)
+  def test_an_exception_while_waiting_for_a_batch_arrives_as_itself
+    skip "needs File.mkfifo" unless File.respond_to?(:mkfifo)
+
     doc = Roo::Excelx.new(write("")).sheet_for(nil).instance_variable_get(:@sheet)
     fifo = File.join(@dir, "sheet.fifo")
     File.mkfifo(fifo)
     doc.instance_variable_set(:@path, fifo)
-    [doc, Thread.new { File.open(fifo, "w") { release.pop } }]
-  end
-
-  def test_an_exception_while_waiting_for_a_batch_arrives_as_itself
-    skip "needs File.mkfifo" unless File.respond_to?(:mkfifo)
-
-    release = Queue.new
-    doc, writer = waiting_sheet_doc(release)
+    # Held open for writing, without writing, the FIFO keeps the reader
+    # waiting for a batch. Opening it read-write does not block.
     stop = Class.new(StandardError)
-    reader = Thread.new do
-      doc.each_row_streaming { nil }
-    rescue Exception => e # rubocop:disable Lint/RescueException
-      e
+    reader = nil
+    stopped = File.open(fifo, File::RDWR) do
+      reader = Thread.new do
+        doc.each_row_streaming { nil }
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        e
+      end
+      sleep 0.3
+      reader.raise(stop, "stop requested")
+      reader.join(5)
     end
-    sleep 0.3
-    reader.raise(stop, "stop requested")
-    stopped = reader.join(5)
-    release.push(true)
-    writer.join
 
     assert stopped, "the reader did not stop"
     assert_instance_of stop, reader.value
@@ -245,7 +241,14 @@ class EdgeCasesTest < Minitest::Test
     truncated = Workbook.write(@dir, "truncated",
                                sheets: { "Sheet1" => Workbook.sheet(%(<row r="1"><c r="A1"><v>1</v></c></row>))[0...-30] })
 
-    [illegal_reference, illegal_byte, truncated].each do |path|
+    undeclared_prefix = write(%(<row r="1"><c r="A1"><v>1</v></c></row><x:row r="2"><c r="A2"><v>2</v></c></x:row>))
+    prefixed_type = Workbook.write(@dir, "prefixed",
+                                   sheets: { "Sheet1" => Workbook.sheet(%(<row r="1"><c r="A1" r:t="str"><v>1</v></c></row>)) })
+    comment_in_row = write(%(<row r="1"><!-- c --><c r="A1"><v>1</v></c></row>))
+    pi_in_value = write(%(<row r="1"><c r="A1" t="str"><v>1<? x?></v></c></row>))
+
+    [illegal_reference, illegal_byte, truncated, undeclared_prefix, prefixed_type, comment_in_row,
+     pi_in_value].each do |path|
       assert_every_path_same_as_roo(path, native_only: false)
     end
   end

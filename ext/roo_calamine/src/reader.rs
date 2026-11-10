@@ -170,6 +170,11 @@ pub struct SheetReader<R: BufRead> {
     /// Whether any event was read yet; an XML declaration must come first.
     started: bool,
     seen_root: bool,
+    /// Depth of the open elements, for namespace scopes.
+    open_elements: usize,
+    /// Namespace prefixes declared on open elements, with the depth they were
+    /// declared at.
+    prefixes: Vec<(usize, String)>,
     /// An error met after some rows of a batch, returned by the next call.
     pending_error: Option<Unsupported>,
 }
@@ -214,6 +219,8 @@ impl<R: BufRead> SheetReader<R> {
             done: false,
             started: false,
             seen_root: false,
+            open_elements: 0,
+            prefixes: Vec::new(),
             pending_error: None,
         }
     }
@@ -299,6 +306,80 @@ impl<R: BufRead> SheetReader<R> {
         }
     }
 
+    /// An element name and its attributes, as far as quick-xml leaves them
+    /// unchecked: names and their namespace prefixes, whitespace between
+    /// attributes, `<` in values, and the references in values.
+    fn check_start(&mut self, e: &BytesStart<'_>) -> Result<()> {
+        let name = e.name();
+        check_name(name.as_ref())?;
+        let raw = e.attributes_raw();
+        check_chars(raw)?;
+        let mut quote = None;
+        let mut after_value = false;
+        let mut name_start = true;
+        for &b in raw.as_bytes() {
+            match quote {
+                Some(q) if b == q => {
+                    quote = None;
+                    after_value = true;
+                }
+                Some(_) if b == b'<' => {
+                    return Err(Unsupported("`<` in an attribute value".into()))
+                }
+                Some(_) => {}
+                None if b.is_ascii_whitespace() => {
+                    after_value = false;
+                    name_start = true;
+                }
+                None if after_value && b != b'/' => {
+                    return Err(Unsupported(
+                        "attributes without whitespace between them".into(),
+                    ));
+                }
+                None => match b {
+                    b'"' | b'\'' => quote = Some(b),
+                    b'=' | b'/' => name_start = true,
+                    b if b.is_ascii_alphabetic() || b == b'_' || b == b':' => name_start = false,
+                    b'0'..=b'9' | b'-' | b'.' if !name_start => {}
+                    _ => return Err(Unsupported("an invalid attribute name".into())),
+                },
+            }
+        }
+        let depth = self.open_elements + 1;
+        if raw.contains(['&', ':']) {
+            for attribute in e.attributes() {
+                let attribute = attribute?;
+                let key = attribute.key.as_ref();
+                if key.contains(':') {
+                    check_name(key)?;
+                }
+                if attribute.value.contains('&') {
+                    check_chars(&attribute.normalized_value(XmlVersion::Implicit1_0)?)?;
+                }
+                if let Some(prefix) = key.strip_prefix("xmlns:") {
+                    self.prefixes.push((depth, prefix.to_owned()));
+                }
+            }
+            for attribute in e.attributes() {
+                let key = attribute?.key;
+                self.check_prefix(key.as_ref())?;
+            }
+        }
+        self.check_prefix(name.as_ref())
+    }
+
+    /// libxml2 keeps an undeclared prefix as part of the name, so roo would
+    /// not see `x:row` as `row`.
+    fn check_prefix(&self, name: &str) -> Result<()> {
+        match name.split_once(':') {
+            Some(("xml" | "xmlns", _)) | None => Ok(()),
+            Some((prefix, _)) if self.prefixes.iter().any(|(_, declared)| declared == prefix) => {
+                Ok(())
+            }
+            Some(_) => Err(Unsupported(format!("the undeclared prefix in {name}"))),
+        }
+    }
+
     /// Outside the root element, XML allows only one root, whitespace,
     /// comments, and processing instructions.
     fn check_top_level(&mut self, event: &Event<'_>) -> Result<()> {
@@ -327,13 +408,29 @@ impl<R: BufRead> SheetReader<R> {
         let event = self.xml.read_event_into(buf)?;
         let first = !std::mem::replace(&mut self.started, true);
         match &event {
-            Event::Start(e) | Event::Empty(e) => check_start(e)?,
+            Event::Start(e) => {
+                self.check_start(e)?;
+                self.open_elements += 1;
+            }
+            Event::Empty(e) => {
+                self.check_start(e)?;
+                let depth = self.open_elements + 1;
+                self.prefixes.retain(|(declared, _)| *declared != depth);
+            }
+            Event::End(_) => {
+                let depth = self.open_elements;
+                self.prefixes.retain(|(declared, _)| *declared != depth);
+                self.open_elements = depth.saturating_sub(1);
+            }
             Event::Text(t) if t.contains("]]>") => {
                 return Err(Unsupported("`]]>` in text".into()));
             }
             Event::Text(t) | Event::Comment(t) => check_chars(t)?,
             Event::CData(t) => check_chars(&t.xml10_content())?,
-            Event::PI(pi) => check_chars(pi)?,
+            Event::PI(pi) => {
+                check_name(pi.target())?;
+                check_chars(pi)?;
+            }
             Event::GeneralRef(r) => {
                 if let Some(c) = r.resolve_char_ref()? {
                     check_chars(c.encode_utf8(&mut [0; 4]))?;
@@ -389,7 +486,7 @@ impl<R: BufRead> SheetReader<R> {
             match self.read_event(buf)? {
                 Event::Start(e) => {
                     if self.is_cell(&e) {
-                        let cell = cell_attributes(&e)?;
+                        let cell = cell_attributes(&e, self.mode)?;
                         self.read_cell(buf, &mut row, cell)?;
                     } else {
                         self.skip(buf)?;
@@ -397,11 +494,21 @@ impl<R: BufRead> SheetReader<R> {
                 }
                 Event::Empty(e) => {
                     if self.is_cell(&e) {
-                        row.cells.push(cell_attributes(&e)?);
+                        row.cells.push(cell_attributes(&e, self.mode)?);
                     }
                 }
                 Event::End(_) => return Ok(row),
                 Event::Eof => return Err(Unsupported("unexpected end of row".into())),
+                // roo's streaming takes every child node of a row as a cell and
+                // fails on one that is not an element.
+                Event::Text(t) if self.mode == Mode::Stream && !t.trim_ascii().is_empty() => {
+                    return Err(Unsupported("text in a streamed row".into()));
+                }
+                Event::Comment(_) | Event::PI(_) | Event::CData(_) | Event::GeneralRef(_)
+                    if self.mode == Mode::Stream =>
+                {
+                    return Err(Unsupported("a non-element child of a streamed row".into()));
+                }
                 _ => {}
             }
         }
@@ -523,7 +630,7 @@ impl<R: BufRead> SheetReader<R> {
     }
 }
 
-fn cell_attributes(e: &BytesStart<'_>) -> Result<RawCell> {
+fn cell_attributes(e: &BytesStart<'_>, mode: Mode) -> Result<RawCell> {
     let mut cell = RawCell {
         reference: Reference::Missing,
         style: Style::Index(0),
@@ -558,6 +665,15 @@ fn cell_attributes(e: &BytesStart<'_>) -> Result<RawCell> {
                     _ => Kind::ByFormat,
                 };
             }
+            // roo's document read removes namespaces first, so `x:t` would
+            // count as `t` there.
+            key if mode == Mode::Document
+                && key.split_once(':').is_some_and(|(prefix, local)| {
+                    prefix != "xmlns" && matches!(local, "r" | "s" | "t")
+                }) =>
+            {
+                return Err(Unsupported(format!("the attribute {key} on a cell")));
+            }
             _ => {}
         }
     }
@@ -576,56 +692,23 @@ fn check_chars(text: &str) -> Result<()> {
     Ok(())
 }
 
-/// An element name and its attributes, as far as quick-xml leaves them
-/// unchecked: name characters, whitespace between attributes, `<` in values,
-/// and the references in values.
-fn check_start(e: &BytesStart<'_>) -> Result<()> {
-    check_name(e.name().as_ref())?;
-    let raw = e.attributes_raw();
-    check_chars(raw)?;
-    let mut quote = None;
-    let mut after_value = false;
-    for c in raw.chars() {
-        match quote {
-            Some(q) if c == q => {
-                quote = None;
-                after_value = true;
-            }
-            Some(_) if c == '<' => return Err(Unsupported("`<` in an attribute value".into())),
-            Some(_) => {}
-            None if after_value && !c.is_ascii_whitespace() && c != '/' => {
-                return Err(Unsupported(
-                    "attributes without whitespace between them".into(),
-                ));
-            }
-            None => {
-                after_value = false;
-                if c == '"' || c == '\'' {
-                    quote = Some(c);
-                }
-            }
-        }
-    }
-    for attribute in e.attributes() {
-        let attribute = attribute?;
-        check_name(attribute.key.as_ref())?;
-        if attribute.value.contains('&') {
-            check_chars(&attribute.normalized_value(XmlVersion::Implicit1_0)?)?;
-        }
-    }
-    Ok(())
-}
-
-/// XML names start with a letter, `_`, `:`, or a non-ASCII character, and
-/// continue with those, digits, `-`, and `.`.
+/// An ASCII XML name: a letter or `_` first, then those, digits, `-`, and
+/// `.`, with at most one `:` between two non-empty parts. Non-ASCII names are
+/// valid XML but never appear in worksheets, so they are left to roo rather
+/// than checked character by character.
 fn check_name(name: &str) -> Result<()> {
-    let valid = name.chars().enumerate().all(|(i, c)| {
-        !c.is_ascii()
-            || c.is_ascii_alphabetic()
-            || matches!(c, '_' | ':')
-            || (i > 0 && (c.is_ascii_digit() || matches!(c, '-' | '.')))
-    });
-    if valid && !name.is_empty() {
+    let part = |part: &str| {
+        part.bytes().enumerate().all(|(i, b)| {
+            b.is_ascii_alphabetic()
+                || b == b'_'
+                || (i > 0 && (b.is_ascii_digit() || b == b'-' || b == b'.'))
+        }) && !part.is_empty()
+    };
+    let valid = match name.split_once(':') {
+        Some((prefix, local)) => part(prefix) && part(local),
+        None => part(name),
+    };
+    if valid {
         Ok(())
     } else {
         Err(Unsupported(format!("the name {name:?}")))
@@ -893,6 +976,12 @@ mod tests {
                 format!(r#"<!-- c --><?xml version="1.0"?><worksheet>{rows}</worksheet>"#),
             ),
             ("empty document", String::new()),
+            ("PI in a value", "<worksheet><sheetData><row><c><v>1<? x?></v></c></row></sheetData></worksheet>".to_string()),
+            ("non-ASCII attribute name", "<worksheet><sheetData><row><c \u{d7}=\"1\"/></row></sheetData></worksheet>".to_string()),
+            ("non-ASCII element name", "<worksheet><sheetData><row><c><v>1<\u{d7}/>2</v></c></row></sheetData></worksheet>".to_string()),
+            ("undeclared element prefix", format!("<worksheet><sheetData><x:row>{rows}</x:row></sheetData></worksheet>")),
+            ("empty prefix", "<worksheet><sheetData><:row/></sheetData></worksheet>".to_string()),
+            ("undeclared value prefix", "<worksheet><sheetData><row><c><x:v>1</x:v><v>9</v></c></row></sheetData></worksheet>".to_string()),
         ] {
             for mode in [Mode::Document, Mode::Stream] {
                 let mut reader = SheetReader::new(xml.as_bytes(), mode);
@@ -901,6 +990,68 @@ mod tests {
                 assert!(read.is_err(), "{label} ({mode:?})");
             }
         }
+        for (label, xml) in [
+            (
+                "prefixed r",
+                r#"<worksheet xmlns:x="urn:x"><sheetData><row><c x:r="B9" r="A1"><v>1</v></c></row></sheetData></worksheet>"#,
+            ),
+            (
+                "prefixed t",
+                r#"<worksheet xmlns:x="urn:x"><sheetData><row><c r="A1" x:t="str"><v>1</v></c></row></sheetData></worksheet>"#,
+            ),
+        ] {
+            assert!(
+                SheetReader::new(xml.as_bytes(), Mode::Document)
+                    .next_rows(9)
+                    .is_err(),
+                "{label}"
+            );
+            assert!(
+                SheetReader::new(xml.as_bytes(), Mode::Stream)
+                    .next_rows(9)
+                    .is_ok(),
+                "{label} streams"
+            );
+        }
+        for (label, xml) in [
+            (
+                "comment in a row",
+                "<worksheet><sheetData><row><!-- c --><c r=\"A1\"/></row></sheetData></worksheet>",
+            ),
+            (
+                "text in a row",
+                "<worksheet><sheetData><row>x<c r=\"A1\"/></row></sheetData></worksheet>",
+            ),
+        ] {
+            assert!(
+                SheetReader::new(xml.as_bytes(), Mode::Stream)
+                    .next_rows(9)
+                    .is_err(),
+                "{label}"
+            );
+            assert!(
+                SheetReader::new(xml.as_bytes(), Mode::Document)
+                    .next_rows(9)
+                    .is_ok(),
+                "{label} in a document"
+            );
+        }
+        let declared = r#"<x:worksheet xmlns:x="urn:x"><x:sheetData><x:row><x:c r="A1"><x:v>3</x:v></x:c></x:row></x:sheetData></x:worksheet>"#;
+        assert_eq!(
+            SheetReader::new(declared.as_bytes(), Mode::Document)
+                .next_rows(9)
+                .unwrap()
+                .len(),
+            1
+        );
+        let scoped =
+            r#"<worksheet><a xmlns:x="urn:x"/><sheetData><x:row/></sheetData></worksheet>"#;
+        assert!(
+            SheetReader::new(scoped.as_bytes(), Mode::Document)
+                .next_rows(9)
+                .is_err(),
+            "a prefix out of scope"
+        );
         let fine = format!(
             r#"<?xml version="1.0"?>
 <!-- c --><?pi ok?><worksheet x="a &amp; b" y='1'>{rows}</worksheet>

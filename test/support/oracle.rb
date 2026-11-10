@@ -43,7 +43,9 @@ module Oracle
   def outcome
     [:ok, yield]
   rescue StandardError => e
-    [:error, e.class, e.message]
+    # roo extracts each workbook into a new temporary directory, named in
+    # some messages.
+    [:error, e.class, e.message.gsub(%r{\S*/roo_[^/\s]*\d{8}-\d+-\w+}, "<tmpdir>")]
   end
 
   def describe_value(value)

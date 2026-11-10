@@ -256,9 +256,11 @@ Each was measured, and adopted only with a win and unchanged results.
 | **3. One String per shared string** | Cells reuse the String objects of roo's own shared-string table, as roo does. 1M shared-string cells: 0.73 s and 2.0M allocated objects, against 0.80 s and 3.0M with a new String per cell (roo: 5.46 s, 14.6M). Inline strings and numbers keep one String per cell, because roo returns distinct, mutable strings for them. | Adopted |
 | **4. No conversions roo does not need** | No Nokogiri nodes, attribute strings, or `"A1"` strings per cell; a style's format and type are looked up once per style; a streamed row becomes cells only when roo yields it: `each_row_streaming(offset: 90_000)` takes 0.67 s against 1.82 s for every row. Lazy Date objects inside `cells` were rejected: roo's cells compute their value in the constructor, and the oracle tests compare every instance variable. | Adopted, except lazy values |
 
-A fifth change came from profiling: parsing a row's attributes once and
-keeping its text in one buffer cut the Rust parse of the 100k × 20 sheet from
-0.79 s to 0.47 s.
+A fifth change came from profiling: keeping a row's text in one buffer and
+its attributes as typed values cut the Rust parse of the 100k × 20 sheet from
+0.79 s to 0.47 s. The well-formedness checks added later cost some of that
+back, on the read-ahead thread, where it does not show in wall time
+(streaming the same sheet: 1.41–1.45 s before and after).
 
 ## Development
 
