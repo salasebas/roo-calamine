@@ -384,9 +384,9 @@ impl<R: BufRead> SharedStringsReader<R> {
             Event::Start(e) | Event::Empty(e) if e.contains(CARRIAGE_RETURN) => {
                 Err(Unsupported(format!("{CARRIAGE_RETURN} in a tag")))
             }
-            Event::PI(pi) if pi.contains(CARRIAGE_RETURN) => Err(Unsupported(format!(
-                "{CARRIAGE_RETURN} in a processing instruction"
-            ))),
+            // Nokogiri names a processing instruction by its target, so roo
+            // takes `<?t x?>` for a `t`.
+            Event::PI(_) => Err(Unsupported("a processing instruction".into())),
             _ => Ok(event),
         }
     }
@@ -454,9 +454,17 @@ fn read(
     while !(checked && read) {
         let (checking, reading) = without_gvl(|interrupted| {
             std::thread::scope(|scope| {
-                let checking = (!checked).then(|| {
-                    scope.spawn(|| until(interrupted, || Ok(check.next_row()?.is_some())))
-                });
+                let checking = if checked {
+                    None
+                } else {
+                    let thread = std::thread::Builder::new()
+                        .name("roo-calamine".into())
+                        .spawn_scoped(scope, || {
+                            until(interrupted, || Ok(check.next_row()?.is_some()))
+                        })
+                        .map_err(|e| Unsupported(e.to_string()))?;
+                    Some(thread)
+                };
                 let reading = read || until(interrupted, || reader.next_item())?;
                 let checking = match checking {
                     Some(thread) => thread.join().unwrap_or_else(|panic| resume_unwind(panic))?,

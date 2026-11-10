@@ -154,11 +154,43 @@ class SharedStringsTest < Minitest::Test
       %(<sst #{main}><si><t>a<!-- comment -->b</t></si></sst>),
       %(<sst #{main}><si><t><!-- only a comment --></t></si><si><t>_x000D_</t></si></sst>),
       %(<sst #{main}><si><t>a<?pi x?>b</t></si></sst>),
+      %(<sst #{main}><si><?t named like a t?></si></sst>),
+      %(<sst #{main}><si><r><rPr><?b?></rPr><t>x</t></r></si></sst>),
       %(<sst #{main}><si><t>a</t><x_x000D_y/></si></sst>)
     ]
     paths = parts.map { |xml| write("<si/>", xml:) }
 
     parts.zip(paths).each { |xml, path| assert_shared_strings_same_as_roo(xml, path, native: false) }
+  end
+
+  # Runs the block while another thread sends this process `signal` every
+  # millisecond, and returns how many arrived.
+  def under_signals(signal)
+    count = 0
+    previous = trap(signal) { count += 1 }
+    sender = Thread.new { loop { Process.kill(signal, Process.pid) && sleep(0.001) } }
+    yield
+    count
+  ensure
+    sender&.kill&.join
+    trap(signal, previous || "DEFAULT")
+  end
+
+  def test_a_read_interrupted_by_signals_resumes_where_it_stopped
+    skip "needs SIGUSR1" unless Signal.list.key?("USR1")
+
+    path = write(xml: Workbook.shared_strings(*Array.new(200_000) { |i| "<si><t>string #{i}</t></si>" }))
+    expected = Roo::Excelx.new(path).shared_strings.to_a
+    Oracle.counts.clear
+    strings = nil
+    signals = under_signals("USR1") do
+      workbook = Roo::Excelx.new(path)
+      strings = workbook.shared_strings.to_a
+    end
+
+    assert_operator signals, :>, 0
+    assert_equal 1, Oracle.counts[:native_shared_strings]
+    assert_equal [expected.size, expected.hash], [strings.size, strings.hash], "the interrupted read differs"
   end
 
   def test_kill_switch_and_other_roo_versions_leave_shared_strings_to_roo

@@ -50,6 +50,11 @@ opening the workbook. Memory is peak RSS.
 | | `each` | 5.96 s, 1630 MB | 0.77 s, 322 MB | 7.7× | 0.21 s, 113 MB |
 | | 10,000 random `cell(row, col)` | 5.33 s, 1602 MB | 0.45 s, 160 MB | 11.9× | 0.23 s, 167 MB |
 | | values only: `each_row_values` | 5.21 s, 121 MB | 0.36 s, 166 MB | 14.3× | 0.24 s, 113 MB |
+| 100k rows × 10 unique strings | `each_row_streaming` | 12.03 s, 925 MB | 0.73 s, 546 MB | 16.5× | 0.43 s, 152 MB |
+| | `parse(headers: true)` | 10.61 s, 2330 MB | 1.48 s, 577 MB | 7.2× | 0.50 s, 206 MB |
+| | `each` | 10.52 s, 2272 MB | 1.27 s, 500 MB | 8.3× | 0.36 s, 152 MB |
+| | 10,000 random `cell(row, col)` | 9.71 s, 2213 MB | 1.01 s, 380 MB | 9.6× | 0.38 s, 205 MB |
+| | values only: `each_row_values` | 11.80 s, 926 MB | 0.66 s, 530 MB | 18.0× | 0.40 s, 152 MB |
 | 100 rows × 20 mixed columns | `each_row_streaming` | 16.6 ms, 45 MB | 3.4 ms, 41 MB | 4.8× | 0.7 ms, 27 MB |
 | | `parse(headers: true)` | 13.0 ms, 45 MB | 3.8 ms, 41 MB | 3.4× | 0.8 ms, 27 MB |
 | | `each` | 12.7 ms, 45 MB | 4.0 ms, 41 MB | 3.2× | 0.6 ms, 26 MB |
@@ -218,7 +223,8 @@ When a sheet uses XML the reader does not reproduce exactly the way Nokogiri
 does (a non-UTF-8 encoding, a DTD, custom entities, or malformed XML), it
 hands the sheet back to roo. A stream that hits such a spot continues in roo
 from the next row. Shared strings follow the same rules, and also go back to
-roo when a `<t>` holds markup other than text and CDATA.
+roo when the part holds a processing instruction or a `<t>` holds markup
+other than text and CDATA.
 
 ## Development
 
