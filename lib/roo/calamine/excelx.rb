@@ -15,8 +15,13 @@ module Roo
       private_constant :NO_CELLS
 
       def each(options = {})
-        sheet_for(nil).cells if block_given?
-        return super if !block_given? || options.empty? || !Calamine.enabled?
+        return super unless block_given?
+
+        if options.empty?
+          build_cells
+          return super
+        end
+        return super unless Calamine.enabled?
 
         headers = header_columns(options)
         @header_line.upto(last_row) do |line|
@@ -33,7 +38,6 @@ module Roo
       def parse(options = {})
         return super if block_given? || options.empty? || !Calamine.enabled?
 
-        sheet_for(nil).cells
         rows = rows_for(header_columns(options))
         options[:headers] == true ? rows : rows.drop(1)
       end
@@ -79,8 +83,17 @@ module Roo
       # Roo::Base#each, up to its loop over the rows.
       def header_columns(options)
         clean_sheet_if_need(options)
+        build_cells
         search_or_set_header(options)
         @headers || (first_column..last_column).to_h { |column| [cell(@header_line, column), column] }
+      end
+
+      # Builds every cell before roo's next step, which reads them all. When
+      # that raises, roo's own read raises the same error where roo raises it.
+      def build_cells
+        sheet_for(nil).cells
+      rescue StandardError
+        nil
       end
 
       def rows_for(headers)

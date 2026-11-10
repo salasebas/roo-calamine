@@ -413,6 +413,31 @@ class EdgeCasesTest < Minitest::Test
     end
   end
 
+  # Roo::Calamine.enabled = false still runs roo-calamine's Roo::Excelx#each
+  # and #parse, so this compares with roo in a process without roo-calamine:
+  # roo checks the options and resets the headers before it reads a cell.
+  def test_each_and_parse_fail_as_plain_roo_on_a_sheet_that_raises
+    path = write(%(<row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>abc</v></c></row>))
+    script = <<~RUBY
+      require ARGV[0]
+      calls = [->(x) { x.each(5) {} }, ->(x) { x.each([1]) {} }, ->(x) { x.each({ clean: true }.freeze) {} },
+               ->(x) { x.parse("x") }, ->(x) { x.each(headers: true) {} }, ->(x) { x.parse(headers: true) },
+               ->(x) { x.parse(o = { clean: true, headers: true }) rescue (raise $!, o.inspect) }]
+      p(calls.map do |call|
+        x = Roo::Excelx.new(ARGV[1])
+        call.call(x)
+      rescue StandardError => e
+        [e.class, e.message.lines.first.to_s[0, 60], x.headers]
+      end)
+    RUBY
+    roo, calamine = %w[roo roo/calamine].map do |library|
+      IO.popen([RbConfig.ruby, "-I", File.expand_path("../lib", __dir__), "-e", script, library, path], &:read)
+    end
+
+    assert_match(/NoMethodError.*TypeError.*FrozenError.*TypeError.*ArgumentError.*\[\]\].*\[\]\].*headers\W+true\}/, roo)
+    assert_equal roo, calamine
+  end
+
   def test_parse_reads_cells_set_before_it
     path = write_header_book
 
