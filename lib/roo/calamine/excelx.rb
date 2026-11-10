@@ -15,10 +15,11 @@ module Roo
 
         headers = header_columns(options)
         @header_line.upto(last_row) do |line|
-          # The block may set cells, switch sheets, or reload; roo sees that
-          # from the next #cell call on.
-          cells = sheet_for(nil).cells
+          # The block may set cells, switch sheets, reload, or close; roo sees
+          # that from the next #cell call on, and makes none without headers.
+          cells = nil
           yield(headers.each_with_object({}) do |(key, column), row|
+            cells ||= sheet_for(nil).cells
             row[key] = safe_send(cells[normalize(line, column)], :value)
           end)
         end

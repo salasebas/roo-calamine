@@ -251,6 +251,17 @@ class EdgeCasesTest < Minitest::Test
     end
   end
 
+  def test_each_without_headers_reads_no_cell
+    path = write_header_book
+
+    # roo reads no cell for a row without headers, so the block may even
+    # close the workbook.
+    assert_same_as_roo("close, no headers") do
+      xlsx = Roo::Excelx.new(path)
+      Oracle.describe_rows(xlsx.each(clean: true).map { |row| xlsx.close || row })
+    end
+  end
+
   def test_parse_reads_cells_set_before_it
     path = write_header_book
 
