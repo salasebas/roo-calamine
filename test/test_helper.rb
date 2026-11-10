@@ -19,4 +19,20 @@ module OracleAssertions
     assert_operator counts[:native_readers], :>, 0, "#{label}: the native reader did not run"
     assert_equal 0, counts[:roo_cells], "#{label}: roo parsed cells itself"
   end
+
+  # Asserts that Roo::Calamine.each_row_values, with the native reader on and
+  # off, yields the values of the cells roo's own
+  # each_row_streaming(pad_cells: true) yields.
+  def assert_values_same_as_roo(label, path, options = {}, native_only: true)
+    roo, = Oracle.read(native: false) { Oracle.describe_streamed_values(Roo::Excelx.new(path, options.dup)) }
+    fallback, = Oracle.read(native: false) { Oracle.describe_each_row_values(path, options) }
+    native, counts = Oracle.read(native: true) { Oracle.describe_each_row_values(path, options) }
+
+    assert_equal roo, fallback, "#{label}: each_row_values without the native reader differs from roo"
+    assert_equal roo, native, "#{label}: each_row_values differs from roo"
+    return unless native_only && roo.first == :ok
+
+    assert_operator counts[:native_readers], :>, 0, "#{label}: the native reader did not run"
+    assert_equal 0, counts[:roo_cells], "#{label}: roo parsed cells itself"
+  end
 end

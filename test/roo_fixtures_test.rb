@@ -39,6 +39,12 @@ class RooFixturesTest < Minitest::Test
       end
     end
 
+    define_method("test_each_row_values_#{slug}") do
+      OPEN_OPTIONS.each do |options|
+        assert_values_same_as_roo("#{name} each_row_values #{options}", path, options, native_only:)
+      end
+    end
+
     define_method("test_roo_api_#{slug}") do
       assert_same_as_roo("#{name} API", native_only:) do
         Oracle.describe_api(Roo::Spreadsheet.open(path))

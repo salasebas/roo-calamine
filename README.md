@@ -50,6 +50,36 @@ does (a non-UTF-8 encoding, a DTD, custom entities, or malformed XML), it
 hands the sheet back to roo. A stream that hits such a spot continues in roo
 from the next row.
 
+## Values only
+
+If you only need values, `Roo::Calamine.each_row_values` skips roo's cell
+objects. It is roo-calamine's own API, not roo's, and using it changes
+nothing in what roo does.
+
+```ruby
+Roo::Calamine.each_row_values("orders.xlsx", sheet: "Orders") do |values|
+  values # => [1001, "Ada", #<Date: 2024-05-01>, 19.5, nil, true]
+end
+```
+
+Each row equals, value for value, what this roo code yields:
+
+```ruby
+Roo::Excelx.new("orders.xlsx").each_row_streaming(sheet: "Orders", pad_cells: true) do |cells|
+  cells.map { |cell| cell&.value }
+end
+```
+
+So the values follow roo's rules: Integer or Float by the written text and
+number format, Date, DateTime and Time by the style, roo's shared strings
+(HTML for rich text), `Roo::Link` for hyperlinks, and error text such as
+`"#DIV/0!"`. A row has one entry per column from A to its last cell, with
+`nil` where there is no cell. The first argument is a path or an IO; `sheet:`
+is a name or index (default: the first sheet); other keywords are
+`Roo::Excelx.new` options. It closes the workbook when it is done, and
+returns an Enumerator without a block. With the reader off, or on JRuby, it
+reads through roo and yields the same rows.
+
 ## Turning it off
 
 ```ruby
@@ -77,6 +107,9 @@ roo is the oracle: every check takes roo's own output as the expected result.
 - **Edge cases.** `test/edge_cases_test.rb` pins roo's answer for Integer vs
   Float, dates and the 1904 system, merged ranges, rich text, inline strings,
   shared formulas, error cells, namespaces, and more.
+- **Values only.** Both suites also compare `Roo::Calamine.each_row_values`
+  with the values of roo's `each_row_streaming(pad_cells: true)`, with the
+  native reader on and off.
 
 Known differences, by design:
 
@@ -92,12 +125,17 @@ Median of 3 runs on an Apple M5 Pro, Ruby 3.4.9. Memory is peak RSS.
 
 | File | Scenario | roo | roo-calamine | Speedup |
 |---|---|---:|---:|---:|
-| 100k rows × 20 mixed columns | `each_row_streaming` | 14.26 s, 122 MB | 1.31 s, 135 MB | 10.9× |
-| | `parse(headers: true)` | 20.96 s, 3431 MB | 3.48 s, 860 MB | 6.0× |
-| | 10,000 random `cell(row, col)` | 20.74 s, 3267 MB | 1.94 s, 660 MB | 10.7× |
-| 100k rows × 10 shared strings | `each_row_streaming` | 5.25 s, 124 MB | 0.43 s, 133 MB | 12.3× |
-| | `parse(headers: true)` | 6.27 s, 1663 MB | 1.47 s, 396 MB | 4.3× |
-| | 10,000 random `cell(row, col)` | 5.40 s, 1598 MB | 0.70 s, 307 MB | 7.8× |
+| 100k rows × 20 mixed columns | `each_row_streaming` | 15.46 s, 122 MB | 1.37 s, 133 MB | 11.3× |
+| | `parse(headers: true)` | 24.42 s, 3295 MB | 3.87 s, 861 MB | 6.3× |
+| | 10,000 random `cell(row, col)` | 19.86 s, 3276 MB | 2.16 s, 673 MB | 9.2× |
+| | values only: `each_row_values` | 16.46 s, 119 MB | 0.78 s, 143 MB | 21.0× |
+| 100k rows × 10 shared strings | `each_row_streaming` | 5.65 s, 123 MB | 0.46 s, 131 MB | 12.4× |
+| | `parse(headers: true)` | 6.49 s, 1680 MB | 1.45 s, 390 MB | 4.5× |
+| | 10,000 random `cell(row, col)` | 5.35 s, 1592 MB | 0.70 s, 306 MB | 7.6× |
+| | values only: `each_row_values` | 6.02 s, 124 MB | 0.39 s, 166 MB | 15.6× |
+
+For the values-only rows, plain roo runs the `each_row_streaming(pad_cells:
+true)` code above.
 
 ```sh
 cd bench && bundle install && bundle exec ruby run.rb

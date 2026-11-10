@@ -32,6 +32,7 @@ class EdgeCasesTest < Minitest::Test
         Oracle.describe_stream(Roo::Excelx.new(path, open_options.dup), stream_options)
       end
     end
+    assert_values_same_as_roo("each_row_values", path, open_options, native_only:)
   end
 
   def roo_cell(path, row, column)
@@ -186,8 +187,10 @@ class EdgeCasesTest < Minitest::Test
     no_styles = write(%(<row r="1"><c r="A1"><v>1</v></c></row>), styles: nil)
     bad_reference = write(%(<row r="1"><c r="1A"><v>1</v></c></row>))
     bad_number = write(%(<row r="1"><c r="A1"><v>2020-01-01</v></c></row>))
+    bad_float = write(%(<row r="1"><c r="A1" s="4"><v>1,5€</v></c></row>))
+    bad_integer = write(%(<row r="1"><c r="A1"><v>1,5€</v></c></row>))
 
-    [no_styles, bad_reference, bad_number].each do |path|
+    [no_styles, bad_reference, bad_number, bad_float, bad_integer].each do |path|
       roo, = Oracle.read(native: false) { Roo::Excelx.new(path).cell(1, 1) }
 
       assert_equal :error, roo.first

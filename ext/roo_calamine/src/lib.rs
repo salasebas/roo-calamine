@@ -250,5 +250,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     let converter = native.define_class("Converter", ruby.class_object())?;
     converter.define_singleton_method("new", function!(Converter::new, 2))?;
     converter.define_method("row_cells", method!(Converter::row_cells, 1))?;
+    converter.define_method("row_values", method!(Converter::row_values, 1))?;
     Ok(())
 }

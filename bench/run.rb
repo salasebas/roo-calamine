@@ -18,7 +18,8 @@ LIBRARIES = %w[roo roo-calamine calx].freeze
 SCENARIOS = {
   "stream" => "`Roo::Spreadsheet.open` + `each_row_streaming`",
   "parse" => "`parse(headers: true)`",
-  "cell" => "10,000 random `cell(row, col)`"
+  "cell" => "10,000 random `cell(row, col)`",
+  "values" => "values only: `Roo::Calamine.each_row_values`"
 }.freeze
 COMPARED = %w[roo roo-calamine].freeze
 FIXTURES = %w[mixed-100k.xlsx shared-strings-100k.xlsx small.xlsx].freeze
