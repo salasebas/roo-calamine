@@ -214,27 +214,44 @@ module Oracle
     end
   end
 
-  # #column, #each, and #parse without a block after one single-cell
-  # lookup, before anything builds `cells`, then whether `cells`, built after
-  # them, holds the very values #column, #each, and #parse(headers: true)
-  # returned. The other parses look for the first row's last value, so their
-  # columns need not start at the sheet's first.
+  # #each and #parse without a block after one single-cell lookup, before
+  # anything builds `cells`, then whether `cells`, built after them, holds
+  # the very values #each and #parse(headers: true) returned. The other
+  # parses look for the first row's last value, so their columns need not
+  # start at the sheet's first.
   def describe_row_reads(workbook)
     workbook.sheets.map do |sheet|
       workbook.default_sheet = sheet
       bounds = BOUNDS.map { |m| workbook.public_send(m) }
       workbook.cell(bounds[0], bounds[2]) if bounds[0]
-      searched, reads = read_rows(workbook, bounds)
-      kept = outcome { kept_row_values(workbook.sheet_for(sheet).cells, workbook, bounds, reads) }
-      [sheet, bounds, searched, *reads.values.map { |read| described_rows(read) }, kept]
+      searched = describe_header_parses(workbook, bounds[0] && workbook.row(bounds[0]).compact.last)
+      workbook.header_line = 1
+      rows = outcome { workbook.each.to_a }
+      parsed = outcome { workbook.parse(headers: true) }
+      kept = outcome { kept_row_values(workbook.sheet_for(sheet).cells, workbook, bounds[2], rows, parsed) }
+      [sheet, bounds, searched, described_rows(rows), described_rows(parsed), kept]
     end
   end
 
-  def read_rows(workbook, bounds)
-    columns = outcome { bounds[2] ? (bounds[2]..bounds[3]).map { |i| workbook.column(i) } : [] }
-    searched = describe_header_parses(workbook, bounds[0] && workbook.row(bounds[0]).compact.last)
-    workbook.header_line = 1
-    [searched, { columns:, rows: outcome { workbook.each.to_a }, parsed: outcome { workbook.parse(headers: true) } }]
+  # #column after one single-cell lookup, before anything builds `cells`,
+  # then whether `cells`, built after it, holds the very values it returned.
+  def describe_column_reads(workbook)
+    workbook.sheets.map do |sheet|
+      workbook.default_sheet = sheet
+      bounds = BOUNDS.map { |m| workbook.public_send(m) }
+      workbook.cell(bounds[0], bounds[2]) if bounds[0]
+      columns = outcome { bounds[2] ? (bounds[2]..bounds[3]).map { |i| workbook.column(i) } : [] }
+      kept = outcome { kept_column_values(workbook.sheet_for(sheet).cells, bounds, columns) }
+      [sheet, bounds, described_rows(columns), kept]
+    end
+  end
+
+  def kept_column_values(cells, bounds, columns)
+    return [] unless columns.first == :ok
+
+    columns.last.each_with_index.flat_map do |values, i|
+      values.each_with_index.map { |value, j| value.equal?(cells[[bounds[0] + j, bounds[2] + i]]&.value) }
+    end.tally
   end
 
   def described_rows(read)
@@ -245,18 +262,16 @@ module Oracle
     [{ header_search: [header] }, { last: header }].map { |options| outcome { describe_rows(workbook.parse(options)) } }
   end
 
-  def kept_row_values(cells, workbook, bounds, reads)
+  def kept_row_values(cells, workbook, first_column, rows, parsed)
     held = ->(value, line, column) { value.equal?(cells[[line, column]]&.value) }
-    [kept_grid_values(reads[:columns]) { |value, i, j| held.call(value, bounds[0] + j, bounds[2] + i) },
-     kept_grid_values(reads[:rows]) { |value, i, j| held.call(value, i + 1, bounds[2] + j) },
-     kept_parse_values(held, workbook, reads[:parsed])].map(&:tally)
+    [kept_each_values(held, first_column, rows), kept_parse_values(held, workbook, parsed)].map(&:tally)
   end
 
-  def kept_grid_values(read)
-    return [] unless read.first == :ok
+  def kept_each_values(held, first_column, rows)
+    return [] unless rows.first == :ok
 
-    read.last.each_with_index.flat_map do |values, i|
-      values.each_with_index.map { |value, j| yield value, i, j }
+    rows.last.each_with_index.flat_map do |row, i|
+      row.each_with_index.map { |value, j| held.call(value, i + 1, first_column + j) }
     end
   end
 

@@ -54,6 +54,9 @@ class EdgeCasesTest < Minitest::Test
     assert_same_as_roo("row reads", native_only:, lazy:) do
       Oracle.describe_row_reads(Roo::Excelx.new(path, open_options.dup))
     end
+    assert_same_as_roo("column reads", native_only:, lazy:) do
+      Oracle.describe_column_reads(Roo::Excelx.new(path, open_options.dup))
+    end
     Oracle::STREAM_OPTIONS.each do |stream_options|
       assert_same_as_roo("each_row_streaming #{stream_options}", native_only:) do
         Oracle.describe_stream(Roo::Excelx.new(path, open_options.dup), stream_options)
@@ -205,8 +208,8 @@ class EdgeCasesTest < Minitest::Test
       _, counts = Oracle.read(native: true, &read)
 
       assert_equal 20, counts[:constructors], "every cell and coordinate should come from its constructor"
-      assert_same_as_roo("row reads under another roo") do
-        Oracle.describe_row_reads(Roo::Excelx.new(path, empty_cell: true))
+      %i[describe_row_reads describe_column_reads].each do |reads|
+        assert_same_as_roo("#{reads} under another roo") { Oracle.public_send(reads, Roo::Excelx.new(path, empty_cell: true)) }
       end
     end
   end

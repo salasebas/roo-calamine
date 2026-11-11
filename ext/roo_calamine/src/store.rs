@@ -113,7 +113,7 @@ pub struct Store {
     index: Vec<u32>,
     /// The cells built so far, by [`key`].
     built: Opaque<RHash>,
-    /// By record, the values [`Store::row`] handed out before their cell
+    /// By record, the values [`Store::value`] handed out before their cell
     /// was built, which that cell then holds: `nil`, or an object that is
     /// not a shared string (the converter picks the same one again).
     handed_out: Opaque<RArray>,
@@ -304,7 +304,7 @@ impl Store {
             bound *= 2;
         }
         let from = bound / 2;
-        start + from + rest[from..rest.len().min(bound + 1)].partition_point(before)
+        start + from + rest[from..rest.len().min(bound)].partition_point(before)
     }
 
     /// `cells` as `SheetDoc#extract_cells` builds it, holding the cells
