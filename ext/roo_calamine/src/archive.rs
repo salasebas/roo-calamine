@@ -186,24 +186,30 @@ impl ZipEntry {
 }
 
 /// The uncompressed size a local header gives: its 32-bit field, or, when
-/// that is `u32::MAX`, the first value of its Zip64 extra field.
+/// that is `u32::MAX`, the first value of its Zip64 extra field. `None`
+/// when the extra fields are malformed or hold more than one Zip64 field,
+/// which rubyzip reads its own way.
 fn local_size(field: u32, extra: &[u8]) -> Option<u64> {
     if field != u32::MAX {
         return Some(u64::from(field));
     }
+    let mut zip64 = None;
     let mut rest = extra;
-    while let [a, b, c, d, data @ ..] = rest {
-        let (id, length) = (
-            u16::from_le_bytes([*a, *b]),
-            usize::from(u16::from_le_bytes([*c, *d])),
-        );
-        let data = data.get(..length)?;
-        if id == ZIP64_EXTRA {
-            return Some(u64::from_le_bytes(data.get(..8)?.try_into().ok()?));
+    while !rest.is_empty() {
+        let [a, b, c, d, after @ ..] = rest else {
+            return None;
+        };
+        let length = usize::from(u16::from_le_bytes([*c, *d]));
+        let data = after.get(..length)?;
+        if u16::from_le_bytes([*a, *b]) == ZIP64_EXTRA {
+            if zip64.is_some() {
+                return None;
+            }
+            zip64 = Some(u64::from_le_bytes(data.get(..8)?.try_into().ok()?));
         }
-        rest = &rest[4 + length..];
+        rest = &after[length..];
     }
-    None
+    zip64
 }
 
 /// Reads until `buf` is full or the input ends.
@@ -348,4 +354,34 @@ pub fn define(ruby: &Ruby, native: RModule) -> Result<(), Error> {
     entry.define_singleton_method("new", function!(ZipEntry::new, 5))?;
     entry.define_method("extract", method!(ZipEntry::extract, 1))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::local_size;
+
+    fn zip64(size: u64) -> Vec<u8> {
+        let mut field = vec![1, 0, 16, 0];
+        field.extend(size.to_le_bytes());
+        field.extend(7u64.to_le_bytes());
+        field
+    }
+
+    #[test]
+    fn local_size_reads_the_zip64_field_rubyzip_reads() {
+        let other = [0x55, 0x54, 1, 0, 9];
+        assert_eq!(local_size(284, &[]), Some(284));
+        assert_eq!(local_size(u32::MAX, &zip64(284)), Some(284));
+        assert_eq!(
+            local_size(u32::MAX, &[&other[..], &zip64(284)].concat()),
+            Some(284)
+        );
+        assert_eq!(local_size(u32::MAX, &[]), None);
+        assert_eq!(local_size(u32::MAX, &[zip64(284), zip64(0)].concat()), None);
+        assert_eq!(local_size(u32::MAX, &zip64(284)[..10]), None);
+        assert_eq!(
+            local_size(u32::MAX, &[&zip64(284)[..], &[1, 0]].concat()),
+            None
+        );
+    }
 }
