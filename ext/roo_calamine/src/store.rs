@@ -23,56 +23,68 @@ fn range((start, end): Span) -> Range<usize> {
     start as usize..end as usize
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Content {
     Empty,
-    Inline(Span),
-    Value(Span),
+    Inline,
+    Value,
 }
 
 /// A record roo's `cells` keeps a cell for, as [`RawCell`] holds it but
-/// without its heap parts: the coordinate is always known, the style is an
-/// index, and spans index [`Store::text`].
+/// without its heap parts, in 20 bytes: the coordinate is always known, the
+/// style is an index, `text` is the span of an `Inline` or `Value` content in
+/// [`Store::text`], and a record with a formula has its span in
+/// [`Store::formulas`].
 #[derive(Clone, Copy)]
 struct Record {
     row: u32,
-    column: u32,
-    style: u32,
+    text: Span,
+    column: u16,
+    style: u16,
     kind: Kind,
-    formula: Option<Span>,
     content: Content,
+    formula: bool,
 }
 
+const _: () = assert!(size_of::<Record>() == 20);
+
 impl Record {
-    /// `None` for a record that needs a heap part, or Ruby, to read.
-    fn new(raw: RawCell, row: i64, column: i64, offset: usize) -> Option<Self> {
+    /// The record and the span of its formula, or `None` for a record that
+    /// needs a heap part, or Ruby, to read, or does not fit.
+    fn new(raw: RawCell, row: i64, column: i64, offset: usize) -> Option<(Self, Option<Span>)> {
         let span = |range: Range<usize>| -> Option<Span> {
             Some((
                 u32::try_from(range.start + offset).ok()?,
                 u32::try_from(range.end + offset).ok()?,
             ))
         };
-        Some(Self {
+        let (content, text) = match raw.body {
+            Body::Empty => (Content::Empty, (0, 0)),
+            Body::Inline(text) => (Content::Inline, span(text)?),
+            Body::Value(text) => (Content::Value, span(text)?),
+        };
+        let formula = match raw.formula {
+            Some(formula) => Some(span(formula)?),
+            None => None,
+        };
+        let record = Self {
             row: u32::try_from(row).ok()?,
-            column: u32::try_from(column).ok()?,
+            text,
+            column: u16::try_from(column).ok()?,
             style: match raw.style {
-                Style::Index(index) => u32::try_from(index).ok()?,
+                Style::Index(index) => u16::try_from(index).ok()?,
                 Style::Other(_) => return None,
             },
             kind: raw.kind,
-            formula: match raw.formula {
-                Some(formula) => Some(span(formula)?),
-                None => None,
-            },
-            content: match raw.body {
-                Body::Empty => Content::Empty,
-                Body::Inline(text) => Content::Inline(span(text)?),
-                Body::Value(text) => Content::Value(span(text)?),
-            },
-        })
+            content,
+            formula: formula.is_some(),
+        };
+        Some((record, formula))
     }
 
-    fn raw(&self) -> RawCell {
+    /// The cell as [`RawCell`] holds it, with `formula` the span of its
+    /// formula when it has one.
+    fn raw(&self, formula: Option<Span>) -> RawCell {
         RawCell {
             reference: Reference::At {
                 row: self.row.into(),
@@ -80,21 +92,43 @@ impl Record {
             },
             style: Style::Index(self.style.into()),
             kind: self.kind,
-            formula: self.formula.map(range),
+            formula: formula.map(range),
             body: match self.content {
                 Content::Empty => Body::Empty,
-                Content::Inline(text) => Body::Inline(range(text)),
-                Content::Value(text) => Body::Value(range(text)),
+                Content::Inline => Body::Inline(range(self.text)),
+                Content::Value => Body::Value(range(self.text)),
             },
         }
     }
 
     fn key(&self) -> (u32, u32) {
-        (self.row, self.column)
+        (self.row, self.column.into())
     }
 
     fn built_key(&self) -> u64 {
         u64::from(self.row) << 32 | u64::from(self.column)
+    }
+
+    fn shared_string(&self) -> bool {
+        self.kind == Kind::Shared && self.content == Content::Value
+    }
+}
+
+/// The span of the formula of each record that has one, by record, sorted.
+#[derive(Default)]
+struct Formulas(Vec<(u32, Span)>);
+
+impl Formulas {
+    /// [`Record::raw`] for the record at `index` of `records`.
+    fn raw(&self, records: &[Record], index: u32) -> RawCell {
+        let record = &records[index as usize];
+        record.raw(record.formula.then(|| {
+            let i = self
+                .0
+                .binary_search_by_key(&index, |&(i, _)| i)
+                .expect("a record with a formula has its span");
+            self.0[i].1
+        }))
     }
 }
 
@@ -108,6 +142,7 @@ pub struct Store {
     text: String,
     /// In document order.
     records: Vec<Record>,
+    formulas: Formulas,
     /// For each key of roo's `cells` hash, the record whose cell it holds
     /// (the last one with that key), sorted by key.
     index: Vec<u32>,
@@ -127,11 +162,21 @@ impl DataTypeFunctions for Store {
         marker.mark(self.built);
         marker.mark(self.handed_out);
     }
+
+    fn size(&self) -> usize {
+        size_of::<Self>()
+            + self.text.capacity()
+            + self.records.capacity() * size_of::<Record>()
+            + self.formulas.0.capacity() * size_of::<(u32, Span)>()
+            + self.index.capacity() * size_of::<u32>()
+            + self.repeated.capacity() * size_of::<u64>()
+    }
 }
 
 struct Records {
     text: String,
     records: Vec<Record>,
+    formulas: Formulas,
 }
 
 impl Records {
@@ -142,7 +187,12 @@ impl Records {
         for (index, raw) in row.cells.into_iter().enumerate() {
             let (row, column) = raw.position(row_number, index + 1)?;
             if raw.body != Body::Empty || empty_cell {
-                self.records.push(Record::new(raw, row, column, offset)?);
+                let (record, formula) = Record::new(raw, row, column, offset)?;
+                if let Some(formula) = formula {
+                    let index = u32::try_from(self.records.len()).ok()?;
+                    self.formulas.0.push((index, formula));
+                }
+                self.records.push(record);
             }
         }
         Some(())
@@ -161,12 +211,13 @@ fn read(ruby: &Ruby, path: &str, converter: &Converter) -> Result<Option<Records
     let mut records = Records {
         text: String::new(),
         records: Vec::new(),
+        formulas: Formulas::default(),
     };
     let empty_cell = converter.empty_cell();
     let mut rows = 0;
-    let mut checked = 0;
+    let mut checked: u32 = 0;
     loop {
-        let batch_end = checked + BATCH_RECORDS;
+        let batch_end = checked as usize + BATCH_RECORDS;
         let read = without_gvl(|interrupted| {
             while !interrupted.load(Ordering::Acquire) && records.records.len() < batch_end {
                 let Some(row) = sheet.next_row()? else {
@@ -182,20 +233,23 @@ fn read(ruby: &Ruby, path: &str, converter: &Converter) -> Result<Option<Records
         let Some(done) = read.map_err(|e| unsupported(ruby, e))? else {
             return Ok(None);
         };
-        let batch = &records.records[checked..];
-        if !batch
-            .iter()
-            .all(|record| converter.builds_safely(ruby, &records.text, &record.raw()))
-        {
+        let Ok(end) = u32::try_from(records.records.len()) else {
+            return Ok(None);
+        };
+        if !(checked..end).all(|i| {
+            let raw = records.formulas.raw(&records.records, i);
+            converter.builds_safely(ruby, &records.text, &raw)
+        }) {
             return Ok(None);
         }
-        checked = records.records.len();
+        checked = end;
         if done {
             break;
         }
     }
     records.text.shrink_to_fit();
     records.records.shrink_to_fit();
+    records.formulas.0.shrink_to_fit();
     Ok(Some(records))
 }
 
@@ -204,7 +258,12 @@ impl Store {
     /// be built all at once, in order. `context` is a `Roo::Calamine::Context`.
     fn read(ruby: &Ruby, path: String, context: Value) -> Result<Option<Self>, Error> {
         let converter = ruby.obj_wrap(Converter::new(ruby, context, false)?);
-        let Some(Records { text, records }) = read(ruby, &path, &converter)? else {
+        let Some(Records {
+            text,
+            records,
+            formulas,
+        }) = read(ruby, &path, &converter)?
+        else {
             return Ok(None);
         };
         let Ok(count) = u32::try_from(records.len()) else {
@@ -231,6 +290,7 @@ impl Store {
             converter: converter.into(),
             text,
             records,
+            formulas,
             index,
             built: ruby.hash_new().into(),
             handed_out: ruby.ary_new().into(),
@@ -240,8 +300,9 @@ impl Store {
         // before a caller can change that string in place.
         for &i in &store.index {
             let record = &store.records[i as usize];
-            let shared = record.kind == Kind::Shared && matches!(record.content, Content::Value(_));
-            if shared && converter.has_link(ruby, record.row.into(), record.column.into()) {
+            if record.shared_string()
+                && converter.has_link(ruby, record.row.into(), record.column.into())
+            {
                 store.build(ruby, i)?;
             }
         }
@@ -251,15 +312,15 @@ impl Store {
     fn build(&self, ruby: &Ruby, record: u32) -> Result<Value, Error> {
         let built = ruby.get_inner(self.built);
         let handed_out: Value = ruby.get_inner(self.handed_out).entry(record as isize)?;
-        let record = &self.records[record as usize];
-        let key = record.built_key();
+        let key = self.records[record as usize].built_key();
         if let Some(cell) = built.get(key) {
             return Ok(cell);
         }
         let known = (!handed_out.is_nil()).then_some(handed_out);
+        let raw = self.formulas.raw(&self.records, record);
         let (_, cell) = ruby
             .get_inner(self.converter)
-            .cell(ruby, &self.text, &record.raw(), 0, 0, known)?
+            .cell(ruby, &self.text, &raw, 0, 0, known)?
             .expect("the store holds only records roo keeps");
         built.aset(key, cell)?;
         Ok(cell)
@@ -278,11 +339,11 @@ impl Store {
             return Ok(kept);
         }
         let converter = ruby.get_inner(self.converter);
-        let Some(value) = converter.known_value(ruby, &self.text, &raw.raw())? else {
+        let cell = self.formulas.raw(&self.records, record);
+        let Some(value) = converter.known_value(ruby, &self.text, &cell)? else {
             return self.build(ruby, record)?.funcall("value", ());
         };
-        let shared = raw.kind == Kind::Shared && matches!(raw.content, Content::Value(_));
-        if !rb_sys::SPECIAL_CONST_P(value.as_raw()) && !shared {
+        if !rb_sys::SPECIAL_CONST_P(value.as_raw()) && !raw.shared_string() {
             handed_out.store(record as isize, value)?;
         }
         Ok(value)
@@ -327,7 +388,14 @@ impl Store {
             let value: Value = handed_out.entry(record as isize)?;
             let known = (kept && !value.is_nil()).then_some(value);
             let (coordinate, cell) = converter
-                .cell(ruby, &rb_self.text, &raw.raw(), 0, 0, known)?
+                .cell(
+                    ruby,
+                    &rb_self.text,
+                    &rb_self.formulas.raw(&rb_self.records, record),
+                    0,
+                    0,
+                    known,
+                )?
                 .expect("the store holds only records roo keeps");
             cells.aset(coordinate, cell)?;
         }
@@ -453,7 +521,7 @@ impl Store {
                 None => match ruby.get_inner(rb_self.converter).presence(
                     ruby,
                     &rb_self.text,
-                    &record.raw(),
+                    &rb_self.formulas.raw(&rb_self.records, i),
                 )? {
                     Some(present) => present,
                     None => presence(rb_self.build(ruby, i)?)?,
