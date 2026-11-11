@@ -14,10 +14,13 @@ module Roo
     # leaves several times the file's size in short-lived Strings, which
     # Ruby's GC frees only after they have grown the process.
     module DeferredSheets
-      # roo versions whose #extract_sheets_in_order this reproduces.
+      # roo versions whose workbook extraction these methods reproduce.
       ROO_VERSIONS = %w[4.0.0].freeze
       COMPRESSION_METHODS = [::Zip::Entry::STORED, ::Zip::Entry::DEFLATED].freeze
-      private_constant :ROO_VERSIONS, :COMPRESSION_METHODS
+      METADATA_FILES = %w[roo_workbook.xml roo_workbook.xml.rels roo_styles.xml].freeze
+      # Nokogiri's memory parser passes the byte length as a signed C int.
+      MAX_METADATA_SIZE = (2**31) - 1
+      private_constant :ROO_VERSIONS, :COMPRESSION_METHODS, :METADATA_FILES, :MAX_METADATA_SIZE
 
       # `path` as the native extension takes it. On Windows, Ruby opens a
       # binary path's bytes as UTF-8, where magnus refuses a binary string.
@@ -35,10 +38,16 @@ module Roo
       # or cannot take the path, rubyzip extracts it as roo does, and raises
       # or warns as roo does.
       module NativeEntry
-        attr_accessor :calamine_entry
+        attr_accessor :calamine_entry, :calamine_metadata
 
         def extract(entry_path, destination_directory:)
-          calamine_entry.extract(DeferredSheets.native_path(::File.join(destination_directory, entry_path)))
+          path = ::File.join(destination_directory, entry_path)
+          if calamine_metadata && METADATA_FILES.include?(entry_path) &&
+             size <= MAX_METADATA_SIZE && !::File.exist?(path)
+            calamine_metadata[entry_path] = Native.metadata_bytes(calamine_entry)
+            return self
+          end
+          calamine_entry.extract(DeferredSheets.native_path(path))
           self
         rescue IOError, EncodingError
           super
@@ -90,7 +99,11 @@ module Roo
       end
 
       def process_zipfile_entries(entries)
-        native_entries(entries) if @calamine_copy
+        if @calamine_copy
+          @shared.extend(MetadataShared)
+          @shared.calamine_metadata = {}
+          native_entries(entries)
+        end
         super
       end
 
@@ -99,15 +112,51 @@ module Roo
       # encrypted, or compressed by another method; rubyzip still extracts it.
       def native_entries(entries)
         zip = DeferredSheets.native_path(@calamine_copy)
+        metadata = metadata_entries(entries)
         entries.each do |entry|
           next unless entry.file? && !entry.encrypted? && COMPRESSION_METHODS.include?(entry.compression_method)
 
           entry.extend(NativeEntry).calamine_entry =
             Native::ZipEntry.new(zip, entry.local_header_offset, entry.compressed_size, entry.size,
                                  entry.compression_method)
+          entry.calamine_metadata = @shared.calamine_metadata if metadata.include?(entry)
         end
       rescue EncodingError
         nil
+      end
+
+      def metadata_entries(entries)
+        metadata = [entries.find { |entry| entry.name[/workbook.xml$/] },
+                    entries.find { |entry| entry.name[/workbook.xml.rels$/] }]
+        styles = entries.select do |entry|
+          entry.name.downcase.match?(/styles.xml$/) && !entry.name.downcase[/richdata/]
+        end
+        metadata << styles.first if styles.one?
+        metadata
+      end
+
+      def extract_worksheet_ids(entries, path)
+        return super unless @calamine_copy
+
+        entry = entries.find { |item| item.name[/workbook.xml$/] }
+        return super unless entry.is_a?(NativeEntry)
+
+        entry.extract(::File.basename(path), destination_directory: ::File.dirname(path))
+        workbook.sheets.map { |sheet| sheet["id"] }
+      end
+
+      def extract_worksheet_rels(entries, path)
+        return super unless @calamine_copy
+
+        entry = entries.find { |item| item.name[/workbook.xml.rels$/] }
+        return super unless entry
+
+        entry.extract(::File.basename(path), destination_directory: ::File.dirname(path))
+        bytes = @shared.calamine_metadata.delete(::File.basename(path))
+        document = (bytes ? ::Nokogiri::XML(bytes, path) : Roo::Utils.load_xml(path)).remove_namespaces!
+        document.xpath("//Relationship").each_with_object({}) do |relationship, sheets|
+          sheets[relationship["Id"]] = relationship["Target"] if worksheet_types.include?(relationship["Type"])
+        end
       end
 
       # Roo::Excelx#extract_sheets_in_order, without the extraction. roo
@@ -125,6 +174,47 @@ module Roo
 
       def sheet_entry(entries, name)
         name && entries.find { |e| "/#{e.name}".end_with?(name) }
+      end
+    end
+
+    # Roo constructs these extractors after extraction. Pass retained bytes
+    # alongside their original paths, including when native reading is off.
+    module MetadataShared
+      attr_accessor :calamine_metadata
+
+      def workbook
+        @workbook ||= Roo::Excelx::Workbook.new(::File.join(@dir, "roo_workbook.xml"),
+                                                calamine_xml: calamine_metadata["roo_workbook.xml"])
+      end
+
+      def styles
+        @styles ||= Roo::Excelx::Styles.new(::File.join(@dir, "roo_styles.xml"),
+                                            calamine_xml: calamine_metadata["roo_styles.xml"])
+      end
+    end
+
+    # Roo's document cache is weak: keep the source bytes so metadata can be
+    # parsed again after GC, without keeping a large Nokogiri tree alive.
+    module MetadataDocument
+      def initialize(*, calamine_xml: nil, **)
+        @calamine_xml = calamine_xml
+        super(*, **)
+      end
+
+      private
+
+      def doc
+        return super unless @calamine_xml
+
+        instance_cache(:@doc) do
+          raise Roo::FileNotFound, "#{@path} file not found" unless doc_exists?
+
+          ::Nokogiri::XML(@calamine_xml, @path).remove_namespaces!
+        end
+      end
+
+      def doc_exists?
+        @calamine_xml ? ::File.directory?(::File.dirname(@path)) : super
       end
     end
 
