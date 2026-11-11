@@ -62,6 +62,14 @@ module Roo
         calamine_stream_converter.row_cells(row_xml).each(&)
       end
 
+      # The cells #each_cell yields for a Native::Row, as a new Array; nil for
+      # rows roo reads itself and when #each_cell is not this module's.
+      def native_row_cells(row)
+        return unless row.is_a?(Native::Row) && method(:each_cell).owner.equal?(SheetDoc)
+
+        calamine_stream_converter.row_cells(row)
+      end
+
       # Roo::Calamine.each_row_values. `sheet` is the Roo::Excelx::Sheet that
       # owns this document; it turns rows that roo reads itself into cells.
       def each_row_values(sheet, &)

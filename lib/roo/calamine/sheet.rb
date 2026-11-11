@@ -84,6 +84,11 @@ module Roo
         by_line
       end
 
+      # roo's loop over #each_cell only copies the cells when it pads none.
+      def cells_for_row_element(row_element, options = {})
+        (@sheet.native_row_cells(row_element) unless options[:pad_cells]) || super
+      end
+
       def first_last_row_col
         @first_last_row_col ||= lazy_cells&.bounds || super
       end
