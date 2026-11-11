@@ -84,7 +84,9 @@ every column is the median of 5 runs on 65bd561.
     row joined by commas, without quoting.
 
 ```sh
-cd bench && bundle install && bundle exec ruby run.rb # optional: runs, then the libraries to time
+cd bench && bundle install
+bundle exec ruby run.rb                  # each scenario 3–10 times, stopping after 10 s
+bundle exec ruby run.rb 5 roo-calamine   # a fixed run count, and only the libraries named
 ```
 
 </details>

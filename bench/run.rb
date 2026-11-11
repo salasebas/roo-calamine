@@ -6,7 +6,9 @@
 #   cd bench && bundle install && bundle exec ruby run.rb [RUNS] [LIBRARY...]
 #
 # Each run is a fresh process. The table shows the median wall time and peak
-# RSS of RUNS timed runs (default 3). LIBRARY limits the timed runs to those
+# RSS of the timed runs. Without RUNS, each scenario runs at least 3 and at
+# most 10 times, stopping once it has run for 10 seconds, so a slow library
+# gets 3 runs and a fast one 10. LIBRARY limits the timed runs to those
 # libraries; the others show "-". Before timing, one run of roo and one of
 # roo-calamine hash every value they read; the two hashes must match.
 require "etc"
@@ -14,9 +16,13 @@ require "json"
 require "open3"
 require "rbconfig"
 
-RUNS = Integer(ARGV.fetch(0, "3"))
+RUNS = Integer(ARGV.first, exception: false)
+MIN_RUNS = 3
+MAX_RUNS = 10
+BUDGET_SECONDS = 10
+RUN_COUNT = RUNS ? "#{RUNS} runs" : "#{MIN_RUNS}–#{MAX_RUNS} runs, stopping after #{BUDGET_SECONDS} s per scenario"
 LIBRARIES = %w[roo roo-calamine calx].freeze
-TIMED = ARGV.drop(1).then { |names| names.empty? ? LIBRARIES : names }
+TIMED = (RUNS ? ARGV.drop(1) : ARGV).then { |names| names.empty? ? LIBRARIES : names }
 raise "unknown library: #{(TIMED - LIBRARIES).join(", ")}" unless (TIMED - LIBRARIES).empty?
 
 SCENARIOS = {
@@ -40,10 +46,24 @@ def scenario(*args)
   JSON.parse(out.lines.last)
 end
 
+def more_runs?(count, started)
+  return count < RUNS if RUNS
+  return true if count < MIN_RUNS
+
+  count < MAX_RUNS && Process.clock_gettime(Process::CLOCK_MONOTONIC) - started < BUDGET_SECONDS
+end
+
+def median(values)
+  sorted = values.sort
+  middle = sorted.size / 2
+  sorted.size.odd? ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2.0
+end
+
 def timed(library, name, path)
-  results = Array.new(RUNS) { scenario(library, name, path) }
-  median = ->(key) { results.map { |r| r[key] }.sort[RUNS / 2] }
-  { seconds: median.call("seconds"), peak_rss: median.call("peak_rss") }
+  started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  results = []
+  results << scenario(library, name, path) while more_runs?(results.size, started)
+  { seconds: median(results.map { |r| r["seconds"] }), peak_rss: median(results.map { |r| r["peak_rss"] }) }
 end
 
 def cpu
@@ -57,11 +77,11 @@ def describe(result)
 
   seconds = result[:seconds]
   time = seconds < 0.1 ? format("%.1f ms", seconds * 1000) : format("%.2f s", seconds)
-  "#{time}, #{result[:peak_rss] / MB} MB"
+  "#{time}, #{result[:peak_rss].to_i / MB} MB"
 end
 
 puts "Ruby #{RUBY_VERSION} (#{RUBY_PLATFORM}), #{`uname -sr`.strip}, #{cpu}, #{Etc.nprocessors} cores, " \
-     "median of #{RUNS} runs", ""
+     "median of #{RUN_COUNT}", ""
 puts "| File | Scenario | roo | roo + roo-calamine | Speedup | calx (reference) |", "|---|---|---:|---:|---:|---:|"
 FIXTURES.each do |fixture|
   path = File.join(__dir__, "fixtures", fixture)
