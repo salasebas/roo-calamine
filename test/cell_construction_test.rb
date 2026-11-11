@@ -1,0 +1,74 @@
+# frozen_string_literal: true
+
+require_relative "test_helper"
+
+class CellConstructionTest < Minitest::Test
+  include OracleAssertions
+
+  def setup
+    @dir = Dir.mktmpdir("roo-calamine")
+  end
+
+  def teardown
+    FileUtils.rm_rf(@dir)
+  end
+
+  def write_serials(texts)
+    cells = texts.each_with_index.map do |text, index|
+      %(<c r="#{Roo::Utils.number_to_letter(index + 1)}1" s="2"><v>#{text}</v></c>)
+    end
+    Workbook.write(@dir, "serials", sheets: { "Sheet1" => Workbook.sheet(%(<row r="1">#{cells.join}</row>)) })
+  end
+
+  def test_temporal_values_are_read_without_building_full_cells
+    path = write_serials(%w[45000.5 0.25 45000 -60000000000000.25])
+    workbook = Roo::Excelx.new(path)
+    GC.disable
+    before = ObjectSpace.each_object(Roo::Excelx::Cell::DateTime).count
+    values = workbook.row(1)
+
+    assert_equal [DateTime, Integer, Date, Integer], values.map(&:class)
+    assert_equal before, ObjectSpace.each_object(Roo::Excelx::Cell::DateTime).count
+
+    cells = workbook.sheet_for(nil).cells.values
+
+    assert_same values.first, cells.first.value
+    assert_equal 4, ObjectSpace.each_object(Roo::Excelx::Cell::DateTime).count - before
+    assert_instance_of DateTime, cells.last.instance_variable_get(:@datetime)
+  ensure
+    GC.enable
+  end
+
+  def test_temporal_values_keep_roos_rounding_identity_and_full_cell_state
+    path = write_serials(%w[45000.1234565 45000.9999999 1.0000009 1.0000011 0.0000005 -0.25 -60000000000000.25])
+    [false, true].each do |date1904|
+      if date1904
+        Zip::File.open(path) do |zip|
+          xml = zip.read("xl/workbook.xml").sub("<sheets>", %(<workbookPr date1904="1"/><sheets>))
+          zip.get_output_stream("xl/workbook.xml") { |io| io.write(xml) }
+        end
+      end
+      assert_same_as_roo("temporal values then full cells, date1904=#{date1904}", lazy: true) do
+        workbook = Roo::Excelx.new(path)
+        values = workbook.row(1)
+        values.grep(DateTime).each { _1.instance_variable_set(:@edited, true) }
+        GC.start
+        cells = workbook.sheet_for(nil).cells.values
+        [values.map { Oracle.describe_value(_1) }, values.zip(cells).map { |value, cell| value.equal?(cell.value) },
+         cells.map { Oracle.describe_cell(_1) }, cells.map { _1.value.instance_variables }]
+      end
+    end
+  end
+
+  def test_temporal_overflow_keeps_roos_values_and_errors
+    %w[-1e20 1e20 -1e308 1e308].each do |text|
+      path = write_serials(["45000.5", text])
+
+      assert_same_as_roo("temporal overflow #{text}") do
+        workbook = Roo::Excelx.new(path)
+        [workbook.row(1), Oracle.describe_cells(workbook)]
+      end
+      assert_values_same_as_roo("temporal overflow #{text}", path)
+    end
+  end
+end
