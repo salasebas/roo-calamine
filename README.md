@@ -106,23 +106,26 @@ including opening the workbook, compared with e979933:
 | Mixed, 100k rows | 0.663 s | 0.640 s | 3.5% | 0.442 s |
 | Shared strings, 100k rows | 0.325 s | 0.309 s | 4.8% | 0.190 s |
 
-The remaining gap is 198 ms on mixed and 119 ms on shared strings. A
+The remaining gap is about 0.20 s on mixed and 0.12 s on shared strings. A
 separate 7-run measurement isolates the work after loading the store:
 
-| File | Loop over `row(n)` | Native `each` | Native walk without checking block changes |
-|---|---:|---:|---:|
-| Mixed | 174 ms | 154 ms | 137 ms |
-| Shared strings | 88 ms | 74 ms | 60 ms |
+| File | Load before rows | Loop over `row(n)` | Native `each` | Native walk without checking block changes |
+|---|---:|---:|---:|---:|
+| Mixed | 459 ms | 174 ms | 154 ms | 137 ms |
+| Shared strings | 232 ms | 88 ms | 74 ms | 60 ms |
 
-The checks after each block cost about 17 ms and 13 ms. The other roughly
-181 ms and 106 ms of the gap come from the document-store path: reading,
-validating, and indexing records before yielding, then converting their
-values while retaining mutable objects for later cell reads. Streaming
-converts and discards rows as it reads them. Removing only the checks does
-not bring `each` within 10% of `each_row_values`, and stops it from seeing
-changes made by the block. These measurements attribute the remaining cost
-for [#52](https://github.com/salasebas/roo-calamine/issues/52); unique-string
-loading remains separate work.
+The load column measures opening the workbook and reading, validating, and
+indexing records before yielding: 459 ms and 232 ms, compared with 442 ms
+and 190 ms for complete streaming reads. Walking the retained store adds
+154 ms and 74 ms, including about 17 ms and 14 ms for block-change checks.
+The store retains mutable values for later cell reads; streaming converts
+and discards rows as it reads them. The medians come from separate runs
+and need not sum to the full-call medians.
+
+Removing only the checks does not bring `each` within 10% of
+`each_row_values`, and stops it from seeing changes made by the block.
+These measurements attribute the remaining cost for
+[#52](https://github.com/salasebas/roo-calamine/issues/52).
 
 After generating the fixtures, run from the repository root:
 
@@ -130,10 +133,9 @@ After generating the fixtures, run from the repository root:
 BUNDLE_GEMFILE=bench/Gemfile bundle exec ruby -Ilib bench/each.rb each bench/fixtures/mixed-100k.xlsx
 ```
 
-Use `row` or `unchecked` to measure the other walks. `unchecked` is a
-diagnostic that deliberately skips the block's changes. Repeat each mode
-in fresh processes and take medians. The existing `bench/scenario.rb`
-measures full `each` and `values` calls and checks their output with `digest`.
+Use `row` or `unchecked` for the other walks; `unchecked` ignores block
+changes. Repeat modes in fresh processes and take medians. `bench/scenario.rb`
+measures full `each` and `values` calls and checks output with `digest`.
 
 ### Whole-sheet formatters
 
