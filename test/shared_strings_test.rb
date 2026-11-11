@@ -122,7 +122,8 @@ class SharedStringsTest < Minitest::Test
 
   def test_strings_are_unfrozen_utf8_objects_of_their_own
     path = write("<si><t>same</t></si>", "<si><t>same</t></si>", "<si><t/></si>", "<si><t/></si>")
-    strings = Roo::Excelx.new(path).shared_strings
+    workbook = Roo::Excelx.new(path)
+    strings = workbook.shared_strings
     all = strings.to_a + strings.to_html
 
     assert_equal all.size, all.map(&:object_id).uniq.size
@@ -180,7 +181,8 @@ class SharedStringsTest < Minitest::Test
     skip "needs SIGUSR1" unless Signal.list.key?("USR1")
 
     path = write(xml: Workbook.shared_strings(*Array.new(200_000) { |i| "<si><t>string #{i}</t></si>" }))
-    expected = Roo::Excelx.new(path).shared_strings.to_a
+    workbook = Roo::Excelx.new(path)
+    expected = workbook.shared_strings.to_a
     Oracle.counts.clear
     strings = nil
     signals = under_signals("USR1") do
@@ -198,7 +200,9 @@ class SharedStringsTest < Minitest::Test
     Roo::Calamine.enabled = false
     Oracle.counts.clear
 
-    assert_equal ["a"], Roo::Excelx.new(path).shared_strings.to_a
+    workbook = Roo::Excelx.new(path)
+
+    assert_equal ["a"], workbook.shared_strings.to_a
     assert_equal 0, Oracle.counts[:native_shared_strings]
 
     Roo::Calamine.enabled = true
