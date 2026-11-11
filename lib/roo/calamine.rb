@@ -72,6 +72,7 @@ if RUBY_ENGINE == "ruby"
   require_relative "calamine/sheet_parts"
   require_relative "calamine/excelx"
   require_relative "calamine/csv"
+  require_relative "calamine/formatters"
   require_relative "calamine/row_index"
   require_relative "calamine/sheet"
   require_relative "calamine/shared_strings"
@@ -85,4 +86,5 @@ if RUBY_ENGINE == "ruby"
   Roo::Excelx::Workbook.prepend(Roo::Calamine::MetadataDocument)
   Roo::Excelx::Styles.prepend(Roo::Calamine::MetadataDocument)
   Roo::Excelx.prepend(Roo::Calamine::CSV)
+  Roo::Excelx.prepend(Roo::Calamine::Formatters)
 end

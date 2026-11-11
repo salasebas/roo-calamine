@@ -46,7 +46,10 @@ ROO_SCENARIOS = {
   "parse" => ->(workbook, digest) { workbook.parse(headers: true).each { |row| digest << value(row.values) } },
   "each" => ->(workbook, digest) { workbook.each { |row| digest << value(row) } },
   "cell" => method(:random_cells),
-  "csv" => ->(workbook, digest) { digest << workbook.to_csv }
+  "csv" => ->(workbook, digest) { digest << workbook.to_csv },
+  "yaml" => ->(workbook, digest) { digest << workbook.to_yaml },
+  "xml" => ->(workbook, digest) { digest << workbook.to_xml },
+  "matrix" => ->(workbook, digest) { digest << value(workbook.to_matrix) }
 }.freeze
 
 def roo_scenario(scenario, path, digest)

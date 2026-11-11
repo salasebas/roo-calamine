@@ -4,6 +4,8 @@
 use std::ops::Range;
 use std::sync::atomic::Ordering;
 
+mod formatters;
+
 use magnus::gc::Marker;
 use magnus::rb_sys::AsRawValue;
 use magnus::typed_data::Obj;
@@ -740,5 +742,8 @@ pub fn define(ruby: &Ruby, native: magnus::RModule) -> Result<(), Error> {
     store.define_method("hash_row", magnus::method!(Store::hash_row, 4))?;
     store.define_method("cells", magnus::method!(Store::cells, 0))?;
     store.define_method("write_csv", magnus::method!(Store::write_csv, 4))?;
+    store.define_method("to_yaml", magnus::method!(Store::to_yaml, 3))?;
+    store.define_method("xml_cells", magnus::method!(Store::xml_cells, 2))?;
+    store.define_method("matrix_rows", magnus::method!(Store::matrix_rows, 1))?;
     Ok(())
 }
