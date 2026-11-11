@@ -19,6 +19,7 @@ class DeferredSheetsTest < Minitest::Test
   ROWS = %(<row r="1"><c r="A1"><v>1</v></c><c r="B1" t="inlineStr"><is><t>one</t></is></c></row>
            <row r="2"><c r="A2"><v>2.5</v></c><c r="B2" t="str"><v>two</v></c></row>)
   HYPERLINK = %(<hyperlinks><hyperlink ref="B1" r:id="rId1"/></hyperlinks>)
+  EXTRACTED = %w[xl/sharedStrings.xml xl/worksheets/sheet1.xml].freeze
   HYPERLINK_RELS = %(<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="#{Workbook::REL}/hyperlink" Target="https://example.com/" TargetMode="External"/></Relationships>).freeze
 
   def setup
@@ -197,12 +198,16 @@ class DeferredSheetsTest < Minitest::Test
     assert_same_as_roo("chart sheet", native_only: false, &read)
   end
 
+  def store(path, name)
+    Zip::File.open(path) do |zip|
+      xml = zip.read(name)
+      zip.get_output_stream(name, compression_method: Zip::Entry::STORED) { |io| io.write(xml) }
+    end
+  end
+
   def test_stored_worksheets
     path = write
-    Zip::File.open(path) do |zip|
-      xml = zip.read("xl/worksheets/sheet1.xml")
-      zip.get_output_stream("xl/worksheets/sheet1.xml", compression_method: Zip::Entry::STORED) { |io| io.write(xml) }
-    end
+    store(path, "xl/worksheets/sheet1.xml")
     method = Zip::File.open(path) { |zip| zip.find_entry("xl/worksheets/sheet1.xml").compression_method }
 
     assert_equal Zip::Entry::STORED, method
@@ -213,7 +218,7 @@ class DeferredSheetsTest < Minitest::Test
   # The central directory says the entry is 10 bytes shorter than it
   # inflates to: rubyzip raises when roo extracts it.
   def test_an_entry_larger_than_its_size_raises_as_in_roo
-    %w[xl/sharedStrings.xml xl/worksheets/sheet1.xml].each do |name|
+    EXTRACTED.each do |name|
       path = shared_strings_book(name.tr("/", "_"), %w[alice bob])
       understate_size(path, name, 10)
 
@@ -225,6 +230,41 @@ class DeferredSheetsTest < Minitest::Test
 
       assert_equal Zip::EntrySizeError, roo[1]
     end
+  end
+
+  # rubyzip reads an entry's encryption flag, compression method, and, when
+  # stored, its size from its local header, not the central directory. The
+  # size is the first value of the Zip64 extra field rubyzip writes.
+  LOCAL_HEADER_CHANGES = {
+    "encrypted" => ->(zip, at, _) { zip[at + 6, 2] = [1].pack("v") },
+    "stored" => ->(zip, at, _) { zip[at + 8, 2] = [Zip::Entry::STORED].pack("v") },
+    "shorter" => lambda do |zip, at, name|
+      size = at + 30 + name.bytesize + 4
+      zip[size, 8] = [zip.byteslice(size, 8).unpack1("Q<") - 1].pack("Q<")
+    end
+  }.freeze
+
+  def test_an_entry_whose_local_header_differs_reads_as_in_roo
+    LOCAL_HEADER_CHANGES.each do |change, edit|
+      EXTRACTED.each do |name|
+        path = shared_strings_book("#{change}#{name.tr("/", "_")}", %w[alice bob])
+        store(path, name) if change == "shorter"
+        edit_local_header(path, name, &edit)
+
+        assert_same_as_roo("#{name} #{change}", native_only: false) do
+          xlsx = Roo::Excelx.new(path)
+          [Oracle.describe_stream(xlsx, {}), Oracle.describe_cells(xlsx)]
+        end
+      end
+    end
+  end
+
+  def edit_local_header(path, name)
+    zip = File.binread(path)
+    header = -1
+    header = zip.index("PK\x03\x04".b, header + 1) until zip.byteslice(header + 30, name.bytesize) == name
+    yield zip, header, name
+    File.binwrite(path, zip)
   end
 
   # rubyzip writes the size in the entry's Zip64 extra field.
