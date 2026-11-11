@@ -13,7 +13,7 @@ use magnus::{
 };
 
 use crate::archive::Source;
-use crate::convert::Converter;
+use crate::convert::{Converter, CsvOutput};
 use crate::reader::{Body, Kind, Mode, RawCell, RawRow, Reference, Style};
 use crate::{unsupported, without_gvl};
 
@@ -196,45 +196,6 @@ impl Records {
             }
         }
         Some(())
-    }
-}
-
-/// [`Store::write_csv`] prints its text at the end of the line that takes
-/// it past this many bytes.
-const CSV_CHUNK: usize = 64 * 1024;
-
-/// The CSV text [`Store::write_csv`] has not printed yet.
-struct CsvOutput {
-    io: Value,
-    bytes: Vec<u8>,
-    separator: Vec<u8>,
-}
-
-impl CsvOutput {
-    fn separators(&mut self, count: i64) {
-        for _ in 0..count {
-            self.bytes.extend_from_slice(&self.separator);
-        }
-    }
-
-    /// Ends the line with `separators` separators and a newline.
-    fn end_line(&mut self, ruby: &Ruby, separators: i64) -> Result<(), Error> {
-        self.separators(separators);
-        self.bytes.push(b'\n');
-        if self.bytes.len() >= CSV_CHUNK {
-            self.print(ruby)?;
-        }
-        Ok(())
-    }
-
-    fn print(&mut self, ruby: &Ruby) -> Result<(), Error> {
-        if self.bytes.is_empty() {
-            return Ok(());
-        }
-        let text = ruby.enc_str_new(&self.bytes, ruby.utf8_encoding());
-        self.bytes.clear();
-        self.io.funcall::<_, _, Value>("print", (text,))?;
-        Ok(())
     }
 }
 
@@ -624,11 +585,7 @@ impl Store {
             first_column: area.entry(4)?,
             last_column: area.entry(5)?,
         };
-        let mut output = CsvOutput {
-            io,
-            bytes: Vec::with_capacity(CSV_CHUNK * 2),
-            separator: unsafe { separator.as_slice() }.to_vec(),
-        };
+        let mut output = CsvOutput::new(io, unsafe { separator.as_slice() }.to_vec());
         let written = rb_self.csv_lines(ruby, book, &mut output, &area);
         output.print(ruby).and(written)
     }
@@ -666,7 +623,7 @@ impl Store {
             written = column - 1;
             let in_bounds = (area.first_row..=area.last_row).contains(&row)
                 && (area.first_column..=area.last_column).contains(&column);
-            self.csv_field(ruby, book, record, in_bounds, &mut output.bytes)?;
+            self.csv_field(ruby, book, record, in_bounds, output)?;
         }
         if line_row > 0 {
             output.end_line(ruby, width - 1 - written)?;
@@ -686,7 +643,7 @@ impl Store {
         book: Value,
         record: u32,
         in_bounds: bool,
-        out: &mut Vec<u8>,
+        output: &mut CsvOutput,
     ) -> Result<(), Error> {
         let key = self.records[record as usize].built_key();
         let cell = match ruby.get_inner(self.built).get(key) {
@@ -697,7 +654,7 @@ impl Store {
                 let kept = (!kept.is_nil()).then_some(kept);
                 let raw = self.formulas.raw(&self.records, record);
                 let converter = ruby.get_inner(self.converter);
-                if converter.csv_field(ruby, book, &self.text, &raw, kept, out)? {
+                if converter.csv_field(ruby, book, &self.text, &raw, kept, output)? {
                     return Ok(());
                 }
                 self.build(ruby, record)?
@@ -706,9 +663,7 @@ impl Store {
         if cell.funcall::<_, _, Value>("empty?", ())?.to_bool() || !in_bounds {
             return Ok(());
         }
-        let field: RString = book.funcall("csv_field", (cell,))?;
-        out.extend_from_slice(unsafe { field.as_slice() });
-        Ok(())
+        output.field(ruby, book.funcall("csv_field", (cell,))?)
     }
 }
 

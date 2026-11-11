@@ -5,6 +5,8 @@
 mod cells;
 mod csv;
 
+pub use csv::CsvOutput;
+
 use std::cell::{Cell as StdCell, RefCell};
 use std::os::raw::c_int;
 

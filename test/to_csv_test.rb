@@ -141,17 +141,20 @@ class ToCsvTest < Minitest::Test
       workbook = Roo::Excelx.new(path)
       row = workbook.row(2) # columns B to M
       row[0].replace('row "value"')
-      row[1].replace("")
+      row[1].replace("é".encode("ISO-8859-1"))
       workbook.row(4)[9].replace("shared")
-      workbook.cell(5, 5).replace("built")
+      workbook.cell(5, 5).replace("built é".encode("ISO-8859-1"))
       workbook.sheet_for("Types").cell_at([2, 5]).value = 99.5
       describe_csv(workbook)
     end
     roo, = Oracle.read(native: false, &change)
     _, _, (_, csv), = roo.last.first
 
-    assert_equal %(,"row ""value""",,,99.5,1.5,2,1000,0.30000000000000004,12345678901234567890,0.25,3,0\n), csv.lines[1]
-    assert_match(/"shared".*\n,2,2.5,2,"built",/, csv)
+    iso = ->(text) { text.encode("ISO-8859-1") }
+
+    assert_equal iso[%(,"row ""value""","é",,99.5,1.5,2,1000,0.30000000000000004,12345678901234567890,0.25,3,0\n)],
+                 csv.lines[1]
+    assert_includes csv, iso[%("shared",,\n,2,2.5,2,"built é",)]
     assert_same_as_roo("changed in place", &change)
   end
 

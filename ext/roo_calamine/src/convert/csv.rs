@@ -10,6 +10,87 @@ use magnus::{Error, RString, Ruby, Value};
 use super::{Converter, ValueType};
 use crate::reader::{Body, Kind, RawCell, Reference};
 
+/// The output prints its text at the end of the line that takes it past this
+/// many bytes.
+const CHUNK: usize = 64 * 1024;
+
+/// CSV text on its way to an IO, printed in chunks of UTF-8 text.
+pub struct CsvOutput {
+    io: Value,
+    bytes: Vec<u8>,
+    separator: Vec<u8>,
+}
+
+impl CsvOutput {
+    pub fn new(io: Value, separator: Vec<u8>) -> Self {
+        Self {
+            io,
+            bytes: Vec::with_capacity(CHUNK * 2),
+            separator,
+        }
+    }
+
+    pub fn separators(&mut self, count: i64) {
+        for _ in 0..count {
+            self.bytes.extend_from_slice(&self.separator);
+        }
+    }
+
+    /// Ends the line with `separators` separators and a newline.
+    pub fn end_line(&mut self, ruby: &Ruby, separators: i64) -> Result<(), Error> {
+        self.separators(separators);
+        self.bytes.push(b'\n');
+        if self.bytes.len() >= CHUNK {
+            self.print(ruby)?;
+        }
+        Ok(())
+    }
+
+    /// Prints the text not printed yet.
+    pub fn print(&mut self, ruby: &Ruby) -> Result<(), Error> {
+        if self.bytes.is_empty() {
+            return Ok(());
+        }
+        let text = ruby.enc_str_new(&self.bytes, ruby.utf8_encoding());
+        self.bytes.clear();
+        self.io.funcall::<_, _, Value>("print", (text,))?;
+        Ok(())
+    }
+
+    /// Writes a field a Ruby call returned. roo prints each field on its
+    /// own, and the IO may convert one in another encoding, so such a field
+    /// is printed on its own too.
+    pub fn field(&mut self, ruby: &Ruby, text: RString) -> Result<(), Error> {
+        if utf8(ruby, text) {
+            self.bytes.extend_from_slice(unsafe { text.as_slice() });
+            return Ok(());
+        }
+        self.print(ruby)?;
+        self.io.funcall::<_, _, Value>("print", (text,))?;
+        Ok(())
+    }
+
+    /// `%("#{text.gsub('"', '""')}")`.
+    fn quote(&mut self, text: &[u8]) {
+        self.bytes.push(b'"');
+        let mut from = 0;
+        for (i, &byte) in text.iter().enumerate() {
+            if byte == b'"' {
+                self.bytes.extend_from_slice(&text[from..=i]);
+                self.bytes.push(b'"');
+                from = i + 1;
+            }
+        }
+        self.bytes.extend_from_slice(&text[from..]);
+        self.bytes.push(b'"');
+    }
+}
+
+fn utf8(ruby: &Ruby, text: RString) -> bool {
+    let index = text.enc_get();
+    index == ruby.utf8_encindex() || index == ruby.usascii_encindex()
+}
+
 /// The roo cell class a record becomes, as far as its CSV text tells them
 /// apart.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -20,32 +101,12 @@ enum Class {
     Date,
 }
 
-/// `%("#{text.gsub('"', '""')}")`.
-fn quote(out: &mut Vec<u8>, text: &[u8]) {
-    out.push(b'"');
-    let mut from = 0;
-    for (i, &byte) in text.iter().enumerate() {
-        if byte == b'"' {
-            out.extend_from_slice(&text[from..=i]);
-            out.push(b'"');
-            from = i + 1;
-        }
-    }
-    out.extend_from_slice(&text[from..]);
-    out.push(b'"');
-}
-
-/// Appends a String a Ruby call returned.
-fn append(out: &mut Vec<u8>, text: RString) {
-    out.extend_from_slice(unsafe { text.as_slice() });
-}
-
 impl Converter {
-    /// Appends to `out` what `csv_field` writes for the cell [`Self::cell`]
-    /// builds for `raw` when `cell.empty?` is false, and nothing when it is
-    /// true. `kept` is the value that cell will hold, when one was handed out
-    /// before it was built. `false`, with nothing appended, when the cell has
-    /// to be built and asked.
+    /// Writes what `csv_field` writes for the cell [`Self::cell`] builds for
+    /// `raw` when `cell.empty?` is false, and nothing when it is true. `kept`
+    /// is the value that cell will hold, when one was handed out before it
+    /// was built. `false`, with nothing written, when the cell has to be
+    /// built and asked.
     pub fn csv_field(
         &self,
         ruby: &Ruby,
@@ -53,7 +114,7 @@ impl Converter {
         buffer: &str,
         raw: &RawCell,
         kept: Option<Value>,
-        out: &mut Vec<u8>,
+        output: &mut CsvOutput,
     ) -> Result<bool, Error> {
         let Reference::At { row, column } = raw.reference else {
             return Ok(false);
@@ -65,7 +126,7 @@ impl Converter {
             (Body::Empty, _) => return Ok(true),
             (Body::Inline(text), _) | (Body::Value(text), Kind::Str) if kept.is_none() => {
                 if !text.is_empty() {
-                    quote(out, buffer[text.clone()].as_bytes());
+                    output.quote(buffer[text.clone()].as_bytes());
                 }
                 return Ok(true);
             }
@@ -90,9 +151,9 @@ impl Converter {
         let formula = raw.formula.is_some();
         match (class, RString::from_value(value)) {
             // `:string`, and a `:formula` String: quoted unless empty.
-            (Class::String, Some(text)) => quote_string(ruby, book, text, out)?,
+            (Class::String, Some(text)) => quote_string(ruby, book, text, output)?,
             (Class::String, None) => return Ok(false),
-            (_, Some(text)) if formula => quote_string(ruby, book, text, out)?,
+            (_, Some(text)) if formula => quote_string(ruby, book, text, output)?,
             (Class::Boolean, _) => {
                 let text = match (value.to_bool(), formula) {
                     (true, false) => "\"true\"",
@@ -100,11 +161,13 @@ impl Converter {
                     (true, true) => "true",
                     (false, true) => "false",
                 };
-                out.extend_from_slice(text.as_bytes());
+                output.bytes.extend_from_slice(text.as_bytes());
             }
-            (_, _) if formula => append(out, book.funcall("csv_formula_value", (value,))?),
-            (Class::Number, _) => append(out, book.funcall("csv_number", (value,))?),
-            (Class::Date, _) => append(out, value.funcall("to_s", ())?),
+            (_, _) if formula => {
+                output.field(ruby, book.funcall("csv_formula_value", (value,))?)?
+            }
+            (Class::Number, _) => output.field(ruby, book.funcall("csv_number", (value,))?)?,
+            (Class::Date, _) => output.field(ruby, value.funcall("to_s", ())?)?,
         }
         Ok(true)
     }
@@ -113,16 +176,19 @@ impl Converter {
 /// `csv_quote(text) unless text.empty?`, quoting UTF-8 text here, where
 /// `gsub` doubles each `"` byte even in broken text, and leaving any other
 /// encoding to Ruby.
-fn quote_string(ruby: &Ruby, book: Value, text: RString, out: &mut Vec<u8>) -> Result<(), Error> {
+fn quote_string(
+    ruby: &Ruby,
+    book: Value,
+    text: RString,
+    output: &mut CsvOutput,
+) -> Result<(), Error> {
     if text.is_empty() {
         return Ok(());
     }
-    let index = text.enc_get();
-    let utf8 = index == ruby.utf8_encindex() || index == ruby.usascii_encindex();
-    if utf8 {
-        quote(out, unsafe { text.as_slice() });
+    if utf8(ruby, text) {
+        output.quote(unsafe { text.as_slice() });
+        Ok(())
     } else {
-        append(out, book.funcall("csv_quote", (text,))?);
+        output.field(ruby, book.funcall("csv_quote", (text,))?)
     }
-    Ok(())
 }
