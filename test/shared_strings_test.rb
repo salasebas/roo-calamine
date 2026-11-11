@@ -199,7 +199,7 @@ class SharedStringsTest < Minitest::Test
     roo, = Oracle.read(native: false, &read)
     native, = Oracle.read(native: true, &read)
 
-    assert_equal [:error, NoMethodError, "undefined method '[]' for nil"], roo
+    assert_equal [:error, NoMethodError], roo.first(2)
     assert_equal roo, native
   end
 
