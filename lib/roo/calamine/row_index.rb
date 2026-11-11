@@ -6,8 +6,8 @@ module Roo
     # first_row..last_row and first_column..last_column, laid out in one pass
     # over Sheet#cells: in one flat Array with a slot per column of each row
     # (an Array per row costs a major GC on a large sheet), or, on a sheet
-    # with fewer than one cell per MAX_SLOTS_PER_CELL slots, in an Array per
-    # row of its column offsets and cells. roo answers the first ROO_ROWS
+    # with fewer than one cell per MAX_SLOTS_PER_CELL slots, in a Hash of an
+    # Array per row of its column offsets and cells. roo answers the first ROO_ROWS
     # requests, so a caller that stops early never pays for that pass, and
     # any other row, a sheet too short to repay the pass (fewer than
     # 3 * ROO_ROWS rows), an empty sheet, and every request once the default
@@ -69,7 +69,7 @@ module Roo
 
       def lay_out(cells, rows)
         if rows * @width > MAX_SLOTS_PER_CELL * cells.size
-          @lines = Array.new(rows)
+          @lines = {}
           each_cell(cells) { |index, column, cell| (@lines[index] ||= []).push(column, cell) }
         else
           @cells = Array.new(rows * @width)

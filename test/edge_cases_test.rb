@@ -683,7 +683,6 @@ class EdgeCasesTest < Minitest::Test
 
   def test_each_without_options_follows_changes_made_by_its_block
     path = write_header_book
-    # Too sparse for one slot per column of each row.
     sparse = write_header_book("sparse", last_cell: %(<c r="Z5"><v>26</v></c>))
     scenarios = {
       set_before_the_index: ->(xlsx, n) { xlsx.set(4, 2, 99) if n == 1 },
@@ -705,7 +704,6 @@ class EdgeCasesTest < Minitest::Test
     sheets = {
       # An empty string is no value for the bounds, but #each still yields it.
       "Blank first" => Workbook.sheet(%(<row r="1"><c r="A1" t="str"><v></v></c></row><row r="2"><c r="A2"><v>1</v></c></row>)),
-      # Too sparse for one slot per column of each row.
       "Sparse" => Workbook.sheet((1..50).map { |i| %(<row r="#{i}"><c r="A#{i}"><v>#{i}</v></c></row>) }.join +
                                  %(<row r="51"><c r="XFD51"><v>0</v></c></row>)),
       "Empty" => Workbook.sheet("")
@@ -735,6 +733,24 @@ class EdgeCasesTest < Minitest::Test
 
       assert_equal rows_from_roo, counts[:sheet_rows]
     end
+  end
+
+  def test_each_without_options_indexes_cells_not_rows
+    path = write((1..3000).map { |i| %(<row r="#{i}"><c r="A#{i}"><v>#{i}</v></c></row>) }.join +
+                 %(<row r="100000000"><c r="B100000000"><v>1</v></c></row>))
+    script = <<~RUBY
+      require ARGV[0]
+      Roo::Excelx.new(ARGV[1], expand_merged_ranges: true).each_with_index do |_, i|
+        next if i <= Roo::Calamine::RowIndex::ROO_ROWS
+
+        print Integer(`ps -o rss= -p \#{Process.pid}`)
+        break
+      end
+    RUBY
+    rss_kb = IO.popen([RbConfig.ruby, "-I", File.expand_path("../lib", __dir__), "-e", script, "roo/calamine", path],
+                      &:read)
+
+    assert_operator Integer(rss_kb), :<, 300_000
   end
 
   # A blank String is no value for the bounds, so each sheet's blank cell lies
