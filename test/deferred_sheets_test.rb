@@ -84,6 +84,7 @@ class DeferredSheetsTest < Minitest::Test
     assert_equal Date.new(1899, 12, 30), xlsx.workbook.base_date
     assert_equal "0.00", xlsx.styles.style_format(5)
     assert_equal 1, xlsx.cell(1, 1)
+    assert_equal({ foo: 1 }, Roo::Excelx::Styles.new("unused", foo: 1).instance_variable_get(:@options))
   ensure
     Roo::Calamine.enabled = true
     xlsx&.close
