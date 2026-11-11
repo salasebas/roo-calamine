@@ -18,7 +18,9 @@ module Roo
       ROO_VERSIONS = %w[4.0.0].freeze
       COMPRESSION_METHODS = [::Zip::Entry::STORED, ::Zip::Entry::DEFLATED].freeze
       METADATA_FILES = %w[roo_workbook.xml roo_workbook.xml.rels roo_styles.xml].freeze
-      private_constant :ROO_VERSIONS, :COMPRESSION_METHODS, :METADATA_FILES
+      # Nokogiri's memory parser passes the byte length as a signed C int.
+      MAX_METADATA_SIZE = (2**31) - 1
+      private_constant :ROO_VERSIONS, :COMPRESSION_METHODS, :METADATA_FILES, :MAX_METADATA_SIZE
 
       # `path` as the native extension takes it. On Windows, Ruby opens a
       # binary path's bytes as UTF-8, where magnus refuses a binary string.
@@ -40,7 +42,8 @@ module Roo
 
         def extract(entry_path, destination_directory:)
           path = ::File.join(destination_directory, entry_path)
-          if calamine_metadata && METADATA_FILES.include?(entry_path) && !::File.exist?(path)
+          if calamine_metadata && METADATA_FILES.include?(entry_path) &&
+             size <= MAX_METADATA_SIZE && !::File.exist?(path)
             calamine_metadata[entry_path] = Native.metadata_bytes(calamine_entry)
             return self
           end
