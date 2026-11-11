@@ -138,14 +138,15 @@ impl ZipEntry {
     }
 
     /// Writes the inflated entry to `path`, as rubyzip's `Zip::Entry#extract`
-    /// does, with the GVL released. A file that fails part way is removed,
-    /// so rubyzip can extract it instead.
+    /// does, with the GVL released. Fails without touching a file already at
+    /// `path`; a file that fails part way is removed, so rubyzip can extract
+    /// it instead.
     fn extract(ruby: &Ruby, rb_self: &Self, path: PathBuf) -> Result<(), Error> {
         let entry = rb_self.clone();
         let written = without_gvl(move |interrupted| -> io::Result<()> {
             let mut bytes = entry.inflated()?;
+            let mut file = File::create_new(&path)?;
             let written = (|| {
-                let mut file = File::create_new(&path)?;
                 let mut chunk = vec![0; CHUNK];
                 loop {
                     if interrupted.load(Ordering::Acquire) {

@@ -4,8 +4,16 @@ require_relative "test_helper"
 
 # A workbook opened from a path leaves its worksheets in the zip: the native
 # reader inflates them, and roo's own code reads them from the file it
-# extracts the first time it needs it.
+# extracts the first time it needs it. The native extension extracts the
+# files roo extracts, and rubyzip only those it cannot.
 class DeferredSheetsTest < Minitest::Test
+  Zip::Entry.prepend(Module.new do
+    define_method(:get_input_stream) do |*args, **options, &block|
+      Oracle.counts[:rubyzip_reads] += 1
+      super(*args, **options, &block)
+    end
+  end)
+
   include OracleAssertions
 
   ROWS = %(<row r="1"><c r="A1"><v>1</v></c><c r="B1" t="inlineStr"><is><t>one</t></is></c></row>
@@ -37,6 +45,30 @@ class DeferredSheetsTest < Minitest::Test
     xlsx.parse(headers: true)
 
     assert_empty extracted_sheets(xlsx)
+  end
+
+  def test_the_native_extension_extracts_what_roo_extracts
+    path = shared_strings_book("extracted", %w[alice bob])
+    read = -> { Oracle.describe_cells(Roo::Excelx.new(path)) }
+    _, roo = Oracle.read(native: false, &read)
+    _, native = Oracle.read(native: true, &read)
+
+    assert_operator roo[:rubyzip_reads], :>, 0
+    assert_equal 0, native[:rubyzip_reads]
+    assert_same_as_roo("extracted", &read)
+  end
+
+  # roo extracts both entries to the same file, and raises on the second.
+  def test_two_shared_strings_entries_raise_as_in_roo
+    path = shared_strings_book("twice", %w[alice bob])
+    Zip::File.open(path) do |zip|
+      zip.get_output_stream("xl/extra/sharedStrings.xml") { |io| io.write(zip.read("xl/sharedStrings.xml")) }
+    end
+    read = -> { Roo::Excelx.new(path).cell(1, 1) }
+    roo, = Oracle.read(native: false, &read)
+
+    assert_equal Zip::DestinationExistsError, roo[1]
+    assert_same_as_roo("twice", native_only: false, &read)
   end
 
   def test_hyperlinks_and_merged_ranges_are_read_from_the_zip
@@ -178,19 +210,21 @@ class DeferredSheetsTest < Minitest::Test
     assert_same_as_roo("stored, lookups", lazy: true) { Oracle.describe_lookups(Roo::Excelx.new(path)) }
   end
 
-  # The central directory says the worksheet is 10 bytes shorter than it
+  # The central directory says the entry is 10 bytes shorter than it
   # inflates to: rubyzip raises when roo extracts it.
-  def test_a_worksheet_larger_than_its_size_raises_as_in_roo
-    path = write
-    understate_size(path, "xl/worksheets/sheet1.xml", 10)
+  def test_an_entry_larger_than_its_size_raises_as_in_roo
+    %w[xl/sharedStrings.xml xl/worksheets/sheet1.xml].each do |name|
+      path = shared_strings_book(name.tr("/", "_"), %w[alice bob])
+      understate_size(path, name, 10)
 
-    assert_same_as_roo("too large", native_only: false) do
-      xlsx = Roo::Excelx.new(path)
-      [Oracle.describe_stream(xlsx, {}), Oracle.describe_cells(xlsx)]
+      assert_same_as_roo("#{name} too large", native_only: false) do
+        xlsx = Roo::Excelx.new(path)
+        [Oracle.describe_stream(xlsx, {}), Oracle.describe_cells(xlsx)]
+      end
+      roo, = Oracle.read(native: false) { Roo::Excelx.new(path) }
+
+      assert_equal Zip::EntrySizeError, roo[1]
     end
-    roo, = Oracle.read(native: false) { Roo::Excelx.new(path) }
-
-    assert_equal Zip::EntrySizeError, roo[1]
   end
 
   # rubyzip writes the size in the entry's Zip64 extra field.
