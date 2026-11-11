@@ -34,7 +34,7 @@ module Roo
       end
 
       def excelx_format(key)
-        cell = cell_at(*key)
+        cell = (lazy = lazy_cells) ? lazy[key] : cells[key]
         styles.style_format(cell.style).to_s if cell
       end
 

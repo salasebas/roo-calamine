@@ -549,6 +549,7 @@ impl Store {
         let built = ruby.get_inner(rb_self.built);
         let has_built = !built.is_empty();
         let handed_out = ruby.get_inner(rb_self.handed_out);
+        let has_handed_out = !handed_out.is_empty();
         let converter = ruby.get_inner(rb_self.converter);
         let mut bounds: Option<(u32, u32, u32, u32)> = None;
         for &i in &rb_self.index {
@@ -563,7 +564,6 @@ impl Store {
                 Some(cell) => presence(cell)?,
                 None => match (record.content, record.kind) {
                     (Content::Empty, _) => false,
-                    (Content::Inline, _) => true,
                     (Content::Value, Kind::Shared) => match converter.presence(
                         ruby,
                         &rb_self.text,
@@ -572,11 +572,17 @@ impl Store {
                         Some(present) => present,
                         None => presence(rb_self.build(ruby, i)?)?,
                     },
-                    (Content::Value, Kind::Str) => {
-                        let value: Value = handed_out.entry(i as isize)?;
+                    (Content::Inline, _) | (Content::Value, Kind::Str) => {
+                        let value: Value = if has_handed_out {
+                            handed_out.entry(i as isize)?
+                        } else {
+                            ruby.qnil().as_value()
+                        };
                         match RString::from_value(value) {
                             Some(value) => !value.is_empty(),
-                            None => record.text.0 != record.text.1,
+                            None => {
+                                record.content == Content::Inline || record.text.0 != record.text.1
+                            }
                         }
                     }
                     (Content::Value, _) => true,

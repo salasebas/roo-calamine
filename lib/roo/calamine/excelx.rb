@@ -47,33 +47,46 @@ module Roo
       end
 
       def formula(row, col, sheet = nil)
-        safe_send(sheet_for(sheet).cell_at(*normalize(row, col)), :formula)
+        row, col = normalize(row, col) if row.is_a?(String) || col.is_a?(String)
+        cell = sheet_for(sheet).cell_at(row, col)
+        cell.formula if cell.respond_to?(:formula)
       end
 
       def font(row, col, sheet = nil)
-        definition_index = safe_send(sheet_for(sheet).cell_at(*normalize(row, col)), :style)
+        row, col = normalize(row, col) if row.is_a?(String) || col.is_a?(String)
+        cell = sheet_for(sheet).cell_at(row, col)
+        definition_index = cell.style if cell.respond_to?(:style)
         styles.definitions[definition_index] if definition_index
       end
 
       def celltype(row, col, sheet = nil)
-        safe_send(sheet_for(sheet).cell_at(*normalize(row, col)), :type)
+        row, col = normalize(row, col) if row.is_a?(String) || col.is_a?(String)
+        cell = sheet_for(sheet).cell_at(row, col)
+        cell.type if cell.respond_to?(:type)
       end
 
       def excelx_type(row, col, sheet = nil)
-        safe_send(sheet_for(sheet).cell_at(*normalize(row, col)), :cell_type)
+        row, col = normalize(row, col) if row.is_a?(String) || col.is_a?(String)
+        cell = sheet_for(sheet).cell_at(row, col)
+        cell.cell_type if cell.respond_to?(:cell_type)
       end
 
       def excelx_value(row, col, sheet = nil)
-        safe_send(sheet_for(sheet).cell_at(*normalize(row, col)), :cell_value)
+        row, col = normalize(row, col) if row.is_a?(String) || col.is_a?(String)
+        cell = sheet_for(sheet).cell_at(row, col)
+        cell.cell_value if cell.respond_to?(:cell_value)
       end
 
       def formatted_value(row, col, sheet = nil)
-        safe_send(sheet_for(sheet).cell_at(*normalize(row, col)), :formatted_value)
+        row, col = normalize(row, col) if row.is_a?(String) || col.is_a?(String)
+        cell = sheet_for(sheet).cell_at(row, col)
+        cell.formatted_value if cell.respond_to?(:formatted_value)
       end
 
       def empty?(row, col, sheet = nil)
         sheet = sheet_for(sheet)
-        cell = sheet.cell_at(*normalize(row, col))
+        key = normalize(row, col)
+        cell = (sheet.lazy_cells || sheet.cells)[key]
         !cell || cell.empty? ||
           (row < sheet.first_row || row > sheet.last_row || col < sheet.first_column || col > sheet.last_column)
       end
