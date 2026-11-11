@@ -330,6 +330,19 @@ class EdgeCasesTest < Minitest::Test
     assert_every_path_same_as_roo(path)
   end
 
+  # The native records hold a column or a style index up to 65,535; a sheet
+  # with a larger one is built whole.
+  def test_columns_and_styles_past_what_a_record_holds
+    { "CRXO1" => 1, "CRXP1" => 0 }.each do |reference, lazy_stores|
+      path = write(%(<row r="1"><c r="A1"><v>1</v></c><c r="#{reference}" t="str"><v>far</v></c></row>))
+      _, counts = Oracle.read(native: true) { Roo::Excelx.new(path).cell(1, 1) }
+
+      assert_equal lazy_stores, counts[:lazy_stores], reference
+      assert_every_path_same_as_roo(path, native_only: lazy_stores.positive?)
+    end
+    assert_every_path_same_as_roo(write(%(<row r="1"><c r="A1" s="65536"><v>1</v></c></row>)), native_only: false)
+  end
+
   def test_coordinates_padding_and_empty_cells
     path = write(<<~XML)
       <row r="2"><c r="C2"><v>1</v></c><c r="F2"/><c r="H2" t="inlineStr"><is><t></t></is></c></row>
