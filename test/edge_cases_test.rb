@@ -545,6 +545,21 @@ class EdgeCasesTest < Minitest::Test
     assert_equal roo, native
   end
 
+  def test_store_bounds_see_strings_handed_out_before_cells_are_built
+    path = write_strings_to_edit
+    roo, = Oracle.read(native: false) do
+      workbook = Roo::Excelx.new(path)
+      workbook.cell(4, 4).clear
+      Oracle::BOUNDS.map { workbook.public_send(_1) }
+    end
+    store = Roo::Excelx.new(path).sheet_for(nil).lazy_cells
+    store.row(4, 4, 4).first.clear
+    bounds = store.bounds
+
+    assert_equal [:ok, [1, 3, 1, 3]], roo
+    assert_equal roo.last, bounds.values_at(*Oracle::BOUNDS)
+  end
+
   # roo's rows hold the cells' own values too.
   def test_values_changed_in_place_in_rows_stay_changed
     path = write_strings_to_edit
@@ -632,6 +647,23 @@ class EdgeCasesTest < Minitest::Test
     assert_equal 9, built.call
   ensure
     GC.enable
+  end
+
+  def test_single_cell_coordinates_keep_roos_normalization_and_sheet_errors
+    path = write(%(<row r="1"><c r="A1"><v>1</v></c></row>))
+    coordinates = [[1, 1], [1, "A"], ["A", 1], %w[A 1], [1.0, 1], [1, nil], [[1, 1], nil],
+                   [0, 1], [-1, 1], [2**64, 1]]
+
+    coordinates.product([nil, "missing"]).each do |(row, column), sheet|
+      original = Roo::Excelx.new(path).method(:cell).super_method
+      roo = Oracle.outcome { original.call(row, column, sheet) }
+      workbook = Roo::Excelx.new(path)
+
+      assert_equal(roo, Oracle.outcome { workbook.cell(row, column, sheet) })
+      workbook.sheet_for(nil).cells
+
+      assert_equal(roo, Oracle.outcome { workbook.cell(row, column, sheet) })
+    end
   end
 
   def test_set_after_single_cell_reads
@@ -855,6 +887,14 @@ class EdgeCasesTest < Minitest::Test
 
     assert_equal [:ok, [{ b: 2, c: 3 }]], roo
     assert_every_path_same_as_roo(path)
+  end
+
+  def test_parse_keeps_reordered_and_repeated_header_columns
+    path = write_header_book
+
+    assert_same_as_roo("reordered and repeated headers", lazy: true) do
+      Roo::Excelx.new(path).parse(quantity: "qty", name: "name", again: "qty")
+    end
   end
 
   def test_parse_reads_cells_set_before_it

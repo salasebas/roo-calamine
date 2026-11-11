@@ -41,37 +41,39 @@ module Roo
       end
 
       def cell(row, col, sheet = nil)
-        safe_send(sheet_for(sheet).cell_at(normalize(row, col)), :value)
+        row, col = normalize(row, col) if row.is_a?(String) || col.is_a?(String)
+        cell = sheet_for(sheet).cell_at(row, col)
+        cell.value if cell.respond_to?(:value)
       end
 
       def formula(row, col, sheet = nil)
-        safe_send(sheet_for(sheet).cell_at(normalize(row, col)), :formula)
+        safe_send(sheet_for(sheet).cell_at(*normalize(row, col)), :formula)
       end
 
       def font(row, col, sheet = nil)
-        definition_index = safe_send(sheet_for(sheet).cell_at(normalize(row, col)), :style)
+        definition_index = safe_send(sheet_for(sheet).cell_at(*normalize(row, col)), :style)
         styles.definitions[definition_index] if definition_index
       end
 
       def celltype(row, col, sheet = nil)
-        safe_send(sheet_for(sheet).cell_at(normalize(row, col)), :type)
+        safe_send(sheet_for(sheet).cell_at(*normalize(row, col)), :type)
       end
 
       def excelx_type(row, col, sheet = nil)
-        safe_send(sheet_for(sheet).cell_at(normalize(row, col)), :cell_type)
+        safe_send(sheet_for(sheet).cell_at(*normalize(row, col)), :cell_type)
       end
 
       def excelx_value(row, col, sheet = nil)
-        safe_send(sheet_for(sheet).cell_at(normalize(row, col)), :cell_value)
+        safe_send(sheet_for(sheet).cell_at(*normalize(row, col)), :cell_value)
       end
 
       def formatted_value(row, col, sheet = nil)
-        safe_send(sheet_for(sheet).cell_at(normalize(row, col)), :formatted_value)
+        safe_send(sheet_for(sheet).cell_at(*normalize(row, col)), :formatted_value)
       end
 
       def empty?(row, col, sheet = nil)
         sheet = sheet_for(sheet)
-        cell = sheet.cell_at(normalize(row, col))
+        cell = sheet.cell_at(*normalize(row, col))
         !cell || cell.empty? ||
           (row < sheet.first_row || row > sheet.last_row || col < sheet.first_column || col > sheet.last_column)
       end

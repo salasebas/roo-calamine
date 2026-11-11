@@ -10,9 +10,9 @@ module Roo
       NO_CELLS = [].freeze
       private_constant :NO_CELLS
 
-      # cells[key]
-      def cell_at(key)
-        (lazy = lazy_cells) ? lazy[key] : cells[key]
+      # cells[[row, column]]
+      def cell_at(row, column)
+        (lazy = lazy_cells) ? lazy.cell_at(row, column) : cells[[row, column]]
       end
 
       def row(row_number)
@@ -20,7 +20,7 @@ module Roo
         return lazy.row(row_number, first_column, last_column) if lazy && first_column
 
         first_column.upto(last_column).map do |col|
-          cell_at([row_number, col])&.value
+          cell_at(row_number, col)&.value
         end
       end
 
@@ -29,12 +29,12 @@ module Roo
         return lazy.column(col_number, first_row, last_row) if lazy && first_row
 
         first_row.upto(last_row).map do |row|
-          cell_at([row, col_number])&.value
+          cell_at(row, col_number)&.value
         end
       end
 
       def excelx_format(key)
-        cell = cell_at(key)
+        cell = cell_at(*key)
         styles.style_format(cell.style).to_s if cell
       end
 
@@ -58,7 +58,7 @@ module Roo
 
       def lazy_parse_rows(lazy, lines, fields)
         first, last = fields.map(&:last).minmax
-        slots = fields.map { |key, column| [key, column - first] }
+        slots = fields.map { |key, column| [key, column - first] }.freeze
         lines.map { |line| lazy.hash_row(line, first || 1, last || 0, slots) }
       end
 
