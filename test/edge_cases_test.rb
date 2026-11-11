@@ -733,7 +733,7 @@ class EdgeCasesTest < Minitest::Test
     seen = []
     # Roo::Excelx#set warns that the Cell it builds is deprecated.
     Oracle.silence do
-      xlsx.each(options) do |row|
+      xlsx.each(options.dup) do |row|
         seen << row
         change.call(xlsx, seen.size)
       end
@@ -752,8 +752,10 @@ class EdgeCasesTest < Minitest::Test
     roo, = Oracle.read(native: false) { each_with_change(path, scenarios[:set_a_later_row]) }
 
     assert_equal 99, roo.dig(1, 3, "qty")
-    scenarios.each do |name, change|
-      assert_same_as_roo(name) { Oracle.describe_rows(each_with_change(path, change)) }
+    scenarios.to_a.product([{ headers: true }, { headers: true, clean: true }]).each do |(name, change), options|
+      assert_same_as_roo("#{name} #{options}") do
+        Oracle.describe_rows(each_with_change(path, change, options))
+      end
     end
   end
 
