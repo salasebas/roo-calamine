@@ -1,5 +1,5 @@
-//! Worksheet XML read straight from the workbook's zip, inflated on a thread
-//! of its own, so roo does not have to extract it to a file first.
+//! Worksheet XML read straight from the workbook's zip, with large entries
+//! inflated on a thread of their own, without extracting them to a file first.
 //!
 //! rubyzip has already read the central directory: Ruby passes each entry's
 //! local header offset, sizes, and compression method, so this reads the
@@ -116,6 +116,16 @@ impl ZipEntry {
             inner: bytes,
             left: self.size,
         })
+    }
+
+    fn input(&self) -> io::Result<Input> {
+        if self.size < CHUNK as u64 {
+            let mut bytes = Vec::with_capacity(self.size as usize);
+            self.inflated()?.read_to_end(&mut bytes)?;
+            Ok(Input::Bytes(io::Cursor::new(bytes)))
+        } else {
+            Ok(Input::Zip(self.inflating()))
+        }
     }
 
     /// The inflated bytes, inflated on a thread of its own ahead of the
@@ -291,6 +301,7 @@ impl BufRead for Inflating {
 pub enum Input {
     File(BufReader<File>),
     Zip(Inflating),
+    Bytes(io::Cursor<Vec<u8>>),
 }
 
 impl Read for Input {
@@ -298,6 +309,7 @@ impl Read for Input {
         match self {
             Self::File(file) => file.read(buf),
             Self::Zip(zip) => zip.read(buf),
+            Self::Bytes(bytes) => bytes.read(buf),
         }
     }
 }
@@ -307,6 +319,7 @@ impl BufRead for Input {
         match self {
             Self::File(file) => file.fill_buf(),
             Self::Zip(zip) => zip.fill_buf(),
+            Self::Bytes(bytes) => bytes.fill_buf(),
         }
     }
 
@@ -314,6 +327,7 @@ impl BufRead for Input {
         match self {
             Self::File(file) => file.consume(amount),
             Self::Zip(zip) => zip.consume(amount),
+            Self::Bytes(bytes) => bytes.consume(amount),
         }
     }
 }
@@ -340,7 +354,9 @@ impl Source {
                 64 * 1024,
                 File::open(path).map_err(|e| unsupported(ruby, Unsupported(e.to_string())))?,
             )),
-            Self::Entry(entry) => Input::Zip(entry.inflating()),
+            Self::Entry(entry) => entry
+                .input()
+                .map_err(|e| unsupported(ruby, Unsupported(e.to_string())))?,
         })
     }
 
@@ -358,7 +374,63 @@ pub fn define(ruby: &Ruby, native: RModule) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::local_size;
+    use super::*;
+
+    fn entry(bytes: &[u8], deflated: bool, size: u64) -> ZipEntry {
+        let data = if deflated {
+            let mut encoder = flate2::write::DeflateEncoder::new(Vec::new(), Default::default());
+            encoder.write_all(bytes).unwrap();
+            encoder.finish().unwrap()
+        } else {
+            bytes.to_vec()
+        };
+        let mut header = [0; LOCAL_HEADER_LENGTH];
+        header[..4].copy_from_slice(&LOCAL_HEADER_SIGNATURE.to_le_bytes());
+        let method = if deflated { DEFLATED } else { STORED };
+        header[8..10].copy_from_slice(&method.to_le_bytes());
+        header[22..26].copy_from_slice(&(size as u32).to_le_bytes());
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let zip = std::env::temp_dir().join(format!(
+            "roo-calamine-input-{}-{timestamp}.zip",
+            std::process::id()
+        ));
+        let mut file = File::create_new(&zip).unwrap();
+        file.write_all(&header).unwrap();
+        file.write_all(&data).unwrap();
+        ZipEntry {
+            zip,
+            offset: 0,
+            compressed_size: data.len() as u64,
+            size,
+            deflated,
+        }
+    }
+
+    #[test]
+    fn reads_entry_bytes_and_checks_sizes_across_the_chunk_boundary() {
+        for size in [0, CHUNK - 1, CHUNK, CHUNK + 1] {
+            let bytes: Vec<_> = (0..size).map(|i| (i % 251) as u8).collect();
+            for deflated in [false, true] {
+                for declared in [size, size.saturating_sub(1)] {
+                    let entry = entry(&bytes, deflated, declared as u64);
+                    let mut actual = Vec::new();
+                    let result = entry
+                        .input()
+                        .and_then(|mut input| input.read_to_end(&mut actual));
+                    std::fs::remove_file(&entry.zip).unwrap();
+                    if declared == size {
+                        result.unwrap();
+                        assert_eq!(actual, bytes);
+                    } else {
+                        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidData);
+                    }
+                }
+            }
+        }
+    }
 
     fn zip64(size: u64) -> Vec<u8> {
         let mut field = vec![1, 0, 16, 0];
