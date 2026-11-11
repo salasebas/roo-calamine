@@ -16,9 +16,18 @@ module Roo
       end
 
       def to_html
-        calamine_read(html: true, plain: false) unless @html || @calamine_html
-        @html ||= @calamine_html.to_a if @calamine_html && (@calamine_html_used || doc_exists?)
+        unless @html
+          calamine_read(html: true, plain: false) unless @calamine_html
+          @html = @calamine_html.to_a if @calamine_html && (@calamine_html_used || doc_exists?)
+        end
         super
+      end
+
+      def calamine_html
+        return to_html unless @calamine_html && (@calamine_html_used || doc_exists?)
+
+        @calamine_html_used = true
+        @html || @calamine_html
       end
 
       private

@@ -51,12 +51,7 @@ module Roo
         strings = @shared.shared_strings
         html_disabled = strings.instance_variable_get(:@options)[:disable_html_wrapper]
         plain = strings.to_a
-        unless html_disabled
-          html = strings.instance_variable_get(:@html) ||
-                 strings.instance_variable_get(:@calamine_html) || strings.to_html
-          strings.instance_variable_set(:@calamine_html_used, true)
-        end
-        [plain, html]
+        [plain, (strings.calamine_html unless html_disabled)]
       end
 
       def shared_string(text)

@@ -180,6 +180,25 @@ class SharedStringsTest < Minitest::Test
     end
   end
 
+  def test_a_stream_closed_before_its_first_shared_cell_raises_as_in_roo
+    rows = %(<row r="1"><c r="A1"><v>1</v></c></row><row r="2"><c r="A2" t="s"><v>0</v></c></row>)
+    path = Workbook.write(@dir, "closed_stream", sheets: { "Sheet1" => Workbook.sheet(rows) },
+                                                 shared_strings: Workbook.shared_strings("<si><t>plain</t></si>"))
+    read = lambda do
+      workbook = Roo::Excelx.new(path)
+      workbook.shared_strings.to_a
+      rows = workbook.each_row_streaming
+      rows.next
+      workbook.close
+      rows.next
+    end
+    roo, = Oracle.read(native: false, &read)
+    native, = Oracle.read(native: true, &read)
+
+    assert_equal [:error, NoMethodError, "undefined method '[]' for nil"], roo
+    assert_equal roo, native
+  end
+
   def test_literal_tags_select_the_public_html_object_and_stream_edits_change_the_next_selection
     path = write("<si><t>&lt;b&gt;literal&lt;/b&gt;</t></si>", indices: [0, 0])
     read = lambda do
@@ -254,6 +273,23 @@ class SharedStringsTest < Minitest::Test
     native, = Oracle.read(native: true, &read)
 
     assert_equal [:ok, [%w[edited edited edited edited], true]], roo
+    assert_equal roo, native
+  end
+
+  def test_document_selections_across_cache_blocks_keep_each_index
+    indices = [0, 1023, 1024, 2049, 1023, 1024, 2049]
+    path = write(*Array.new(2050) { |i| "<si><t>#{i}</t></si>" }, indices:)
+    read = lambda do
+      workbook = Roo::Excelx.new(path)
+      values = (1..indices.size).map { workbook.cell(_1, 1) }
+      workbook.shared_strings.to_a.replace(Array.new(2050, "replacement"))
+      again = (1..indices.size).map { workbook.cell(_1, 1) }
+      [again, again.each_with_index.all? { |value, i| value.equal?(values[i]) }]
+    end
+    roo, = Oracle.read(native: false, &read)
+    native, = Oracle.read(native: true, &read)
+
+    assert_equal [:ok, [indices.map(&:to_s), true]], roo
     assert_equal roo, native
   end
 

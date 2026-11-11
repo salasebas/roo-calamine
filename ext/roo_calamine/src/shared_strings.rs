@@ -648,7 +648,23 @@ pub fn define(native: magnus::RModule) -> std::result::Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::string_end;
+    use super::{has_html_tag, string_end};
+
+    #[test]
+    fn finds_the_tags_roo_looks_for() {
+        for html in [
+            "<html><b>x</b></html>",
+            "a<i>",
+            "<u>",
+            "x<sup>2</sup>",
+            "<sub>",
+        ] {
+            assert!(has_html_tag(html.as_bytes()), "{html}");
+        }
+        for plain in ["<html>x</html>", "<br>", "<bb>", "b>", "<s>", "<su>", "<"] {
+            assert!(!has_html_tag(plain.as_bytes()), "{plain}");
+        }
+    }
 
     #[test]
     fn offsets_reject_overflow_instead_of_wrapping() {
