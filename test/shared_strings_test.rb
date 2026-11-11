@@ -17,9 +17,11 @@ class SharedStringsTest < Minitest::Test
     FileUtils.rm_rf(@dir)
   end
 
-  def write(*items, xml: Workbook.shared_strings(*items))
+  def write(*items, xml: Workbook.shared_strings(*items), indices: (0...items.size).to_a)
     @books = (@books || 0) + 1
-    rows = (0...items.size).map { |i| %(<row r="#{i + 1}"><c r="A#{i + 1}" t="s"><v>#{i}</v></c></row>) }.join
+    rows = indices.each_with_index.map do |index, i|
+      %(<row r="#{i + 1}"><c r="A#{i + 1}" t="s"><v>#{index}</v></c></row>)
+    end.join
     Workbook.write(@dir, "book#{@books}", sheets: { "Sheet1" => Workbook.sheet(rows) }, shared_strings: xml)
   end
 
@@ -133,12 +135,126 @@ class SharedStringsTest < Minitest::Test
 
   def test_the_html_strings_are_built_only_when_they_can_be_used
     path = write("<si><r><rPr><b/></rPr><t>bold</t></r></si>")
-    workbook = Roo::Excelx.new(path, disable_html_wrapper: true)
-    strings = workbook.shared_strings
+    [{}, { disable_html_wrapper: true }].each do |options|
+      strings = Roo::Excelx.new(path, options).shared_strings
 
-    assert_equal ["bold"], strings.to_a
-    assert_nil strings.instance_variable_get(:@html)
-    assert_equal ["<html><b>bold</b></html>"], strings.to_html
+      assert_equal ["bold"], strings.to_a
+      assert_nil strings.instance_variable_get(:@html)
+      assert_equal ["<html><b>bold</b></html>"], strings.to_html
+    end
+  end
+
+  def test_html_keeps_the_original_text_after_plain_text_changes
+    path = write("<si><t>original_x000D_text</t></si>", "<si><t/></si>")
+    read = lambda do
+      workbook = Roo::Excelx.new(path)
+      strings = workbook.shared_strings
+      plain = strings.to_a
+      plain[0].replace("edited")
+      html = strings.to_html
+      [plain, html, plain.equal?(strings.to_a), html.equal?(strings.to_html)]
+    end
+    roo, = Oracle.read(native: false, &read)
+    native, = Oracle.read(native: true, &read)
+
+    assert_equal [:ok, [["edited", ""], ["<html>original_x000D_text</html>", "<html></html>"], true, true]], roo
+    assert_equal roo, native
+  end
+
+  def test_close_keeps_only_the_tables_roo_has_read
+    path = write("<si><t>original</t></si>")
+    { to_a: [["original"], []], to_html: [[], ["<html>original</html>"]],
+      cell: [["original"], ["<html>original</html>"]] }.each do |first, expected|
+      read = lambda do
+        workbook = Roo::Excelx.new(path)
+        strings = workbook.shared_strings
+        first == :cell ? workbook.cell(1, 1) : strings.public_send(first)
+        workbook.close
+        [strings.to_a, strings.to_html]
+      end
+      roo, = Oracle.read(native: false, &read)
+      native, = Oracle.read(native: true, &read)
+
+      assert_equal [:ok, expected], roo
+      assert_equal roo, native
+    end
+  end
+
+  def test_literal_tags_select_the_public_html_object_and_stream_edits_change_the_next_selection
+    path = write("<si><t>&lt;b&gt;literal&lt;/b&gt;</t></si>", indices: [0, 0])
+    read = lambda do
+      workbook = Roo::Excelx.new(path)
+      strings = workbook.shared_strings
+      plain = strings.to_a
+      rows = workbook.each_row_streaming
+      first = rows.next.first.value
+      html = strings.to_html
+      same_html = first.equal?(html[0])
+      html[0].replace("tags removed")
+      GC.start
+      GC.compact
+      second = rows.next.first.value
+      [first, second, same_html, second.equal?(plain[0])]
+    end
+    roo, = Oracle.read(native: false, &read)
+    native, = Oracle.read(native: true, &read)
+
+    assert_equal [:ok, ["tags removed", "<b>literal</b>", true, true]], roo
+    assert_equal roo, native
+  end
+
+  def test_replacing_a_public_html_entry_changes_the_next_stream_selection
+    path = write("<si><t>plain</t></si>", indices: [0, 0])
+    read = lambda do
+      workbook = Roo::Excelx.new(path)
+      rows = workbook.each_row_streaming
+      first = rows.next.first.value
+      html = workbook.shared_strings.to_html
+      html[0] = "<u>replacement</u>"
+      second = rows.next.first.value
+      [first, second, second.equal?(html[0])]
+    end
+    roo, = Oracle.read(native: false, &read)
+    native, = Oracle.read(native: true, &read)
+
+    assert_equal [:ok, ["plain", "<u>replacement</u>", true]], roo
+    assert_equal roo, native
+  end
+
+  def test_public_html_array_changes_raise_at_the_same_stream_row_as_roo
+    path = write("<si><t>plain</t></si>", indices: [0, 0])
+    [lambda(&:clear), ->(html) { html[0] = nil }, ->(html) { html[0] = 7 }].each do |edit|
+      read = lambda do
+        workbook = Roo::Excelx.new(path)
+        rows = workbook.each_row_streaming
+        rows.next
+        edit.call(workbook.shared_strings.to_html)
+        rows.next
+      end
+      roo, = Oracle.read(native: false, &read)
+      native, = Oracle.read(native: true, &read)
+
+      assert_equal :error, roo.first
+      assert_equal roo, native
+    end
+  end
+
+  def test_document_selections_keep_the_original_objects_for_all_index_spellings
+    path = write("<si><r><rPr><b/></rPr><t>bold</t></r></si>", indices: %w[0 +0 -1 000])
+    read = lambda do
+      workbook = Roo::Excelx.new(path)
+      first = workbook.cell(1, 1)
+      first.replace("edited")
+      workbook.shared_strings.to_html[0] = "<u>replacement</u>"
+      workbook.shared_strings.to_a[0] = "new plain"
+      values = (1..4).map { workbook.cell(_1, 1) }
+      [values, values.all? { _1.equal?(first) }]
+    end
+    roo, = Oracle.read(native: false, &read)
+    native, = Oracle.read(native: true, &read)
+
+    assert_equal [:ok, [%w[edited edited edited edited], true]], roo
+    assert_equal roo, native
   end
 
   def test_xml_nokogiri_reads_differently_goes_to_roo

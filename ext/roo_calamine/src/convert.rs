@@ -21,6 +21,7 @@ use magnus::{
 
 use crate::numeric::{create_numeric, plain_number};
 use crate::reader::{parse_index, Body, Kind, Mode, RawCell, RawRow, Reference, Style};
+use crate::shared_strings::{has_html_tag, HtmlSelection, HtmlStrings};
 
 fn constant<T: magnus::TryConvert>(ruby: &Ruby, path: &str) -> T {
     ruby.eval(path).expect("roo is loaded before roo/calamine")
@@ -35,16 +36,6 @@ static CELL_DATETIME: Lazy<RClass> = Lazy::new(|r| constant(r, "Roo::Excelx::Cel
 static CELL_TIME: Lazy<RClass> = Lazy::new(|r| constant(r, "Roo::Excelx::Cell::Time"));
 static CELL_EMPTY: Lazy<RClass> = Lazy::new(|r| constant(r, "Roo::Excelx::Cell::Empty"));
 static NUMERIC_OR_FORMULA: Lazy<StaticSymbol> = Lazy::new(|r| r.sym_new("numeric_or_formula"));
-
-/// `string[/<([biu]|sup|sub)>/]`, the test in `SharedStrings#use_html?`.
-fn has_html_tag(string: &[u8]) -> bool {
-    string.windows(3).enumerate().any(|(i, w)| {
-        w[0] == b'<'
-            && (matches!(w, [_, b'b' | b'i' | b'u', b'>'])
-                || string[i..].starts_with(b"<sup>")
-                || string[i..].starts_with(b"<sub>"))
-    })
-}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ValueType {
@@ -153,6 +144,8 @@ pub struct Converter {
     /// code in between, so one pick per index gives the cells it gives, even
     /// when a caller later changes a picked string in place.
     picked: Option<Opaque<RHash>>,
+    picked_dense: Option<Opaque<RArray>>,
+    picked_present: RefCell<Vec<bool>>,
 }
 
 impl DataTypeFunctions for Converter {
@@ -171,6 +164,9 @@ impl DataTypeFunctions for Converter {
             marker.mark(html);
         }
         if let Some(picked) = self.picked {
+            marker.mark(picked);
+        }
+        if let Some(picked) = self.picked_dense {
             marker.mark(picked);
         }
     }
@@ -200,6 +196,8 @@ impl Converter {
             shared_html: StdCell::new(None),
             error_values: ruby.eval("Roo::Excelx::ERROR_VALUES.to_a")?,
             picked: (!stream).then(|| ruby.hash_new().into()),
+            picked_dense: (!stream).then(|| ruby.ary_new().into()),
+            picked_present: RefCell::new(Vec::new()),
         })
     }
 
@@ -512,11 +510,31 @@ impl Converter {
             Some(index) => index.into_value_with(ruby),
             None => ruby.str_new(text).funcall("to_i", ())?,
         };
+        let dense = ruby.get_inner(self.picked_dense.expect("document cache"));
+        let dense_index = usize::try_convert(key).ok();
+        if let Some(index) = dense_index {
+            if self.picked_present.borrow().get(index) == Some(&true) {
+                return dense.entry(index as isize);
+            }
+        }
         if let Some(string) = picked.get(key) {
             return Ok(string);
         }
         let string = self.pick_shared_string(ruby, index, text)?;
-        picked.aset(key, string)?;
+        if let Some(index) = dense_index.filter(|index| {
+            self.shared_plain
+                .get()
+                .is_some_and(|plain| *index < ruby.get_inner(plain).len())
+        }) {
+            dense.store(index as isize, string)?;
+            let mut present = self.picked_present.borrow_mut();
+            if present.len() <= index {
+                present.resize(index + 1, false);
+            }
+            present[index] = true;
+        } else {
+            picked.aset(key, string)?;
+        }
         Ok(string)
     }
 
@@ -541,7 +559,12 @@ impl Converter {
         let plain = ruby.get_inner(self.shared_plain.get().expect("fetched above"));
         let html = ruby.get_inner(self.shared_html.get().expect("fetched above"));
         let chosen = match RArray::from_value(html) {
-            None => Some(plain),
+            None if html.is_nil() => Some(plain),
+            None => match <&HtmlStrings>::try_convert(html)?.select(ruby, index)? {
+                HtmlSelection::Html(string) => return Ok(string),
+                HtmlSelection::Plain => Some(plain),
+                HtmlSelection::Invalid => None,
+            },
             Some(html) if index < html.len() => {
                 match RString::from_value(html.entry(index as isize)?) {
                     Some(string) if has_html_tag(unsafe { string.as_slice() }) => {

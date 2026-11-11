@@ -46,12 +46,17 @@ module Roo
         Roo::Utils.extract_coordinate(reference)
       end
 
-      # roo's own memoized shared-string arrays: plain text, and the HTML that
-      # SharedStrings#use_html? tests (nil when the HTML wrapper is disabled).
+      # Roo's plain strings and deferred or public HTML table, nil when disabled.
       def shared_strings
         strings = @shared.shared_strings
         html_disabled = strings.instance_variable_get(:@options)[:disable_html_wrapper]
-        [strings.to_a, (strings.to_html unless html_disabled)]
+        plain = strings.to_a
+        unless html_disabled
+          html = strings.instance_variable_get(:@html) ||
+                 strings.instance_variable_get(:@calamine_html) || strings.to_html
+          strings.instance_variable_set(:@calamine_html_used, true)
+        end
+        [plain, html]
       end
 
       def shared_string(text)

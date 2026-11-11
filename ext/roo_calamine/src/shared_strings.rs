@@ -7,13 +7,16 @@
 //! match by local name. [`SheetReader`] first checks that Nokogiri reads the
 //! file as quick-xml does; anything it rejects is left to roo.
 
+use std::cell::RefCell;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::panic::resume_unwind;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use magnus::{prelude::*, Error, RArray, Ruby};
+use magnus::gc::Marker;
+use magnus::value::{Opaque, ReprValue};
+use magnus::{prelude::*, DataTypeFunctions, Error, RArray, RString, Ruby, TypedData, Value};
 use quick_xml::events::{BytesRef, BytesStart, Event};
 use quick_xml::XmlVersion;
 
@@ -30,13 +33,15 @@ const CARRIAGE_RETURN: &str = "_x000D_";
 #[derive(Default)]
 struct Strings {
     text: String,
-    ends: Vec<usize>,
+    ends: Vec<u32>,
 }
 
 impl Strings {
-    fn push(&mut self, string: &str) {
+    fn push(&mut self, string: &str) -> Result<()> {
+        let end = string_end(self.text.len(), string.len())?;
         self.text.push_str(string);
-        self.ends.push(self.text.len());
+        self.ends.push(end);
+        Ok(())
     }
 
     fn len(&self) -> usize {
@@ -47,7 +52,129 @@ impl Strings {
         let starts = std::iter::once(0).chain(self.ends.iter().copied());
         starts
             .zip(self.ends.iter().copied())
-            .map(|(start, end)| &self.text[start..end])
+            .map(|(start, end)| &self.text[start as usize..end as usize])
+    }
+
+    fn get(&self, index: usize) -> &str {
+        let start = index.checked_sub(1).map_or(0, |i| self.ends[i]);
+        &self.text[start as usize..self.ends[index] as usize]
+    }
+
+    fn into_array(self, ruby: &Ruby) -> std::result::Result<RArray, Error> {
+        let out = ruby.ary_new_capa(self.len());
+        for string in self.iter() {
+            out.push(ruby.str_new(string))?;
+        }
+        Ok(out)
+    }
+}
+
+fn string_end(start: usize, len: usize) -> Result<u32> {
+    start
+        .checked_add(len)
+        .and_then(|end| u32::try_from(end).ok())
+        .ok_or_else(|| Unsupported("shared strings exceed 32-bit offsets".into()))
+}
+
+/// `string[/<([biu]|sup|sub)>/]`, the test in `SharedStrings#use_html?`.
+pub(crate) fn has_html_tag(string: &[u8]) -> bool {
+    string.windows(3).enumerate().any(|(i, w)| {
+        w[0] == b'<'
+            && (matches!(w, [_, b'b' | b'i' | b'u', b'>'])
+                || string[i..].starts_with(b"<sup>")
+                || string[i..].starts_with(b"<sub>"))
+    })
+}
+
+pub(crate) enum HtmlSelection {
+    Plain,
+    Html(Value),
+    Invalid,
+}
+
+#[derive(TypedData)]
+#[magnus(
+    class = "Roo::Calamine::Native::HtmlStrings",
+    mark,
+    free_immediately,
+    size
+)]
+pub(crate) struct HtmlStrings {
+    strings: RefCell<Option<Strings>>,
+    cached: Opaque<RArray>,
+}
+
+impl DataTypeFunctions for HtmlStrings {
+    fn mark(&self, marker: &Marker) {
+        marker.mark(self.cached);
+    }
+
+    fn size(&self) -> usize {
+        size_of::<Self>()
+            + self.strings.borrow().as_ref().map_or(0, |strings| {
+                strings.text.capacity() + strings.ends.capacity() * size_of::<u32>()
+            })
+    }
+}
+
+impl HtmlStrings {
+    pub(crate) fn select(
+        &self,
+        ruby: &Ruby,
+        index: usize,
+    ) -> std::result::Result<HtmlSelection, Error> {
+        let cached = ruby.get_inner(self.cached);
+        if index < cached.len() {
+            let value: Value = cached.entry(index as isize)?;
+            if !value.is_nil() || self.strings.borrow().is_none() {
+                return Ok(match RString::from_value(value) {
+                    Some(string) if has_html_tag(unsafe { string.as_slice() }) => {
+                        HtmlSelection::Html(value)
+                    }
+                    Some(_) => HtmlSelection::Plain,
+                    None => HtmlSelection::Invalid,
+                });
+            }
+        }
+        {
+            let strings = self.strings.borrow();
+            let Some(strings) = strings.as_ref().filter(|strings| index < strings.len()) else {
+                return Ok(HtmlSelection::Invalid);
+            };
+            if !has_html_tag(strings.get(index).as_bytes()) {
+                return Ok(HtmlSelection::Plain);
+            }
+        }
+        self.materialize(ruby, index).map(HtmlSelection::Html)
+    }
+
+    fn materialize(&self, ruby: &Ruby, index: usize) -> std::result::Result<Value, Error> {
+        let cached = ruby.get_inner(self.cached);
+        let value: Value = cached.entry(index as isize)?;
+        if !value.is_nil() {
+            return Ok(value);
+        }
+        let html = {
+            let strings = self.strings.borrow();
+            format!(
+                "<html>{}</html>",
+                strings.as_ref().expect("not materialized").get(index)
+            )
+        };
+        let string = ruby.str_new(&html);
+        cached.store(index as isize, string)?;
+        Ok(string.as_value())
+    }
+
+    fn to_a(ruby: &Ruby, rb_self: &Self) -> std::result::Result<RArray, Error> {
+        let len = rb_self.strings.borrow().as_ref().map(Strings::len);
+        if let Some(len) = len {
+            for index in 0..len {
+                rb_self.materialize(ruby, index)?;
+            }
+            rb_self.strings.borrow_mut().take();
+        }
+        Ok(ruby.get_inner(rb_self.cached))
     }
 }
 
@@ -187,9 +314,9 @@ impl<R: BufRead> SharedStringsReader<R> {
                 }
                 Event::Empty(e) => {
                     if self.depth == 1 && self.in_sst && e.local_name().as_ref() == "si" {
-                        self.plain.push("");
+                        self.plain.push("")?;
                         if self.html {
-                            self.html_strings.push("<html></html>");
+                            self.html_strings.push("")?;
                         }
                         return Ok(true);
                     }
@@ -206,7 +333,6 @@ impl<R: BufRead> SharedStringsReader<R> {
     fn read_si(&mut self, buf: &mut Vec<u8>) -> Result<()> {
         self.item_plain.clear();
         self.item_html.clear();
-        self.item_html.push_str("<html>");
         loop {
             buf.clear();
             let (child, empty) = match self.read_event(buf)? {
@@ -221,7 +347,9 @@ impl<R: BufRead> SharedStringsReader<R> {
                     self.read_t(buf)?;
                     self.item_plain.clear();
                     self.push_fixed_content();
-                    self.item_html.push_str(&self.content);
+                    if self.html {
+                        self.item_html.push_str(&self.content);
+                    }
                 }
                 (Name::T, true) => self.item_plain.clear(),
                 (Name::R, false) => self.read_run(buf)?,
@@ -229,10 +357,9 @@ impl<R: BufRead> SharedStringsReader<R> {
                 (_, true) => {}
             }
         }
-        self.item_html.push_str("</html>");
-        self.plain.push(&self.item_plain);
+        self.plain.push(&self.item_plain)?;
         if self.html {
-            self.html_strings.push(&self.item_html);
+            self.html_strings.push(&self.item_html)?;
         }
         Ok(())
     }
@@ -479,25 +606,32 @@ fn read(
     Ok(reader)
 }
 
-/// `Native.shared_strings(path, html)`: `[to_a, to_html]` for roo's
-/// `SharedStrings`, with `nil` for `to_html` unless `html`. Raises
+/// `Native.shared_strings(path, html, plain)`: plain strings and deferred HTML
+/// for roo's `SharedStrings`, with `nil` for an unrequested table. Raises
 /// `Roo::Calamine::UnsupportedError` for a file roo reads differently.
 fn shared_strings(
     ruby: &Ruby,
     path: String,
     html: bool,
-) -> std::result::Result<(RArray, Option<RArray>), Error> {
-    let reader = read(ruby, Path::new(&path), html)?;
-    let array = |strings: &Strings| -> std::result::Result<RArray, Error> {
-        let out = ruby.ary_new_capa(strings.len());
-        for string in strings.iter() {
-            out.push(ruby.str_new(string))?;
-        }
-        Ok(out)
+    plain: bool,
+) -> std::result::Result<(Option<RArray>, Option<HtmlStrings>), Error> {
+    let build_plain = plain;
+    let SharedStringsReader {
+        plain,
+        html_strings,
+        ..
+    } = read(ruby, Path::new(&path), html)?;
+    let plain = if build_plain {
+        Some(plain.into_array(ruby)?)
+    } else {
+        drop(plain);
+        None
     };
-    let plain = array(&reader.plain)?;
     let html = if html {
-        Some(array(&reader.html_strings)?)
+        Some(HtmlStrings {
+            cached: ruby.ary_new().into(),
+            strings: RefCell::new(Some(html_strings)),
+        })
     } else {
         None
     };
@@ -505,6 +639,21 @@ fn shared_strings(
 }
 
 pub fn define(native: magnus::RModule) -> std::result::Result<(), Error> {
-    native.define_singleton_method("shared_strings", magnus::function!(shared_strings, 2))?;
+    let ruby = Ruby::get().expect("GVL held");
+    let html = native.define_class("HtmlStrings", ruby.class_object())?;
+    html.define_method("to_a", magnus::method!(HtmlStrings::to_a, 0))?;
+    native.define_singleton_method("shared_strings", magnus::function!(shared_strings, 3))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::string_end;
+
+    #[test]
+    fn offsets_reject_overflow_instead_of_wrapping() {
+        assert_eq!(string_end(u32::MAX as usize - 1, 1).unwrap(), u32::MAX);
+        assert!(string_end(u32::MAX as usize, 1).is_err());
+        assert!(string_end(usize::MAX, 1).is_err());
+    }
 }
