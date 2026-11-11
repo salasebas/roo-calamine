@@ -276,23 +276,6 @@ class SharedStringsTest < Minitest::Test
     assert_equal roo, native
   end
 
-  def test_document_selections_across_cache_blocks_keep_each_index
-    indices = [0, 1023, 1024, 2049, 1023, 1024, 2049]
-    path = write(*Array.new(2050) { |i| "<si><t>#{i}</t></si>" }, indices:)
-    read = lambda do
-      workbook = Roo::Excelx.new(path)
-      values = (1..indices.size).map { workbook.cell(_1, 1) }
-      workbook.shared_strings.to_a.replace(Array.new(2050, "replacement"))
-      again = (1..indices.size).map { workbook.cell(_1, 1) }
-      [again, again.each_with_index.all? { |value, i| value.equal?(values[i]) }]
-    end
-    roo, = Oracle.read(native: false, &read)
-    native, = Oracle.read(native: true, &read)
-
-    assert_equal [:ok, [indices.map(&:to_s), true]], roo
-    assert_equal roo, native
-  end
-
   def test_xml_nokogiri_reads_differently_goes_to_roo
     main = %(xmlns="#{Workbook::MAIN}")
     parts = [

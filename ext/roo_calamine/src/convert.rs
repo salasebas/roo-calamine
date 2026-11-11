@@ -37,8 +37,6 @@ static CELL_TIME: Lazy<RClass> = Lazy::new(|r| constant(r, "Roo::Excelx::Cell::T
 static CELL_EMPTY: Lazy<RClass> = Lazy::new(|r| constant(r, "Roo::Excelx::Cell::Empty"));
 static NUMERIC_OR_FORMULA: Lazy<StaticSymbol> = Lazy::new(|r| r.sym_new("numeric_or_formula"));
 
-const PICK_BLOCK: usize = 1024;
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ValueType {
     Date,
@@ -146,8 +144,6 @@ pub struct Converter {
     /// code in between, so one pick per index gives the cells it gives, even
     /// when a caller later changes a picked string in place.
     picked: Option<Opaque<RHash>>,
-    picked_blocks: Option<Opaque<RArray>>,
-    picked_present: RefCell<Vec<Option<Box<[bool; PICK_BLOCK]>>>>,
 }
 
 impl DataTypeFunctions for Converter {
@@ -168,16 +164,6 @@ impl DataTypeFunctions for Converter {
         if let Some(picked) = self.picked {
             marker.mark(picked);
         }
-        if let Some(picked) = self.picked_blocks {
-            marker.mark(picked);
-        }
-    }
-
-    fn size(&self) -> usize {
-        let present = self.picked_present.borrow();
-        size_of::<Self>()
-            + present.capacity() * size_of::<Option<Box<[bool; PICK_BLOCK]>>>()
-            + present.iter().filter(|block| block.is_some()).count() * PICK_BLOCK
     }
 }
 
@@ -205,8 +191,6 @@ impl Converter {
             shared_html: StdCell::new(None),
             error_values: ruby.eval("Roo::Excelx::ERROR_VALUES.to_a")?,
             picked: (!stream).then(|| ruby.hash_new().into()),
-            picked_blocks: (!stream).then(|| ruby.ary_new().into()),
-            picked_present: RefCell::new(Vec::new()),
         })
     }
 
@@ -519,49 +503,11 @@ impl Converter {
             Some(index) => index.into_value_with(ruby),
             None => ruby.str_new(text).funcall("to_i", ())?,
         };
-        let blocks = ruby.get_inner(self.picked_blocks.expect("document cache"));
-        let dense_index = usize::try_convert(key).ok();
-        if let Some(index) = dense_index {
-            if self
-                .picked_present
-                .borrow()
-                .get(index / PICK_BLOCK)
-                .and_then(Option::as_ref)
-                .is_some_and(|present| present[index % PICK_BLOCK])
-            {
-                let block: RArray = blocks.entry((index / PICK_BLOCK) as isize)?;
-                return block.entry((index % PICK_BLOCK) as isize);
-            }
-        }
         if let Some(string) = picked.get(key) {
             return Ok(string);
         }
         let string = self.pick_shared_string(ruby, index, text)?;
-        if let Some(index) = dense_index.filter(|index| {
-            self.shared_plain
-                .get()
-                .is_some_and(|plain| *index < ruby.get_inner(plain).len())
-        }) {
-            let block_index = index / PICK_BLOCK;
-            let value: Value = blocks.entry(block_index as isize)?;
-            let block = match RArray::from_value(value) {
-                Some(block) => block,
-                None => {
-                    let block = ruby.ary_new_capa(PICK_BLOCK);
-                    blocks.store(block_index as isize, block)?;
-                    block
-                }
-            };
-            block.store((index % PICK_BLOCK) as isize, string)?;
-            let mut present = self.picked_present.borrow_mut();
-            if present.len() <= block_index {
-                present.resize_with(block_index + 1, || None);
-            }
-            present[block_index].get_or_insert_with(|| Box::new([false; PICK_BLOCK]))
-                [index % PICK_BLOCK] = true;
-        } else {
-            picked.aset(key, string)?;
-        }
+        picked.aset(key, string)?;
         Ok(string)
     }
 
