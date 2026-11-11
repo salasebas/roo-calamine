@@ -247,8 +247,8 @@ copies of roo's loops turn them into the same hyperlinks and merged cells.
 roo extracts every worksheet of a workbook to a temporary directory when it
 opens it. With the reader on, a workbook opened from a path (not an IO) is
 copied to that directory instead, and roo opens the copy. Its worksheets
-stay in the copied zip: the reader inflates the one it reads on a thread of
-its own, and a worksheet is extracted only when roo's own code reads it
+stay in the copied zip: the reader inflates the one it reads, using a separate
+thread for large entries. A worksheet is extracted only when roo's own code reads it
 (`#dimensions`, or XML the reader hands back to roo). Opening a large
 workbook writes the .xlsx once rather than every worksheet inflated, and
 skips the memory roo's extraction leaves behind. The files roo still
