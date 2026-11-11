@@ -91,6 +91,32 @@ bundle exec ruby run.rb 5 roo-calamine   # a fixed run count, and only the libra
 
 </details>
 
+### Whole-sheet formatters
+
+On `mixed-100k.xlsx`, a single fresh-process run per entry, including opening
+the workbook, on the same Apple M5 Pro and Ruby 3.4.12. Before is roo-calamine
+on 11f2a02. These are single measurements, separate from the medians above.
+
+| Call | roo 4.0.0 | Before | Now | Speedup over roo |
+|---|---:|---:|---:|---:|
+| `to_yaml` | 24.97 s | 8.21 s | 1.29 s | 19.3× |
+| `to_xml` | 53.29 s | 38.21 s | 1.05 s | 50.6× |
+| `to_matrix` | 20.70 s | 2.30 s | 0.69 s | 30.1× |
+
+The three full-output SHA-256 digests match roo. YAML and XML compare the
+exact bytes; Matrix compares its inspected values. Native formatting uses
+roo 4.0.0's records and preserves values and cells changed in place. Once
+the public cells hash is materialized, roo formats the output itself.
+
+Run one scenario from the repository root after generating the fixtures:
+
+```sh
+BUNDLE_GEMFILE=bench/Gemfile bundle exec ruby -Ilib bench/scenario.rb roo-calamine yaml bench/fixtures/mixed-100k.xlsx
+```
+
+Use `roo` for the reference, `xml` or `matrix` for the other formatters, and
+append `digest` to check output in a separate run.
+
 ## Values only
 
 If you only need values, `Roo::Calamine.each_row_values` skips roo's cell

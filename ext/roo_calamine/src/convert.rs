@@ -168,6 +168,37 @@ impl DataTypeFunctions for Converter {
 }
 
 impl Converter {
+    pub fn formatter_type(
+        &self,
+        ruby: &Ruby,
+        raw: &RawCell,
+    ) -> Result<Option<&'static str>, Error> {
+        let Reference::At { row, column } = raw.reference else {
+            return Ok(None);
+        };
+        if !self.build_cells || self.has_link(ruby, row, column) {
+            return Ok(None);
+        }
+        let kind = match (&raw.body, raw.kind) {
+            (Body::Empty, _) => return Ok(None),
+            (Body::Inline(_), _) | (Body::Value(_), Kind::Shared | Kind::Str) => "string",
+            (Body::Value(_), Kind::Boolean) => "boolean",
+            (Body::Value(_), Kind::InlineStr) => "float",
+            (Body::Value(_), Kind::ByFormat) => {
+                match self.style_info(ruby, self.style(ruby, raw)?)?.1 {
+                    ValueType::Number => "float",
+                    ValueType::Date => "date",
+                    ValueType::DateTime | ValueType::Time => return Ok(None),
+                }
+            }
+        };
+        Ok(Some(if raw.formula.is_some() {
+            "formula"
+        } else {
+            kind
+        }))
+    }
+
     /// `context` is a `Roo::Calamine::Context`.
     pub fn new(ruby: &Ruby, context: Value, stream: bool) -> Result<Self, Error> {
         let hyperlinks: RHash = context.funcall("hyperlinks", ())?;
