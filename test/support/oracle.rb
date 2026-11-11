@@ -233,6 +233,27 @@ module Oracle
     end
   end
 
+  # #column after one single-cell lookup, before anything builds `cells`,
+  # then whether `cells`, built after it, holds the very values it returned.
+  def describe_column_reads(workbook)
+    workbook.sheets.map do |sheet|
+      workbook.default_sheet = sheet
+      bounds = BOUNDS.map { |m| workbook.public_send(m) }
+      workbook.cell(bounds[0], bounds[2]) if bounds[0]
+      columns = outcome { bounds[2] ? (bounds[2]..bounds[3]).map { |i| workbook.column(i) } : [] }
+      kept = outcome { kept_column_values(workbook.sheet_for(sheet).cells, bounds, columns) }
+      [sheet, bounds, described_rows(columns), kept]
+    end
+  end
+
+  def kept_column_values(cells, bounds, columns)
+    return [] unless columns.first == :ok
+
+    columns.last.each_with_index.flat_map do |values, i|
+      values.each_with_index.map { |value, j| value.equal?(cells[[bounds[0] + j, bounds[2] + i]]&.value) }
+    end.tally
+  end
+
   def described_rows(read)
     read.first == :ok ? [:ok, describe_rows(read.last)] : read.first
   end

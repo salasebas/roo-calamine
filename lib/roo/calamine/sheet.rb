@@ -5,7 +5,7 @@ module Roo
     # Prepended to Roo::Excelx::Sheet: single-cell lookups, rows, columns, and
     # the sheet's bounds read the lazy cells of SheetDoc#lazy_cells while
     # #cells has not been built, so they build only the cells they read. Rows
-    # build only the cells whose value needs one.
+    # and columns build only the cells whose value needs one.
     module Sheet
       NO_CELLS = [].freeze
       private_constant :NO_CELLS
@@ -25,6 +25,9 @@ module Roo
       end
 
       def column(col_number)
+        lazy = lazy_cells
+        return lazy.column(col_number, first_row, last_row) if lazy && first_row
+
         first_row.upto(last_row).map do |row|
           cell_at([row, col_number])&.value
         end

@@ -70,6 +70,9 @@ class RooFixturesTest < Minitest::Test
         assert_same_as_roo("#{name} row reads #{options}", native_only:, lazy:) do
           Oracle.describe_row_reads(Roo::Excelx.new(path, options.dup))
         end
+        assert_same_as_roo("#{name} column reads #{options}", native_only:, lazy:) do
+          Oracle.describe_column_reads(Roo::Excelx.new(path, options.dup))
+        end
       end
     end
 
