@@ -551,6 +551,24 @@ class EdgeCasesTest < Minitest::Test
     assert_equal roo, native
   end
 
+  def test_store_bounds_see_strings_handed_out_before_cells_are_built
+    inline = write(%(<row r="1"><c r="A1"><v>1</v></c></row><row r="3"><c r="C3"><v>1</v></c></row>) +
+                   %(<row r="4"><c r="D4" t="inlineStr"><is><t>x</t></is></c></row>))
+    [write_strings_to_edit, inline].each do |path|
+      roo, = Oracle.read(native: false) do
+        workbook = Roo::Excelx.new(path)
+        workbook.cell(4, 4).clear
+        Oracle::BOUNDS.map { workbook.public_send(_1) }
+      end
+      store = Roo::Excelx.new(path).sheet_for(nil).lazy_cells
+      store.row(4, 4, 4).first.clear
+      bounds = store.bounds
+
+      assert_equal [:ok, [1, 3, 1, 3]], roo
+      assert_equal roo.last, bounds.values_at(*Oracle::BOUNDS)
+    end
+  end
+
   # roo's rows hold the cells' own values too.
   def test_values_changed_in_place_in_rows_stay_changed
     path = write_strings_to_edit
@@ -638,6 +656,39 @@ class EdgeCasesTest < Minitest::Test
     assert_equal 9, built.call
   ensure
     GC.enable
+  end
+
+  def test_single_cell_coordinates_keep_roos_normalization_and_sheet_errors
+    path = write(%(<row r="1"><c r="A1"><v>1</v></c></row>))
+    coordinates = [[1, 1], [1, "A"], ["A", 1], %w[A 1], [1.0, 1], [1, nil], [[1, 1], nil],
+                   [0, 1], [-1, 1], [2**64, 1]]
+    describe = ->(value) { value.is_a?(Roo::Font) ? [value.class, value.bold?, value.italic?, value.underline?] : value }
+
+    coordinates.product([nil, "missing"], %i[cell formula font celltype excelx_type excelx_value formatted_value empty?])
+               .each do |(row, column), sheet, method|
+      original = Roo::Excelx.new(path).method(method).super_method
+      roo = Oracle.outcome { describe.call(original.call(row, column, sheet)) }
+      workbook = Roo::Excelx.new(path)
+
+      assert_equal(roo, Oracle.outcome { describe.call(workbook.public_send(method, row, column, sheet)) })
+      workbook.sheet_for(nil).cells
+
+      assert_equal(roo, Oracle.outcome { describe.call(workbook.public_send(method, row, column, sheet)) })
+    end
+  end
+
+  def test_sheet_formats_keep_hash_key_lookup_semantics
+    path = write(%(<row r="1"><c r="A1"><v>1</v></c></row>))
+    [nil, "A1", [1], [1, 1, 1], [1, 1]].each do |key|
+      original = Roo::Excelx.new(path).sheet_for(nil).method(:excelx_format).super_method
+      sheet = Roo::Excelx.new(path).sheet_for(nil)
+      roo = Oracle.outcome { original.call(key) }
+
+      assert_equal(roo, Oracle.outcome { sheet.excelx_format(key) })
+      sheet.cells
+
+      assert_equal(roo, Oracle.outcome { sheet.excelx_format(key) })
+    end
   end
 
   def test_set_after_single_cell_reads
@@ -861,6 +912,14 @@ class EdgeCasesTest < Minitest::Test
 
     assert_equal [:ok, [{ b: 2, c: 3 }]], roo
     assert_every_path_same_as_roo(path)
+  end
+
+  def test_parse_keeps_reordered_and_repeated_header_columns
+    path = write_header_book
+
+    assert_same_as_roo("reordered and repeated headers", lazy: true) do
+      Roo::Excelx.new(path).parse(quantity: "qty", name: "name", again: "qty")
+    end
   end
 
   def test_parse_reads_cells_set_before_it

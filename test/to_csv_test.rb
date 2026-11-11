@@ -143,7 +143,7 @@ class ToCsvTest < Minitest::Test
     row[1].replace("é".encode("ISO-8859-1"))
     workbook.row(4)[9].replace("shared")
     workbook.cell(5, 5).replace("built é".encode("ISO-8859-1"))
-    workbook.sheet_for("Types").cell_at([2, 5]).value = 99.5
+    workbook.sheet_for("Types").cell_at(2, 5).value = 99.5
     describe_csv(workbook)
   end
 
