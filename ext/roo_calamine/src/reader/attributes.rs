@@ -13,7 +13,7 @@ use std::ops::Range;
 use quick_xml::name::QName;
 use quick_xml::XmlVersion;
 
-use super::{check_name, Result, Unsupported};
+use super::{check_chars, check_name, Result, Unsupported};
 
 /// An attribute as written, before references are resolved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,9 +55,13 @@ impl TagAttributes {
     /// Reads and checks `raw`, what quick-xml's `BytesStart::attributes_raw`
     /// returns, in place of the tag read before.
     pub fn read(&mut self, raw: &str) -> Result<()> {
-        self.spans.clear();
         self.prefixed = false;
         self.references = false;
+        if self.read_common(raw) {
+            return Ok(());
+        }
+        self.spans.clear();
+        check_chars(raw)?;
         let bytes = raw.as_bytes();
         let mut position = 0;
         loop {
@@ -103,6 +107,43 @@ impl TagAttributes {
             position = value_end + 1;
         }
         self.check_unique(bytes)
+    }
+
+    fn read_common(&mut self, raw: &str) -> bool {
+        self.spans.clear();
+        let bytes = raw.as_bytes();
+        let mut seen = 0u8;
+        let mut position = 0;
+        while position < bytes.len() {
+            let &[b' ', key, b'=', b'"', ..] = &bytes[position..] else {
+                return false;
+            };
+            let bit = match key {
+                b'r' => 1,
+                b's' => 2,
+                b't' => 4,
+                _ => return false,
+            };
+            if seen & bit != 0 {
+                return false;
+            }
+            seen |= bit;
+            let value_start = position + 4;
+            let Some(length) = bytes[value_start..].iter().position(|&b| b == b'"') else {
+                return false;
+            };
+            let value_end = value_start + length;
+            if !bytes[value_start..value_end]
+                .iter()
+                .all(|&b| matches!(b, b' '..=b'~') && b != b'&' && b != b'<')
+            {
+                return false;
+            }
+            self.spans
+                .push((position + 1..position + 2, value_start..value_end));
+            position = value_end + 1;
+        }
+        true
     }
 
     /// Whether a key has a namespace prefix.

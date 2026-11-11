@@ -22,6 +22,9 @@ const LOCAL_HEADER_SIGNATURE: u32 = 0x0403_4b50;
 const LOCAL_HEADER_LENGTH: usize = 30;
 const STORED: u16 = 0;
 const DEFLATED: u16 = 8;
+/// The general purpose flag of an encrypted entry.
+const ENCRYPTED: u16 = 1;
+const ZIP64_EXTRA: u16 = 1;
 /// Bytes per inflated chunk handed from the inflating thread to the parser.
 const CHUNK: usize = 256 * 1024;
 /// Chunks the inflating thread may run ahead of the parser.
@@ -65,24 +68,38 @@ impl ZipEntry {
         })
     }
 
-    /// The entry's data as stored, after its local header.
+    /// The entry's data as stored, after its local header. Fails where the
+    /// local header disagrees with the central directory on what rubyzip
+    /// reads from it: the encryption flag, the compression method, and a
+    /// stored entry's size.
     fn data(&self) -> io::Result<impl Read> {
         let mut file = File::open(&self.zip)?;
         file.seek(SeekFrom::Start(self.offset))?;
         let mut header = [0; LOCAL_HEADER_LENGTH];
         file.read_exact(&mut header)?;
         let field = |at: usize| u16::from_le_bytes([header[at], header[at + 1]]);
-        if u32::from_le_bytes([header[0], header[1], header[2], header[3]])
-            != LOCAL_HEADER_SIGNATURE
-        {
+        let long = |at: usize| {
+            u32::from_le_bytes([header[at], header[at + 1], header[at + 2], header[at + 3]])
+        };
+        if long(0) != LOCAL_HEADER_SIGNATURE {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "no local header at the entry's offset",
             ));
         }
-        file.seek(SeekFrom::Current(
-            i64::from(field(26)) + i64::from(field(28)),
-        ))?;
+        file.seek(SeekFrom::Current(i64::from(field(26))))?;
+        let mut extra = vec![0; usize::from(field(28))];
+        file.read_exact(&mut extra)?;
+        let method = if self.deflated { DEFLATED } else { STORED };
+        if field(6) & ENCRYPTED != 0
+            || field(8) != method
+            || (!self.deflated && local_size(long(22), &extra) != Some(self.size))
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "the local header disagrees with the central directory",
+            ));
+        }
         Ok(file.take(self.compressed_size))
     }
 
@@ -138,14 +155,15 @@ impl ZipEntry {
     }
 
     /// Writes the inflated entry to `path`, as rubyzip's `Zip::Entry#extract`
-    /// does, with the GVL released. A file that fails part way is removed,
-    /// so rubyzip can extract it instead.
+    /// does, with the GVL released. Fails without touching a file already at
+    /// `path`; a file that fails part way is removed, so rubyzip can extract
+    /// it instead.
     fn extract(ruby: &Ruby, rb_self: &Self, path: PathBuf) -> Result<(), Error> {
         let entry = rb_self.clone();
         let written = without_gvl(move |interrupted| -> io::Result<()> {
             let mut bytes = entry.inflated()?;
+            let mut file = File::create_new(&path)?;
             let written = (|| {
-                let mut file = File::create_new(&path)?;
                 let mut chunk = vec![0; CHUNK];
                 loop {
                     if interrupted.load(Ordering::Acquire) {
@@ -165,6 +183,33 @@ impl ZipEntry {
         })?;
         written.map_err(|e| Error::new(ruby.exception_io_error(), e.to_string()))
     }
+}
+
+/// The uncompressed size a local header gives: its 32-bit field, or, when
+/// that is `u32::MAX`, the first value of its Zip64 extra field. `None`
+/// when the extra fields are malformed or hold more than one Zip64 field,
+/// which rubyzip reads its own way.
+fn local_size(field: u32, extra: &[u8]) -> Option<u64> {
+    if field != u32::MAX {
+        return Some(u64::from(field));
+    }
+    let mut zip64 = None;
+    let mut rest = extra;
+    while !rest.is_empty() {
+        let [a, b, c, d, after @ ..] = rest else {
+            return None;
+        };
+        let length = usize::from(u16::from_le_bytes([*c, *d]));
+        let data = after.get(..length)?;
+        if u16::from_le_bytes([*a, *b]) == ZIP64_EXTRA {
+            if zip64.is_some() {
+                return None;
+            }
+            zip64 = Some(u64::from_le_bytes(data.get(..8)?.try_into().ok()?));
+        }
+        rest = &after[length..];
+    }
+    zip64
 }
 
 /// Reads until `buf` is full or the input ends.
@@ -309,4 +354,34 @@ pub fn define(ruby: &Ruby, native: RModule) -> Result<(), Error> {
     entry.define_singleton_method("new", function!(ZipEntry::new, 5))?;
     entry.define_method("extract", method!(ZipEntry::extract, 1))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::local_size;
+
+    fn zip64(size: u64) -> Vec<u8> {
+        let mut field = vec![1, 0, 16, 0];
+        field.extend(size.to_le_bytes());
+        field.extend(7u64.to_le_bytes());
+        field
+    }
+
+    #[test]
+    fn local_size_reads_the_zip64_field_rubyzip_reads() {
+        let other = [0x55, 0x54, 1, 0, 9];
+        assert_eq!(local_size(284, &[]), Some(284));
+        assert_eq!(local_size(u32::MAX, &zip64(284)), Some(284));
+        assert_eq!(
+            local_size(u32::MAX, &[&other[..], &zip64(284)].concat()),
+            Some(284)
+        );
+        assert_eq!(local_size(u32::MAX, &[]), None);
+        assert_eq!(local_size(u32::MAX, &[zip64(284), zip64(0)].concat()), None);
+        assert_eq!(local_size(u32::MAX, &zip64(284)[..10]), None);
+        assert_eq!(
+            local_size(u32::MAX, &[&zip64(284)[..], &[1, 0]].concat()),
+            None
+        );
+    }
 }

@@ -76,6 +76,22 @@ fn keeps_attributes_ruby_has_to_read() {
     assert_eq!(cell.reference, at(2, 2));
     assert_eq!(cell.style, Style::Index(4));
     assert_eq!(cell.kind, Kind::Shared);
+
+    for tag in [
+        "<c r=\"B2\" s=\"4\"\tt='s'/>",
+        "<c r=\"B2\" s=\"4\" t=\"s\" />",
+        "<c r=\"B2\" s=\"4\" t = \"s\"/>",
+        "<c r=\"B2\" s=\"4\" t=\"&#115;\"/>",
+        "<c r=\"B2\" s=\"4\" x=\"\" t=\"s\"/>",
+    ] {
+        let xml = format!("<worksheet {NS}><sheetData><row>{tag}</row></sheetData></worksheet>");
+        let cell = &rows(&xml, Mode::Document)[0].cells[0];
+        assert_eq!(
+            (&cell.reference, &cell.style, cell.kind),
+            (&at(2, 2), &Style::Index(4), Kind::Shared),
+            "{tag}"
+        );
+    }
 }
 
 #[test]
@@ -163,11 +179,19 @@ fn rejects_inputs_it_cannot_reproduce() {
             "{body:?}"
         );
     }
-    let attribute =
-        format!(r#"<worksheet {NS}><sheetData><row><c r="A&#2;1"/></row></sheetData></worksheet>"#);
-    assert!(SheetReader::new(attribute.as_bytes(), Mode::Document)
-        .next_row()
-        .is_err());
+    for tag in [
+        r#"<c r="A&#2;1"/>"#,
+        "<c r=\"A\u{1}1\"/>",
+        "<c t=\"\u{FFFE}\"/>",
+    ] {
+        let xml = format!("<worksheet {NS}><sheetData><row>{tag}</row></sheetData></worksheet>");
+        assert!(
+            SheetReader::new(xml.as_bytes(), Mode::Document)
+                .next_row()
+                .is_err(),
+            "{tag:?}"
+        );
+    }
     let truncated = format!("<worksheet {NS}><sheetData><row><c><v>1</v></c></row>");
     let mut reader = SheetReader::new(truncated.as_bytes(), Mode::Document);
     assert!(reader.next_row().unwrap().is_some());
@@ -196,6 +220,19 @@ fn rejects_xml_that_is_not_well_formed() {
         (
             "unknown entity in a value",
             format!(r#"<worksheet x="&bogus;">{rows}</worksheet>"#),
+        ),
+        (
+            "unknown entity in a row's `r`",
+            r#"<worksheet><sheetData><row r="&bogus;"/></sheetData></worksheet>"#.to_string(),
+        ),
+        (
+            "no space before a cell's attribute",
+            r#"<worksheet><sheetData><row><c r="A1"xs="2"/></row></sheetData></worksheet>"#
+                .to_string(),
+        ),
+        (
+            "`<` in a cell's value",
+            r#"<worksheet><sheetData><row><c r="A<1"/></row></sheetData></worksheet>"#.to_string(),
         ),
         (
             "bare `&` in a value",

@@ -9,7 +9,10 @@ module Roo
     # the file extracted the first time it reads it (DeferredSheetDoc). roo
     # reads the workbook's file only while it opens it, so it opens a copy in
     # its temporary directory, and the workbook reads the same after its file
-    # is changed, moved, or deleted.
+    # is changed, moved, or deleted. The native extension also writes the
+    # files roo does extract, such as sharedStrings.xml: rubyzip's inflating
+    # leaves several times the file's size in short-lived Strings, which
+    # Ruby's GC frees only after they have grown the process.
     module DeferredSheets
       # roo versions whose #extract_sheets_in_order this reproduces.
       ROO_VERSIONS = %w[4.0.0].freeze
@@ -26,31 +29,43 @@ module Roo
         path.dup.force_encoding(Encoding::UTF_8)
       end
 
-      # A worksheet left in the zip: `entry` is its Native::ZipEntry and
-      # `zip_entry` rubyzip's Zip::Entry for it.
-      class Sheet
-        attr_reader :entry
+      # Extended onto each Zip::Entry of the copy that the native extension
+      # can read: `calamine_entry` is its Native::ZipEntry, which writes the
+      # file when roo extracts the entry. When the native extraction fails,
+      # or cannot take the path, rubyzip extracts it as roo does, and raises
+      # or warns as roo does.
+      module NativeEntry
+        attr_accessor :calamine_entry
 
-        def initialize(entry, zip_entry)
-          @entry = entry
+        def extract(entry_path, destination_directory:)
+          calamine_entry.extract(DeferredSheets.native_path(::File.join(destination_directory, entry_path)))
+          self
+        rescue IOError, EncodingError
+          super
+        end
+      end
+
+      # A worksheet left in the zip: `zip_entry` is rubyzip's Zip::Entry for
+      # it, a NativeEntry.
+      class Sheet
+        def initialize(zip_entry)
           @zip_entry = zip_entry
           @lock = Mutex.new
           @extracted = false
         end
 
+        # Its Native::ZipEntry.
+        def entry
+          @zip_entry.calamine_entry
+        end
+
         # Extracts the worksheet where roo would have, once; another thread
-        # waits until the file is complete. When the native extraction fails,
-        # or cannot take the path, rubyzip extracts it as roo does, and raises
-        # or warns as roo does.
+        # waits until the file is complete.
         def extract(path)
           @lock.synchronize do
             next if @extracted
 
-            begin
-              entry.extract(DeferredSheets.native_path(path))
-            rescue IOError, EncodingError
-              @zip_entry.extract(::File.basename(path), destination_directory: ::File.dirname(path))
-            end
+            @zip_entry.extract(::File.basename(path), destination_directory: ::File.dirname(path))
             @extracted = true
           end
         end
@@ -74,33 +89,42 @@ module Roo
         "#{@tmpdir}/roo_calamine.xlsx".tap { IO.copy_stream(@filename, _1) }
       end
 
-      # Roo::Excelx#extract_sheets_in_order, without the extraction.
-      def extract_sheets_in_order(entries, sheet_ids, sheets, tmpdir)
-        found = (sheet_ids & sheets.keys).map { |id| sheet_entry(entries, sheets[id]) }
-        return super unless @calamine_copy && found.all? { deferrable?(_1) }
-
-        deferred = found.each_with_index.to_h { |entry, i| ["#{tmpdir}/roo_sheet#{i + 1}", deferred_sheet(entry)] }
-        sheet_files.concat(deferred.keys)
-        @sheet_files.concat(deferred.keys)
-        @shared.instance_variable_set(:@calamine_deferred_sheets, deferred)
-      rescue EncodingError
+      def process_zipfile_entries(entries)
+        native_entries(entries) if @calamine_copy
         super
       end
 
-      def deferred_sheet(entry)
-        native = Native::ZipEntry.new(DeferredSheets.native_path(@calamine_copy), entry.local_header_offset,
-                                      entry.compressed_size, entry.size, entry.compression_method)
-        Sheet.new(native, entry)
+      # Makes each entry the native extension can read a NativeEntry. roo
+      # raises or warns while extracting an entry that is not a file,
+      # encrypted, or compressed by another method; rubyzip still extracts it.
+      def native_entries(entries)
+        zip = DeferredSheets.native_path(@calamine_copy)
+        entries.each do |entry|
+          next unless entry.file? && !entry.encrypted? && COMPRESSION_METHODS.include?(entry.compression_method)
+
+          entry.extend(NativeEntry).calamine_entry =
+            Native::ZipEntry.new(zip, entry.local_header_offset, entry.compressed_size, entry.size,
+                                 entry.compression_method)
+        end
+      rescue EncodingError
+        nil
+      end
+
+      # Roo::Excelx#extract_sheets_in_order, without the extraction. roo
+      # raises or warns reading a worksheet that is missing or that the
+      # native extension cannot read; it still does.
+      def extract_sheets_in_order(entries, sheet_ids, sheets, tmpdir)
+        found = (sheet_ids & sheets.keys).map { |id| sheet_entry(entries, sheets[id]) }
+        return super unless found.all?(NativeEntry)
+
+        deferred = found.each_with_index.to_h { |entry, i| ["#{tmpdir}/roo_sheet#{i + 1}", Sheet.new(entry)] }
+        sheet_files.concat(deferred.keys)
+        @sheet_files.concat(deferred.keys)
+        @shared.instance_variable_set(:@calamine_deferred_sheets, deferred)
       end
 
       def sheet_entry(entries, name)
         name && entries.find { |e| "/#{e.name}".end_with?(name) }
-      end
-
-      # roo raises or warns while extracting an entry that is missing, not a
-      # file, encrypted, or compressed by another method; it still does.
-      def deferrable?(entry)
-        entry&.file? && !entry.encrypted? && COMPRESSION_METHODS.include?(entry.compression_method)
       end
     end
 

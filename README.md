@@ -249,8 +249,14 @@ stay in the copied zip: the reader inflates the one it reads on a thread of
 its own, and a worksheet is extracted only when roo's own code reads it
 (`#dimensions`, or XML the reader hands back to roo). Opening a large
 workbook writes the .xlsx once rather than every worksheet inflated, and
-skips the memory roo's extraction leaves behind. As with roo, a workbook
-reads the same after its file is changed or deleted.
+skips the memory roo's extraction leaves behind. The files roo still
+extracts while it opens the copy (`sharedStrings.xml`, styles, comments,
+relationships, images) are inflated by the extension too, not rubyzip, which
+keeps a workbook with many unique strings from growing by several times its
+`sharedStrings.xml`. An entry the extension cannot extract, such as an
+encrypted one or one that inflates past its size, is left to rubyzip, which
+raises or warns as in roo. As with roo, a workbook reads the same after its
+file is changed or deleted.
 
 Everything else stays roo's code: styles, number formats, the base date,
 comments, images, and every open option. It works with
