@@ -4,7 +4,7 @@ module Roo
   module Calamine
     # Prepended to Roo::Excelx. roo extracts every worksheet to its temporary
     # directory when it opens a workbook. With the native reader on, a
-    # workbook opened from a path leaves its worksheets in the zip instead:
+    # workbook leaves its worksheets in the zip instead:
     # the native reader inflates the one it reads, and roo's own code finds
     # the file extracted the first time it reads it (DeferredSheetDoc). roo
     # reads the workbook's file only while it opens it, so it opens a copy in
@@ -83,7 +83,7 @@ module Roo
       private
 
       def process_zipfile(zipfilename_or_stream)
-        @calamine_copy = calamine_copy
+        @calamine_copy = calamine_copy(zipfilename_or_stream)
         @calamine_copy ? super(@calamine_copy) : super
       end
 
@@ -91,11 +91,27 @@ module Roo
       # directory, or the file roo wrote there itself for a URL or
       # `packed: :zip`. An empty file is left to roo: rubyzip's error names
       # the file it opened.
-      def calamine_copy
-        return unless @filename && Calamine.enabled? && ROO_VERSIONS.include?(Roo::VERSION) && ::File.size?(@filename)
-        return @filename if ::File.dirname(@filename) == @tmpdir
+      def calamine_copy(source)
+        return unless Calamine.enabled? && ROO_VERSIONS.include?(Roo::VERSION)
 
-        "#{@tmpdir}/roo_calamine.xlsx".tap { IO.copy_stream(@filename, _1) }
+        if is_stream?(source)
+          source.seek(0)
+        elsif ::File.dirname(source) == @tmpdir
+          return source
+        end
+
+        write_calamine_copy(source)
+      end
+
+      def write_calamine_copy(source)
+        path = "#{@tmpdir}/roo_calamine.xlsx"
+        # StringIO#read shares its full String; IO.copy_stream's partial reads copy its buffer.
+        if source.is_a?(::StringIO)
+          ::File.binwrite(path, source.read)
+        else
+          IO.copy_stream(source, path)
+        end
+        path if ::File.size?(path)
       end
 
       def process_zipfile_entries(entries)

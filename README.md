@@ -225,13 +225,11 @@ These are by design.
 - **Broken XML.** On XML that breaks partway, `each_row_streaming` raises the
   same `Nokogiri::XML::SyntaxError` as roo but yields a few more rows before
   it.
-- **Errors come when a sheet is read.** A workbook opened from a path leaves
+- **Errors come when a sheet is read.** A workbook leaves
   its worksheets in the zip, so a worksheet whose compressed data is broken,
   or larger than the zip says, raises roo's error when it is read rather than
   in `Roo::Excelx.new`. The paths in `#sheet_files` exist only once roo's own
   code has read them.
-- **Streaming from an IO** uses about 20 MB more peak memory than roo. A
-  workbook opened from a path uses less.
 
 </details>
 
@@ -345,8 +343,9 @@ array the way roo does, `_x000D_` fix and rich-text HTML included.
 ### Opening a workbook
 
 roo extracts every worksheet of a workbook to a temporary directory when it
-opens it. With the reader on, a workbook opened from a path (not an IO) is
+opens it. With the reader on, a workbook opened from a path or an IO is
 copied to that directory instead, and roo opens the copy.
+An IO is read once from its beginning. A `StringIO` still holds its input bytes.
 
 - **Worksheets stay in the copied zip.** The reader inflates the one it reads,
   using a separate thread for large entries. A worksheet is extracted only

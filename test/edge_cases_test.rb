@@ -680,14 +680,19 @@ class EdgeCasesTest < Minitest::Test
   def test_sheet_formats_keep_hash_key_lookup_semantics
     path = write(%(<row r="1"><c r="A1"><v>1</v></c></row>))
     [nil, "A1", [1], [1, 1, 1], [1, 1]].each do |key|
-      original = Roo::Excelx.new(path).sheet_for(nil).method(:excelx_format).super_method
-      sheet = Roo::Excelx.new(path).sheet_for(nil)
+      original_workbook = Roo::Excelx.new(path)
+      workbook = Roo::Excelx.new(path)
+      original = original_workbook.sheet_for(nil).method(:excelx_format).super_method
+      sheet = workbook.sheet_for(nil)
       roo = Oracle.outcome { original.call(key) }
 
       assert_equal(roo, Oracle.outcome { sheet.excelx_format(key) })
       sheet.cells
 
       assert_equal(roo, Oracle.outcome { sheet.excelx_format(key) })
+    ensure
+      original_workbook&.close
+      workbook&.close
     end
   end
 
