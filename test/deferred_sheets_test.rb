@@ -90,6 +90,24 @@ class DeferredSheetsTest < Minitest::Test
     xlsx&.close
   end
 
+  def test_metadata_at_a_declared_size_of_two_gibibytes_uses_files
+    { "xl/workbook.xml" => "roo_workbook.xml", "xl/_rels/workbook.xml.rels" => "roo_workbook.xml.rels",
+      "xl/styles.xml" => "roo_styles.xml" }.each do |name, extracted|
+      [[(2**31) - 1, false], [2**31, true], [(2**31) + 1, true]].each do |declared, file|
+        path = write("#{extracted}#{declared}")
+        Zip::File.open(path) { |zip| zip.get_entry(name).size = declared }
+        xlsx = Roo::Excelx.new(path)
+
+        assert_equal file, File.file?(File.join(xlsx.instance_variable_get(:@tmpdir), extracted))
+        xlsx.close
+        assert_same_as_roo("#{name} declared size #{declared}") do
+          workbook = Roo::Excelx.new(path)
+          [workbook.workbook.base_date, workbook.styles.style_format(5), Oracle.describe_cells(workbook)]
+        end
+      end
+    end
+  end
+
   def test_a_temp_root_with_two_leading_slashes_reads_as_in_roo
     skip "double-slash roots are UNC paths on Windows" if Gem.win_platform?
 
