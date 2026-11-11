@@ -90,6 +90,16 @@ class DeferredSheetsTest < Minitest::Test
     xlsx&.close
   end
 
+  def test_a_temp_root_with_two_leading_slashes_reads_as_in_roo
+    skip "double-slash roots are UNC paths on Windows" if Gem.win_platform?
+
+    path = write
+    assert_same_as_roo("double-slash temp root") do
+      xlsx = Roo::Excelx.new(path, tmpdir_root: "/#{@dir}")
+      [xlsx.workbook.base_date, xlsx.styles.style_format(5), Oracle.describe_cells(xlsx)]
+    end
+  end
+
   def test_metadata_constructors_preserve_roos_arity_errors
     { Roo::Excelx::Workbook => "1", Roo::Excelx::Styles => "1..2" }.each do |klass, expected|
       error = assert_raises(ArgumentError) { klass.new }

@@ -41,7 +41,7 @@ module Roo
         def extract(entry_path, destination_directory:)
           path = ::File.join(destination_directory, entry_path)
           if calamine_metadata && METADATA_FILES.include?(entry_path) && !::File.exist?(path)
-            calamine_metadata[path] = Native.metadata_bytes(calamine_entry)
+            calamine_metadata[entry_path] = Native.metadata_bytes(calamine_entry)
             return self
           end
           calamine_entry.extract(DeferredSheets.native_path(path))
@@ -149,7 +149,7 @@ module Roo
         return super unless entry
 
         entry.extract(::File.basename(path), destination_directory: ::File.dirname(path))
-        bytes = @shared.calamine_metadata.delete(path)
+        bytes = @shared.calamine_metadata.delete(::File.basename(path))
         document = (bytes ? ::Nokogiri::XML(bytes, path) : Roo::Utils.load_xml(path)).remove_namespaces!
         document.xpath("//Relationship").each_with_object({}) do |relationship, sheets|
           sheets[relationship["Id"]] = relationship["Target"] if worksheet_types.include?(relationship["Type"])
@@ -181,12 +181,12 @@ module Roo
 
       def workbook
         @workbook ||= Roo::Excelx::Workbook.new(::File.join(@dir, "roo_workbook.xml"),
-                                                calamine_xml: calamine_metadata[::File.join(@dir, "roo_workbook.xml")])
+                                                calamine_xml: calamine_metadata["roo_workbook.xml"])
       end
 
       def styles
         @styles ||= Roo::Excelx::Styles.new(::File.join(@dir, "roo_styles.xml"),
-                                            calamine_xml: calamine_metadata[::File.join(@dir, "roo_styles.xml")])
+                                            calamine_xml: calamine_metadata["roo_styles.xml"])
       end
     end
 
