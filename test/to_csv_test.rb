@@ -153,11 +153,13 @@ class ToCsvTest < Minitest::Test
     roo, = Oracle.read(native: false, &change)
     _, _, (_, csv), = roo.last.first
 
-    iso = ->(text) { text.encode("ISO-8859-1") }
+    # A StringIO converts the ISO-8859-1 fields to UTF-8 only when that is
+    # its encoding, the default external one.
+    as_written = ->(text) { text.encode(csv.encoding) }
 
-    assert_equal iso[%(,"row ""value""","é",,99.5,1.5,2,1000,0.30000000000000004,12345678901234567890,0.25,3,0\n)],
+    assert_equal as_written[%(,"row ""value""","é",,99.5,1.5,2,1000,0.30000000000000004,12345678901234567890,0.25,3,0\n)],
                  csv.lines[1]
-    assert_includes csv, iso[%("shared",,\n,2,2.5,2,"built é",)]
+    assert_includes csv, as_written[%("shared",,\n,2,2.5,2,"built é",)]
     assert_same_as_roo("changed in place", &change)
   end
 
