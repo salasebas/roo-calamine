@@ -101,6 +101,18 @@ class DeferredSheetsTest < Minitest::Test
     assert_same_as_roo("duplicate styles", native_only: false, &read)
   end
 
+  def test_a_symlink_workbook_entry_raises_as_in_roo
+    path = write
+    Zip::File.open(path) do |zip|
+      entry = zip.get_entry("xl/workbook.xml")
+      entry.fstype = Zip::FSTYPE_UNIX
+      entry.instance_variable_set(:@ftype, :symlink)
+      entry.unix_perms = 0o777
+    end
+
+    assert_same_as_roo("symlink workbook", native_only: false) { Roo::Excelx.new(path) }
+  end
+
   def test_missing_metadata_parts_raise_as_in_roo
     %w[xl/workbook.xml xl/_rels/workbook.xml.rels xl/styles.xml].each_with_index do |name, index|
       path = write("missing#{index}")

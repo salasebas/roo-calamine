@@ -14,7 +14,7 @@ module Roo
     # leaves several times the file's size in short-lived Strings, which
     # Ruby's GC frees only after they have grown the process.
     module DeferredSheets
-      # roo versions whose #extract_sheets_in_order this reproduces.
+      # roo versions whose workbook extraction these methods reproduce.
       ROO_VERSIONS = %w[4.0.0].freeze
       COMPRESSION_METHODS = [::Zip::Entry::STORED, ::Zip::Entry::DEFLATED].freeze
       METADATA_FILES = %w[roo_workbook.xml roo_workbook.xml.rels roo_styles.xml].freeze
@@ -136,7 +136,7 @@ module Roo
         return super unless @calamine_copy
 
         entry = entries.find { |item| item.name[/workbook.xml$/] }
-        return super unless entry
+        return super unless entry.is_a?(NativeEntry)
 
         entry.extract(::File.basename(path), destination_directory: ::File.dirname(path))
         workbook.sheets.map { |sheet| sheet["id"] }
@@ -149,7 +149,7 @@ module Roo
         return super unless entry
 
         entry.extract(::File.basename(path), destination_directory: ::File.dirname(path))
-        bytes = @shared.calamine_metadata[path]
+        bytes = @shared.calamine_metadata.delete(path)
         document = (bytes ? ::Nokogiri::XML(bytes, path) : Roo::Utils.load_xml(path)).remove_namespaces!
         document.xpath("//Relationship").each_with_object({}) do |relationship, sheets|
           sheets[relationship["Id"]] = relationship["Target"] if worksheet_types.include?(relationship["Type"])
