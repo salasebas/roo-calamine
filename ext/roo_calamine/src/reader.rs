@@ -345,7 +345,6 @@ impl<R: BufRead> SheetReader<R> {
         let name = e.name();
         check_name(name.as_ref())?;
         let raw = e.attributes_raw();
-        check_chars(raw)?;
         if self.mode == Mode::Stream && self.in_row {
             // roo's streaming reader yields a nested `row` as a row of its own,
             // and matches prefixed names in a row by namespace.
