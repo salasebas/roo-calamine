@@ -21,6 +21,7 @@ use magnus::{
 
 use crate::numeric::{create_numeric, plain_number};
 use crate::reader::{parse_index, Body, Kind, Mode, RawCell, RawRow, Reference, Style};
+use crate::shared_strings::{has_html_tag, HtmlSelection, HtmlStrings};
 
 fn constant<T: magnus::TryConvert>(ruby: &Ruby, path: &str) -> T {
     ruby.eval(path).expect("roo is loaded before roo/calamine")
@@ -35,16 +36,6 @@ static CELL_DATETIME: Lazy<RClass> = Lazy::new(|r| constant(r, "Roo::Excelx::Cel
 static CELL_TIME: Lazy<RClass> = Lazy::new(|r| constant(r, "Roo::Excelx::Cell::Time"));
 static CELL_EMPTY: Lazy<RClass> = Lazy::new(|r| constant(r, "Roo::Excelx::Cell::Empty"));
 static NUMERIC_OR_FORMULA: Lazy<StaticSymbol> = Lazy::new(|r| r.sym_new("numeric_or_formula"));
-
-/// `string[/<([biu]|sup|sub)>/]`, the test in `SharedStrings#use_html?`.
-fn has_html_tag(string: &[u8]) -> bool {
-    string.windows(3).enumerate().any(|(i, w)| {
-        w[0] == b'<'
-            && (matches!(w, [_, b'b' | b'i' | b'u', b'>'])
-                || string[i..].starts_with(b"<sup>")
-                || string[i..].starts_with(b"<sub>"))
-    })
-}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ValueType {
@@ -142,7 +133,7 @@ pub struct Converter {
     /// Format string per style index, filled on first use.
     formats: Opaque<RArray>,
     styles: RefCell<Vec<Option<StyleInfo>>>,
-    /// roo's own shared-string arrays: plain text, and the HTML version
+    /// roo's plain shared-string array and deferred or public HTML table
     /// (`nil` when the HTML wrapper is disabled). Fetched on first use.
     shared_plain: StdCell<Option<Opaque<RArray>>>,
     shared_html: StdCell<Option<Opaque<Value>>>,
@@ -541,7 +532,12 @@ impl Converter {
         let plain = ruby.get_inner(self.shared_plain.get().expect("fetched above"));
         let html = ruby.get_inner(self.shared_html.get().expect("fetched above"));
         let chosen = match RArray::from_value(html) {
-            None => Some(plain),
+            None if html.is_nil() => Some(plain),
+            None => match <&HtmlStrings>::try_convert(html)?.select(ruby, index)? {
+                HtmlSelection::Html(string) => return Ok(string),
+                HtmlSelection::Plain => Some(plain),
+                HtmlSelection::Invalid => None,
+            },
             Some(html) if index < html.len() => {
                 match RString::from_value(html.entry(index as isize)?) {
                     Some(string) if has_html_tag(unsafe { string.as_slice() }) => {
@@ -564,25 +560,4 @@ impl Converter {
 /// The style indexes [`Converter`] keeps a format and type for.
 fn cacheable(style: Value) -> Option<usize> {
     usize::try_convert(style).ok().filter(|i| *i < 1 << 16)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::has_html_tag;
-
-    #[test]
-    fn finds_the_tags_roo_looks_for() {
-        for html in [
-            "<html><b>x</b></html>",
-            "a<i>",
-            "<u>",
-            "x<sup>2</sup>",
-            "<sub>",
-        ] {
-            assert!(has_html_tag(html.as_bytes()), "{html}");
-        }
-        for plain in ["<html>x</html>", "<br>", "<bb>", "b>", "<s>", "<su>", "<"] {
-            assert!(!has_html_tag(plain.as_bytes()), "{plain}");
-        }
-    }
 }
