@@ -118,11 +118,18 @@ impl ZipEntry {
         })
     }
 
+    #[cold]
+    fn read_all(&self) -> io::Result<Vec<u8>> {
+        let mut bytes = Vec::with_capacity(self.size as usize);
+        self.inflated()?.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
+
     fn input(&self) -> Input {
         // The parser reads off Ruby's GVL, but its input is constructed under it.
         if self.size < CHUNK as u64 {
             Input::SmallZip {
-                entry: Some(self.clone()),
+                entry: Some(Box::new(self.clone())),
                 bytes: io::Cursor::new(Vec::new()),
             }
         } else {
@@ -304,7 +311,7 @@ pub enum Input {
     File(BufReader<File>),
     Zip(Inflating),
     SmallZip {
-        entry: Option<ZipEntry>,
+        entry: Option<Box<ZipEntry>>,
         bytes: io::Cursor<Vec<u8>>,
     },
 }
@@ -326,15 +333,14 @@ impl Read for Input {
 }
 
 impl BufRead for Input {
+    #[inline(always)]
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
         match self {
             Self::File(file) => file.fill_buf(),
             Self::Zip(zip) => zip.fill_buf(),
             Self::SmallZip { entry, bytes } => {
                 if let Some(source) = entry {
-                    let mut inflated = Vec::with_capacity(source.size as usize);
-                    source.inflated()?.read_to_end(&mut inflated)?;
-                    *bytes = io::Cursor::new(inflated);
+                    *bytes = io::Cursor::new(source.read_all()?);
                     *entry = None;
                 }
                 bytes.fill_buf()
@@ -392,6 +398,9 @@ pub fn define(ruby: &Ruby, native: RModule) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicUsize;
+
+    static NEXT_ENTRY: AtomicUsize = AtomicUsize::new(0);
 
     fn entry(bytes: &[u8], deflated: bool, size: u64) -> ZipEntry {
         let data = if deflated {
@@ -411,8 +420,9 @@ mod tests {
             .unwrap()
             .as_nanos();
         let zip = std::env::temp_dir().join(format!(
-            "roo-calamine-input-{}-{timestamp}.zip",
-            std::process::id()
+            "roo-calamine-input-{}-{timestamp}-{}.zip",
+            std::process::id(),
+            NEXT_ENTRY.fetch_add(1, Ordering::Relaxed)
         ));
         let mut file = File::create_new(&zip).unwrap();
         file.write_all(&header).unwrap();
