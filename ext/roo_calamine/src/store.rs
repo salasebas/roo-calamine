@@ -215,9 +215,9 @@ fn read(ruby: &Ruby, path: &str, converter: &Converter) -> Result<Option<Records
     };
     let empty_cell = converter.empty_cell();
     let mut rows = 0;
-    let mut checked = 0;
+    let mut checked: u32 = 0;
     loop {
-        let batch_end = checked + BATCH_RECORDS;
+        let batch_end = checked as usize + BATCH_RECORDS;
         let read = without_gvl(|interrupted| {
             while !interrupted.load(Ordering::Acquire) && records.records.len() < batch_end {
                 let Some(row) = sheet.next_row()? else {
@@ -233,19 +233,16 @@ fn read(ruby: &Ruby, path: &str, converter: &Converter) -> Result<Option<Records
         let Some(done) = read.map_err(|e| unsupported(ruby, e))? else {
             return Ok(None);
         };
-        let Ok(first) = u32::try_from(checked) else {
-            return Ok(None);
-        };
         let Ok(end) = u32::try_from(records.records.len()) else {
             return Ok(None);
         };
-        if !(first..end).all(|i| {
+        if !(checked..end).all(|i| {
             let raw = records.formulas.raw(&records.records, i);
             converter.builds_safely(ruby, &records.text, &raw)
         }) {
             return Ok(None);
         }
-        checked = records.records.len();
+        checked = end;
         if done {
             break;
         }

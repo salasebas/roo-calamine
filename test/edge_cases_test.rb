@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "objspace"
 require_relative "test_helper"
 
 # Hand-built worksheets for the cases where a reader that does not follow
@@ -334,13 +335,20 @@ class EdgeCasesTest < Minitest::Test
   # with a larger one is built whole.
   def test_columns_and_styles_past_what_a_record_holds
     { "CRXO1" => 1, "CRXP1" => 0 }.each do |reference, lazy_stores|
-      path = write(%(<row r="1"><c r="A1"><v>1</v></c><c r="#{reference}" t="str"><v>far</v></c></row>))
-      _, counts = Oracle.read(native: true) { Roo::Excelx.new(path).cell(1, 1) }
+      path = write(%(<row r="1"><c r="#{reference}" t="str"><v>far</v></c></row>))
+      _, counts = Oracle.read(native: true) { Roo::Excelx.new(path).first_row }
 
       assert_equal lazy_stores, counts[:lazy_stores], reference
       assert_every_path_same_as_roo(path, native_only: lazy_stores.positive?)
     end
     assert_every_path_same_as_roo(write(%(<row r="1"><c r="A1" s="65536"><v>1</v></c></row>)), native_only: false)
+  end
+
+  def test_the_store_reports_the_memory_of_its_records
+    path = write((1..1000).map { |i| %(<row r="#{i}"><c r="A#{i}"><v>#{i}</v></c></row>) }.join)
+    store = Roo::Excelx.new(path).sheet_for(nil).lazy_cells
+
+    assert_operator ObjectSpace.memsize_of(store), :>, 1000 * 20
   end
 
   def test_coordinates_padding_and_empty_cells
