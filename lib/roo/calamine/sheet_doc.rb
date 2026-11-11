@@ -41,7 +41,7 @@ module Roo
         return super unless native?
 
         yielded = 0
-        reader = Native::Reader.new(@path, true, BATCH_CELLS)
+        reader = Native::Reader.new(sheet_source, true, BATCH_CELLS)
         while (row = reader.next_row)
           yield row
           yielded += 1
@@ -68,7 +68,7 @@ module Roo
         return each_roo_row_values(sheet, 0, &) unless native?
 
         yielded = 0
-        reader = Native::Reader.new(@path, true, BATCH_CELLS)
+        reader = Native::Reader.new(sheet_source, true, BATCH_CELLS)
         while (values = reader.next_values(calamine_stream_converter))
           yield values
           yielded += 1
@@ -105,7 +105,7 @@ module Roo
       # Every cell, in roo's order.
       def read_cells(relationships)
         cells = {}
-        reader = Native::Reader.new(@path, false, BATCH_CELLS)
+        reader = Native::Reader.new(sheet_source, false, BATCH_CELLS)
         converter = Native::Converter.new(context(relationships), false)
         nil while reader.fill_cells(cells, converter)
         expand_merged_ranges(cells) if @options[:expand_merged_ranges]
@@ -118,7 +118,7 @@ module Roo
       # roo applies the hyperlinks to every cell on the first read, so later
       # changes to the hash it hands out do not reach the cells.
       def read_store(relationships)
-        Native::Store.read(@path, context(relationships, hyperlinks(relationships).dup)) || false
+        Native::Store.read(sheet_source, context(relationships, hyperlinks(relationships).dup)) || false
       rescue UnsupportedError
         false
       end

@@ -51,7 +51,7 @@ module Roo
       def calamine_parts
         return unless native? && ROO_VERSIONS.include?(Roo::VERSION)
 
-        @calamine_parts = Native.sheet_parts(@path) if @calamine_parts.nil?
+        @calamine_parts = Native.sheet_parts(sheet_source) if @calamine_parts.nil?
         @calamine_parts || nil
       rescue UnsupportedError
         @calamine_parts = false

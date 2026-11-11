@@ -12,17 +12,16 @@
 //! that Nokogiri reads the sheet as quick-xml does; anything it rejects is
 //! left to roo.
 
-use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::BufRead;
 use std::panic::resume_unwind;
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use magnus::{prelude::*, Error, Ruby};
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::XmlVersion;
 
-use crate::reader::{Mode, SheetReader, Unsupported};
+use crate::archive::{Input, Source};
+use crate::reader::{Mode, Unsupported};
 use crate::{unsupported, without_gvl};
 
 type Result<T> = std::result::Result<T, Unsupported>;
@@ -47,13 +46,6 @@ pub struct SheetPartsReader<R: BufRead> {
     pub hyperlinks: Vec<Hyperlink>,
     /// Each `mergeCell`'s `ref`.
     pub merge_cells: Vec<Option<String>>,
-}
-
-impl SheetPartsReader<BufReader<File>> {
-    pub fn open(path: &Path) -> Result<Self> {
-        let file = File::open(path).map_err(|e| Unsupported(e.to_string()))?;
-        Ok(Self::new(BufReader::with_capacity(64 * 1024, file)))
-    }
 }
 
 impl<R: BufRead> SheetPartsReader<R> {
@@ -160,11 +152,11 @@ fn until(interrupted: &AtomicBool, mut step: impl FnMut() -> Result<bool>) -> Re
     Ok(false)
 }
 
-/// Reads the parts of the worksheet at `path` with the GVL released, while
+/// Reads the parts of the worksheet `source` with the GVL released, while
 /// another thread checks that Nokogiri reads the sheet the same way.
-fn read(ruby: &Ruby, path: &Path) -> std::result::Result<SheetPartsReader<BufReader<File>>, Error> {
-    let mut check = SheetReader::open(path, Mode::Document).map_err(|e| unsupported(ruby, e))?;
-    let mut parts = SheetPartsReader::open(path).map_err(|e| unsupported(ruby, e))?;
+fn read(ruby: &Ruby, source: &Source) -> std::result::Result<SheetPartsReader<Input>, Error> {
+    let mut check = source.open(ruby, Mode::Document)?;
+    let mut parts = SheetPartsReader::new(source.input(ruby)?);
     let (mut checked, mut read) = (false, false);
     while !(checked && read) {
         let (checking, reading) = without_gvl(|interrupted| {
@@ -194,15 +186,16 @@ fn read(ruby: &Ruby, path: &Path) -> std::result::Result<SheetPartsReader<BufRea
     Ok(parts)
 }
 
-/// `Native.sheet_parts(path)`: `[hyperlinks, merge_cells]`, where each
+/// `Native.sheet_parts(source)`, for a worksheet's path or `Native::ZipEntry`:
+/// `[hyperlinks, merge_cells]`, where each
 /// hyperlink is `[ref, id, location]` and each merged range its `ref`, in
 /// document order, with `nil` for a missing attribute. Raises
 /// `Roo::Calamine::UnsupportedError` for a sheet roo reads differently.
 fn sheet_parts(
     ruby: &Ruby,
-    path: String,
+    source: Source,
 ) -> std::result::Result<(Vec<Hyperlink>, Vec<Option<String>>), Error> {
-    let parts = read(ruby, Path::new(&path))?;
+    let parts = read(ruby, &source)?;
     Ok((parts.hyperlinks, parts.merge_cells))
 }
 

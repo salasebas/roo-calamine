@@ -192,7 +192,13 @@ Known differences, by design:
   (not through `set`) does not show in later rows.
 - On XML that breaks partway, `each_row_streaming` raises the same
   `Nokogiri::XML::SyntaxError` as roo but yields a few more rows before it.
-- Streaming uses about 15 MB more peak memory.
+- A workbook opened from a path leaves its worksheets in the zip, so a
+  worksheet whose compressed data is broken, or larger than the zip says,
+  raises the error roo raises when it is read rather than in
+  `Roo::Excelx.new`, and the paths in `#sheet_files` exist only once roo's
+  own code has read them.
+- Streaming a workbook opened from an IO uses about 20 MB more peak memory
+  than roo. One opened from a path uses less.
 
 ## How it works
 
@@ -232,6 +238,16 @@ roo finds a sheet's hyperlinks, and its merged ranges under
 `expand_merged_ranges`, with XPath on a Nokogiri document of the whole sheet.
 The extension reads those `hyperlink` and `mergeCell` elements alone, and
 copies of roo's loops turn them into the same hyperlinks and merged cells.
+
+roo extracts every worksheet of a workbook to a temporary directory when it
+opens it. With the reader on, a workbook opened from a path (not an IO) is
+copied to that directory instead, and roo opens the copy. Its worksheets
+stay in the copied zip: the reader inflates the one it reads on a thread of
+its own, and a worksheet is extracted only when roo's own code reads it
+(`#dimensions`, or XML the reader hands back to roo). Opening a large
+workbook writes the .xlsx once rather than every worksheet inflated, and
+skips the memory roo's extraction leaves behind. As with roo, a workbook
+reads the same after its file is changed or deleted.
 
 Everything else stays roo's code: styles, number formats, the base date,
 comments, images, and every open option. It works with

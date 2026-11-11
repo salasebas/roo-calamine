@@ -67,6 +67,7 @@ if RUBY_ENGINE == "ruby"
     require "roo/calamine/roo_calamine"
   end
   require_relative "calamine/context"
+  require_relative "calamine/deferred_sheets"
   require_relative "calamine/sheet_doc"
   require_relative "calamine/sheet_parts"
   require_relative "calamine/excelx"
@@ -74,9 +75,11 @@ if RUBY_ENGINE == "ruby"
   require_relative "calamine/row_index"
   require_relative "calamine/sheet"
   require_relative "calamine/shared_strings"
+  Roo::Excelx::SheetDoc.prepend(Roo::Calamine::DeferredSheetDoc)
   Roo::Excelx::SheetDoc.prepend(Roo::Calamine::SheetDoc)
   Roo::Excelx::SheetDoc.prepend(Roo::Calamine::SheetParts)
   Roo::Excelx::Sheet.prepend(Roo::Calamine::Sheet)
+  Roo::Excelx.prepend(Roo::Calamine::DeferredSheets)
   Roo::Excelx.prepend(Roo::Calamine::Excelx)
   Roo::Excelx::SharedStrings.prepend(Roo::Calamine::SharedStrings)
   Roo::Excelx.prepend(Roo::Calamine::CSV)
