@@ -2,7 +2,7 @@
 
 require_relative "test_helper"
 
-# A workbook opened from a path leaves its worksheets in the zip: the native
+# A workbook leaves its worksheets in the zip: the native
 # reader inflates them, and roo's own code reads them from the file it
 # extracts the first time it needs it. The native extension extracts the
 # files roo extracts, and rubyzip only those it cannot.
@@ -40,12 +40,18 @@ class DeferredSheetsTest < Minitest::Test
   end
 
   def test_the_native_reader_reads_worksheets_from_the_zip
-    xlsx = Roo::Excelx.new(write)
-    xlsx.cell(1, 1)
-    xlsx.each_row_streaming(sheet: "Sheet2") { nil }
-    xlsx.parse(headers: true)
+    path = write
+    [path, StringIO.new(File.binread(path)), File.open(path, "rb")].each do |source|
+      xlsx = Roo::Excelx.new(source)
+      xlsx.cell(1, 1)
+      xlsx.each_row_streaming(sheet: "Sheet2") { nil }
+      xlsx.parse(headers: true)
 
-    assert_empty extracted_sheets(xlsx)
+      assert_empty extracted_sheets(xlsx), source.class.to_s
+    ensure
+      xlsx&.close
+      source.close if source.respond_to?(:close)
+    end
   end
 
   def test_the_native_extension_extracts_what_roo_extracts
@@ -229,6 +235,24 @@ class DeferredSheetsTest < Minitest::Test
     end
   end
 
+  def test_an_io_is_snapshotted_even_when_positioned_past_the_start
+    [StringIO, File].each do |kind|
+      assert_same_as_roo("#{kind}, snapshotted", native_only: false) do
+        path = write
+        source = kind == StringIO ? StringIO.new(File.binread(path)) : File.open(path, "rb")
+        source.seek(10)
+        xlsx = Roo::Excelx.new(source)
+        source.string.replace("") if kind == StringIO
+        source.close
+        File.binwrite(path, "")
+        [Oracle.describe_stream(xlsx, {}), xlsx.cell(1, 1), xlsx.sheet_for("Sheet2").dimensions]
+      ensure
+        xlsx&.close
+        source&.close
+      end
+    end
+  end
+
   # The two files differ only in a worksheet's digits, so its entry sits at
   # the same offset in both.
   def test_reload_after_turning_the_reader_off_reads_the_file_as_it_is_now
@@ -272,7 +296,11 @@ class DeferredSheetsTest < Minitest::Test
     path = File.join(@dir, "empty.xlsx")
     File.write(path, "")
 
-    assert_same_as_roo("empty", native_only: false) { Roo::Excelx.new(path) }
+    [path, StringIO.new(""), File.open(path, "rb")].each do |source|
+      assert_same_as_roo("empty #{source.class}", native_only: false) { Roo::Excelx.new(source) }
+    ensure
+      source.close if source.respond_to?(:close)
+    end
   end
 
   def test_a_sheet_read_after_its_workbook_is_gone_raises_as_in_roo
