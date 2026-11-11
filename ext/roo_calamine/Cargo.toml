@@ -9,6 +9,7 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+flate2 = "1.1.11"
 magnus = { version = "0.9.3", features = ["rb-sys"] }
 quick-xml = "0.42.0"
 rb-sys = "0.9.130"

@@ -2,7 +2,6 @@
 //! it is read, for `Roo::Excelx#cell` and the other single-cell lookups.
 
 use std::ops::Range;
-use std::path::Path;
 use std::sync::atomic::Ordering;
 
 use magnus::gc::Marker;
@@ -13,8 +12,9 @@ use magnus::{
     prelude::*, DataTypeFunctions, Error, Integer, RArray, RHash, Ruby, TypedData, Value,
 };
 
+use crate::archive::Source;
 use crate::convert::Converter;
-use crate::reader::{Body, Kind, Mode, RawCell, RawRow, Reference, SheetReader, Style};
+use crate::reader::{Body, Kind, Mode, RawCell, RawRow, Reference, Style};
 use crate::{unsupported, without_gvl};
 
 type Span = (u32, u32);
@@ -205,9 +205,8 @@ const BATCH_RECORDS: usize = 16_384;
 /// Reads every row with the GVL released, in batches. `None` as soon as a
 /// record does not fit in a [`Record`], or `converter` might not build it
 /// safely.
-fn read(ruby: &Ruby, path: &str, converter: &Converter) -> Result<Option<Records>, Error> {
-    let mut sheet =
-        SheetReader::open(Path::new(path), Mode::Document).map_err(|e| unsupported(ruby, e))?;
+fn read(ruby: &Ruby, source: &Source, converter: &Converter) -> Result<Option<Records>, Error> {
+    let mut sheet = source.open(ruby, Mode::Document)?;
     let mut records = Records {
         text: String::new(),
         records: Vec::new(),
@@ -254,15 +253,15 @@ fn read(ruby: &Ruby, path: &str, converter: &Converter) -> Result<Option<Records
 }
 
 impl Store {
-    /// The store for the worksheet at `path`, or `nil` when its cells have to
+    /// The store for the worksheet `source`, or `nil` when its cells have to
     /// be built all at once, in order. `context` is a `Roo::Calamine::Context`.
-    fn read(ruby: &Ruby, path: String, context: Value) -> Result<Option<Self>, Error> {
+    fn read(ruby: &Ruby, source: Source, context: Value) -> Result<Option<Self>, Error> {
         let converter = ruby.obj_wrap(Converter::new(ruby, context, false)?);
         let Some(Records {
             text,
             records,
             formulas,
-        }) = read(ruby, &path, &converter)?
+        }) = read(ruby, &source, &converter)?
         else {
             return Ok(None);
         };

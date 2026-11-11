@@ -5,6 +5,7 @@
 //! and [`store`] keeps them to build one cell at a time. [`shared_strings`]
 //! reads a workbook's shared strings the way roo does.
 
+pub mod archive;
 pub mod convert;
 pub mod numeric;
 pub mod reader;
@@ -15,7 +16,6 @@ pub mod store;
 use std::cell::{Cell as StdCell, RefCell};
 use std::ffi::c_void;
 use std::panic::{self, AssertUnwindSafe};
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, TryRecvError};
 use std::time::Duration;
@@ -23,8 +23,9 @@ use std::time::Duration;
 use magnus::value::Lazy;
 use magnus::{function, method, prelude::*, Error, ExceptionClass, RArray, RHash, Ruby};
 
+use archive::Source;
 use convert::Converter;
-use reader::{Mode, RawRow, SheetReader, Unsupported};
+use reader::{Mode, RawRow, Unsupported};
 
 static UNSUPPORTED: Lazy<ExceptionClass> = Lazy::new(|r| {
     r.eval("Roo::Calamine::UnsupportedError")
@@ -132,10 +133,9 @@ struct Reader {
 
 impl Reader {
     /// `batch` is the number of cells parsed per batch.
-    fn new(ruby: &Ruby, path: String, stream: bool, batch: usize) -> Result<Self, Error> {
+    fn new(ruby: &Ruby, source: Source, stream: bool, batch: usize) -> Result<Self, Error> {
         let mode = if stream { Mode::Stream } else { Mode::Document };
-        let mut sheet =
-            SheetReader::open(Path::new(&path), mode).map_err(|e| unsupported(ruby, e))?;
+        let mut sheet = source.open(ruby, mode)?;
         let (sender, batches) = mpsc::sync_channel::<Batch>(1);
         std::thread::Builder::new()
             .name("roo-calamine".into())
@@ -284,5 +284,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     store::define(ruby, native)?;
     shared_strings::define(native)?;
     sheet_parts::define(native)?;
+    archive::define(ruby, native)?;
     Ok(())
 }
