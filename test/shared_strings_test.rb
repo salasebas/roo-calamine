@@ -136,9 +136,13 @@ class SharedStringsTest < Minitest::Test
   def test_the_html_strings_are_built_only_when_they_can_be_used
     path = write("<si><r><rPr><b/></rPr><t>bold</t></r></si>")
     [{}, { disable_html_wrapper: true }].each do |options|
-      strings = Roo::Excelx.new(path, options).shared_strings
+      workbook = Roo::Excelx.new(path, options)
+      strings = workbook.shared_strings
 
       assert_equal ["bold"], strings.to_a
+      assert_nil strings.instance_variable_get(:@html)
+      workbook.cell(1, 1)
+
       assert_nil strings.instance_variable_get(:@html)
       assert_equal ["<html><b>bold</b></html>"], strings.to_html
     end
