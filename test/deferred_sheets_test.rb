@@ -90,6 +90,14 @@ class DeferredSheetsTest < Minitest::Test
     xlsx&.close
   end
 
+  def test_metadata_constructors_preserve_roos_arity_errors
+    { Roo::Excelx::Workbook => "1", Roo::Excelx::Styles => "1..2" }.each do |klass, expected|
+      error = assert_raises(ArgumentError) { klass.new }
+
+      assert_equal "wrong number of arguments (given 0, expected #{expected})", error.message
+    end
+  end
+
   def test_duplicate_styles_destinations_raise_as_in_roo
     path = write
     Zip::File.open(path) do |zip|

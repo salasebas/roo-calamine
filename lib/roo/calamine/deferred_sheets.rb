@@ -193,9 +193,9 @@ module Roo
     # Roo's document cache is weak: keep the source bytes so metadata can be
     # parsed again after GC, without keeping a large Nokogiri tree alive.
     module MetadataDocument
-      def initialize(path, *, calamine_xml: nil, **)
+      def initialize(*, calamine_xml: nil, **)
         @calamine_xml = calamine_xml
-        super(path, *, **)
+        super(*, **)
       end
 
       private
