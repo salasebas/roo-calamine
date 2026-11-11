@@ -1,7 +1,7 @@
 # roo-calamine
 
 Make [roo](https://github.com/roo-rb/roo) read `.xlsx` and `.xlsm` files
-6–33× faster on large sheets, with identical results and 2–31× less memory.
+12–37× faster on large sheets, with identical results and 2–31× less memory.
 Your roo code does not change.
 
 ```ruby
@@ -36,36 +36,36 @@ without Bundler, `require "roo/calamine"`.
 
 Apple M5 Pro, Ruby 3.4.12, each run a fresh process. A run starts after
 `require`, so it includes opening the workbook. Memory is peak RSS. The
-roo-calamine column is the median of 5 runs on 77c232b (`run.rb 5
+roo-calamine column is the median of 5 runs on 8293459 (`run.rb 5
 roo-calamine`). The roo 4.0.0 and calx 0.1.0 columns are the median of 3
 runs from an earlier measurement on the same machine (5 for the small file).
 
 | File | Scenario | roo | roo + roo-calamine | Speedup | calx (reference) |
 |---|---|---:|---:|---:|---:|
-| 100k rows × 20 mixed columns | `each_row_streaming` | 14.49 s, 119 MB | 0.75 s, 51 MB | 19.3× | 0.58 s, 178 MB |
-| | `parse(headers: true)` | 21.13 s, 3306 MB | 0.87 s, 293 MB | 24.3× | 0.75 s, 283 MB |
-| | `each` | 20.23 s, 3281 MB | 0.71 s, 173 MB | 28.5× | 0.46 s, 178 MB |
-| | 10,000 random `cell(row, col)` | 18.64 s, 3274 MB | 0.57 s, 106 MB | 32.7× | 0.50 s, 249 MB |
-| | `to_csv` | 25.20 s, 3367 MB | 2.91 s, 704 MB | 8.7× | 0.71 s, 178 MB |
-| | values only: `each_row_values` | 14.86 s, 118 MB | 0.48 s, 48 MB | 31.0× | 0.55 s, 178 MB |
-| 100k rows × 10 shared strings | `each_row_streaming` | 5.37 s, 121 MB | 0.34 s, 52 MB | 15.8× | 0.25 s, 113 MB |
-| | `parse(headers: true)` | 6.44 s, 1630 MB | 0.42 s, 127 MB | 15.3× | 0.34 s, 208 MB |
-| | `each` | 5.96 s, 1630 MB | 0.35 s, 74 MB | 17.0× | 0.21 s, 113 MB |
-| | 10,000 random `cell(row, col)` | 5.33 s, 1602 MB | 0.30 s, 71 MB | 17.8× | 0.23 s, 167 MB |
-| | `to_csv` | 7.54 s, 1619 MB | 1.25 s, 267 MB | 6.0× | 0.24 s, 114 MB |
-| | values only: `each_row_values` | 5.21 s, 121 MB | 0.21 s, 50 MB | 24.8× | 0.24 s, 113 MB |
-| 100k rows × 10 unique strings | `each_row_streaming` | 12.03 s, 925 MB | 0.63 s, 512 MB | 19.1× | 0.43 s, 152 MB |
-| | `parse(headers: true)` | 10.61 s, 2330 MB | 0.88 s, 421 MB | 12.1× | 0.50 s, 206 MB |
-| | `each` | 10.52 s, 2272 MB | 0.94 s, 350 MB | 11.2× | 0.36 s, 152 MB |
-| | 10,000 random `cell(row, col)` | 9.71 s, 2213 MB | 0.71 s, 352 MB | 13.7× | 0.38 s, 205 MB |
-| | `to_csv` | 11.49 s, 2368 MB | 1.75 s, 595 MB | 6.6× | 0.39 s, 153 MB |
-| | values only: `each_row_values` | 11.80 s, 926 MB | 0.48 s, 348 MB | 24.6× | 0.40 s, 152 MB |
-| 100 rows × 20 mixed columns | `each_row_streaming` | 16.6 ms, 45 MB | 3.1 ms, 41 MB | 5.4× | 0.7 ms, 27 MB |
-| | `parse(headers: true)` | 13.0 ms, 45 MB | 2.8 ms, 41 MB | 4.6× | 0.8 ms, 27 MB |
-| | `each` | 12.7 ms, 45 MB | 2.7 ms, 41 MB | 4.7× | 0.6 ms, 26 MB |
-| | 10,000 random `cell(row, col)` | 19.8 ms, 46 MB | 10.5 ms, 42 MB | 1.9× | 1.5 ms, 27 MB |
-| | `to_csv` | 16.9 ms, 45 MB | 4.3 ms, 41 MB | 3.9× | 0.9 ms, 27 MB |
-| | values only: `each_row_values` | 16.8 ms, 46 MB | 2.6 ms, 41 MB | 6.5× | 0.7 ms, 27 MB |
+| 100k rows × 20 mixed columns | `each_row_streaming` | 14.49 s, 119 MB | 0.62 s, 51 MB | 23.4× | 0.58 s, 178 MB |
+| | `parse(headers: true)` | 21.13 s, 3306 MB | 0.77 s, 293 MB | 27.4× | 0.75 s, 283 MB |
+| | `each` | 20.23 s, 3281 MB | 0.65 s, 173 MB | 31.1× | 0.46 s, 178 MB |
+| | 10,000 random `cell(row, col)` | 18.64 s, 3274 MB | 0.50 s, 105 MB | 37.3× | 0.50 s, 249 MB |
+| | `to_csv` | 25.20 s, 3367 MB | 0.78 s, 118 MB | 32.3× | 0.71 s, 178 MB |
+| | values only: `each_row_values` | 14.86 s, 118 MB | 0.44 s, 48 MB | 33.8× | 0.55 s, 178 MB |
+| 100k rows × 10 shared strings | `each_row_streaming` | 5.37 s, 121 MB | 0.27 s, 53 MB | 19.9× | 0.25 s, 113 MB |
+| | `parse(headers: true)` | 6.44 s, 1630 MB | 0.39 s, 129 MB | 16.5× | 0.34 s, 208 MB |
+| | `each` | 5.96 s, 1630 MB | 0.32 s, 75 MB | 18.6× | 0.21 s, 113 MB |
+| | 10,000 random `cell(row, col)` | 5.33 s, 1602 MB | 0.26 s, 71 MB | 20.5× | 0.23 s, 167 MB |
+| | `to_csv` | 7.54 s, 1619 MB | 0.29 s, 89 MB | 26.0× | 0.24 s, 114 MB |
+| | values only: `each_row_values` | 5.21 s, 121 MB | 0.19 s, 50 MB | 27.4× | 0.24 s, 113 MB |
+| 100k rows × 10 unique strings | `each_row_streaming` | 12.03 s, 925 MB | 0.56 s, 442 MB | 21.5× | 0.43 s, 152 MB |
+| | `parse(headers: true)` | 10.61 s, 2330 MB | 0.77 s, 356 MB | 13.8× | 0.50 s, 206 MB |
+| | `each` | 10.52 s, 2272 MB | 0.86 s, 285 MB | 12.2× | 0.36 s, 152 MB |
+| | 10,000 random `cell(row, col)` | 9.71 s, 2213 MB | 0.64 s, 288 MB | 15.2× | 0.38 s, 205 MB |
+| | `to_csv` | 11.49 s, 2368 MB | 0.69 s, 298 MB | 16.7× | 0.39 s, 153 MB |
+| | values only: `each_row_values` | 11.80 s, 926 MB | 0.45 s, 285 MB | 26.2× | 0.40 s, 152 MB |
+| 100 rows × 20 mixed columns | `each_row_streaming` | 16.6 ms, 45 MB | 2.8 ms, 41 MB | 5.9× | 0.7 ms, 27 MB |
+| | `parse(headers: true)` | 13.0 ms, 45 MB | 2.5 ms, 41 MB | 5.2× | 0.8 ms, 27 MB |
+| | `each` | 12.7 ms, 45 MB | 2.4 ms, 41 MB | 5.3× | 0.6 ms, 26 MB |
+| | 10,000 random `cell(row, col)` | 19.8 ms, 46 MB | 9.9 ms, 43 MB | 2.0× | 1.5 ms, 27 MB |
+| | `to_csv` | 16.9 ms, 45 MB | 2.6 ms, 41 MB | 6.5× | 0.9 ms, 27 MB |
+| | values only: `each_row_values` | 16.8 ms, 46 MB | 2.4 ms, 41 MB | 7.0× | 0.7 ms, 27 MB |
 
 For the values-only rows, plain roo runs the `each_row_streaming(pad_cells:
 true)` code [below](#values-only). Before timing, the benchmark checks that
