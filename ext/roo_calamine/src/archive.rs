@@ -118,13 +118,15 @@ impl ZipEntry {
         })
     }
 
-    fn input(&self) -> io::Result<Input> {
-        if self.size.max(self.compressed_size) < CHUNK as u64 {
-            let mut bytes = Vec::with_capacity(self.size as usize);
-            self.inflated()?.read_to_end(&mut bytes)?;
-            Ok(Input::Bytes(io::Cursor::new(bytes)))
+    fn input(&self) -> Input {
+        // The parser reads off Ruby's GVL, but its input is constructed under it.
+        if self.size < CHUNK as u64 {
+            Input::SmallZip {
+                entry: Some(self.clone()),
+                bytes: io::Cursor::new(Vec::new()),
+            }
         } else {
-            Ok(Input::Zip(self.inflating()))
+            Input::Zip(self.inflating())
         }
     }
 
@@ -301,7 +303,10 @@ impl BufRead for Inflating {
 pub enum Input {
     File(BufReader<File>),
     Zip(Inflating),
-    Bytes(io::Cursor<Vec<u8>>),
+    SmallZip {
+        entry: Option<ZipEntry>,
+        bytes: io::Cursor<Vec<u8>>,
+    },
 }
 
 impl Read for Input {
@@ -309,7 +314,13 @@ impl Read for Input {
         match self {
             Self::File(file) => file.read(buf),
             Self::Zip(zip) => zip.read(buf),
-            Self::Bytes(bytes) => bytes.read(buf),
+            Self::SmallZip { .. } => {
+                let available = self.fill_buf()?;
+                let n = available.len().min(buf.len());
+                buf[..n].copy_from_slice(&available[..n]);
+                self.consume(n);
+                Ok(n)
+            }
         }
     }
 }
@@ -319,7 +330,15 @@ impl BufRead for Input {
         match self {
             Self::File(file) => file.fill_buf(),
             Self::Zip(zip) => zip.fill_buf(),
-            Self::Bytes(bytes) => bytes.fill_buf(),
+            Self::SmallZip { entry, bytes } => {
+                if let Some(source) = entry {
+                    let mut inflated = Vec::with_capacity(source.size as usize);
+                    source.inflated()?.read_to_end(&mut inflated)?;
+                    *bytes = io::Cursor::new(inflated);
+                    *entry = None;
+                }
+                bytes.fill_buf()
+            }
         }
     }
 
@@ -327,7 +346,7 @@ impl BufRead for Input {
         match self {
             Self::File(file) => file.consume(amount),
             Self::Zip(zip) => zip.consume(amount),
-            Self::Bytes(bytes) => bytes.consume(amount),
+            Self::SmallZip { bytes, .. } => bytes.consume(amount),
         }
     }
 }
@@ -354,9 +373,7 @@ impl Source {
                 64 * 1024,
                 File::open(path).map_err(|e| unsupported(ruby, Unsupported(e.to_string())))?,
             )),
-            Self::Entry(entry) => entry
-                .input()
-                .map_err(|e| unsupported(ruby, Unsupported(e.to_string())))?,
+            Self::Entry(entry) => entry.input(),
         })
     }
 
@@ -410,6 +427,21 @@ mod tests {
     }
 
     #[test]
+    fn opens_small_entries_on_first_read() {
+        let entry = entry(b"x", true, 1);
+        let mut input = entry.input();
+        std::fs::remove_file(&entry.zip).unwrap();
+        assert_eq!(
+            input.fill_buf().unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+        assert_eq!(
+            input.fill_buf().unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+    }
+
+    #[test]
     fn reads_entry_bytes_and_checks_sizes_across_the_chunk_boundary() {
         for size in [0, 1, CHUNK - 1, CHUNK, CHUNK + 1] {
             let bytes: Vec<_> = (0..size).map(|i| (i % 251) as u8).collect();
@@ -417,9 +449,7 @@ mod tests {
                 for declared in [size, size.saturating_sub(1)] {
                     let entry = entry(&bytes, deflated, declared as u64);
                     let mut actual = Vec::new();
-                    let result = entry
-                        .input()
-                        .and_then(|mut input| input.read_to_end(&mut actual));
+                    let result = entry.input().read_to_end(&mut actual);
                     std::fs::remove_file(&entry.zip).unwrap();
                     if declared == size {
                         result.unwrap();
