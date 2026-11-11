@@ -8,14 +8,22 @@ class ToCsvTest < Minitest::Test
   include OracleAssertions
 
   @roo_fields = 0
+  @native_writes = 0
 
   class << self
-    attr_accessor :roo_fields
+    attr_accessor :roo_fields, :native_writes
   end
 
   Roo::Formatters::CSV.prepend(Module.new do
     define_method(:cell_to_csv) do |*args|
       ToCsvTest.roo_fields += 1
+      super(*args)
+    end
+  end)
+
+  Roo::Calamine::Native::Store.prepend(Module.new do
+    define_method(:write_csv) do |*args|
+      ToCsvTest.native_writes += 1
       super(*args)
     end
   end)
@@ -112,11 +120,12 @@ class ToCsvTest < Minitest::Test
     roo, = Oracle.read(native: false, &read)
 
     assert_equal 7 * 13, ToCsvTest.roo_fields
-    ToCsvTest.roo_fields = 0
+    ToCsvTest.roo_fields = ToCsvTest.native_writes = 0
     native, = Oracle.read(native: true, &read)
 
     assert_equal roo, native
     assert_equal 0, ToCsvTest.roo_fields
+    assert_equal 1, ToCsvTest.native_writes
     with_roo_version("4.1.0") do
       ToCsvTest.roo_fields = 0
       native, = Oracle.read(native: true, &read)
@@ -124,6 +133,48 @@ class ToCsvTest < Minitest::Test
       assert_equal roo, native
       assert_equal 7 * 13, ToCsvTest.roo_fields
     end
+  end
+
+  # The types book with values it handed out, and cells it built, changed.
+  def changed_in_place(path)
+    workbook = Roo::Excelx.new(path)
+    row = workbook.row(2) # columns B to M
+    row[0].replace('row "value"')
+    row[1].replace("é".encode("ISO-8859-1"))
+    workbook.row(4)[9].replace("shared")
+    workbook.cell(5, 5).replace("built é".encode("ISO-8859-1"))
+    workbook.sheet_for("Types").cell_at([2, 5]).value = 99.5
+    describe_csv(workbook)
+  end
+
+  def test_values_and_cells_changed_in_place_before_to_csv
+    path = types_book
+    change = -> { changed_in_place(path) }
+    roo, = Oracle.read(native: false, &change)
+    _, _, (_, csv), = roo.last.first
+
+    # A StringIO converts the ISO-8859-1 fields to UTF-8 only when that is
+    # its encoding, the default external one.
+    as_written = ->(text) { text.encode(csv.encoding) }
+
+    assert_equal as_written[%(,"row ""value""","é",,99.5,1.5,2,1000,0.30000000000000004,12345678901234567890,0.25,3,0\n)],
+                 csv.lines[1]
+    assert_includes csv, as_written[%("shared",,\n,2,2.5,2,"built é",)]
+    assert_same_as_roo("changed in place", &change)
+  end
+
+  # 20,000 lines of "1,2", then a formula whose cached value is empty, which
+  # roo raises for after writing the "3," before it.
+  def test_an_empty_formula_value_raises_after_the_text_before_it
+    rows = Array.new(20_000) { |i| %(<row r="#{i + 1}"><c r="A#{i + 1}"><v>1</v></c><c r="B#{i + 1}"><v>2</v></c></row>) }
+    rows << %(<row r="20001"><c r="A20001"><v>3</v></c><c r="B20001"><f>1+1</f><v></v></c></row>)
+    path = Workbook.write(@dir, "empty-formula", sheets: { "Sheet1" => Workbook.sheet(rows.join) })
+    roo, = Oracle.read(native: false) { csv_outcome(Roo::Excelx.new(path), @csv) }
+    _, _, (outcome, error, message), written = roo.last
+
+    assert_equal [:error, RuntimeError, "unhandled onecell-class NilClass", "#{"1,2\n" * 20_000}3,"],
+                 [outcome, error, message, written.gsub("\r\n", "\n")]
+    assert_same_as_roo("empty formula value") { csv_outcome(Roo::Excelx.new(path), @csv) }
   end
 
   def with_roo_version(version)
@@ -138,7 +189,8 @@ class ToCsvTest < Minitest::Test
 
   def order_book
     sheets = {
-      "Out of order" => Workbook.sheet(%(<row r="3"><c r="C3"><v>3</v></c><c r="A3"><v>1</v></c></row>) +
+      "Out of order" => Workbook.sheet(%(<row r="3"><c r="C3"><v>3</v></c><c r="A3"><v>1</v></c>) +
+                                       %(<c r="C3" t="str"><v>last C3</v></c></row>) +
                                        %(<row r="1"><c r="B1"><v>2</v></c></row>)),
       "Merged" => Workbook.sheet(%(<row r="1"><c r="A1" t="str"><v>m</v></c><c r="C1"><v>1</v></c></row>) +
                                  %(<row r="3"><c r="B3"><v>2</v></c></row>),

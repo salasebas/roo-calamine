@@ -7,8 +7,9 @@ module Roo
     # Prepended to Roo::Excelx. roo's #to_csv writes every slot from the first
     # row and column to the last through #empty?, #cell and #celltype, and each
     # of them looks up the sheet and the cell again. This writes the same text
-    # from one pass over the sheet's cells, a line at a time, and asks each cell
-    # what roo's Roo::Formatters::CSV#cell_to_csv asks it, in the same order.
+    # from one pass over the sheet's cells: natively from the lazy cells while
+    # the sheet has them, else a line at a time, asking each cell what roo's
+    # Roo::Formatters::CSV#cell_to_csv asks it, in the same order.
     module CSV
       # roo versions whose Roo::Formatters::CSV this reproduces. Under any other
       # version roo writes the CSV itself.
@@ -23,7 +24,15 @@ module Roo
         file ||= STDOUT # rubocop:disable Style/GlobalStdStream
         return unless first_row(sheet)
 
-        write_csv_lines(file, sheet_for(sheet), separator.to_s, last_row(sheet), last_column(sheet))
+        target = sheet_for(sheet)
+        area = [last_row(sheet), last_column(sheet), target.first_row, target.last_row, target.first_column,
+                target.last_column]
+        store = target.lazy_cells
+        if store && area.all?(Integer)
+          store.write_csv(file, self, separator.to_s, area)
+        else
+          write_csv_lines(file, target, separator.to_s, *area.first(2))
+        end
       end
 
       # roo prints each field on its own; a line joins them, so the separator
@@ -137,7 +146,7 @@ module Roo
       end
 
       def csv_quote(text)
-        %("#{text.gsub('"', '""')}")
+        text.include?('"') ? %("#{text.gsub('"', '""')}") : %("#{text}")
       end
 
       def csv_number(value)

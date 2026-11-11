@@ -155,8 +155,9 @@ roo is the oracle: every check takes roo's own output as the expected result.
   roo. The fixture test does the same for every roo fixture.
 - **CSV.** `test/to_csv_test.rb` compares the bytes `to_csv` returns and
   writes with roo's for every cell type, separator, sheet, and file argument,
-  cells out of order or merged, keys written into the cells hash, `set`
-  before it, and the file roo leaves behind when a cell raises.
+  cells out of order, repeated, or merged, keys written into the cells hash,
+  values and cells changed in place before it, `set` before it, and the file
+  roo leaves behind when a cell raises.
 - **Values only.** Both suites also compare `Roo::Calamine.each_row_values`
   with the values of roo's `each_row_streaming(pad_cells: true)`, with the
   native reader on and off.
@@ -178,7 +179,7 @@ Known differences, by design:
   themselves (subclasses work). Under
   roo 4.0.0 so is an override of `initialize` on a `Cell` class or on
   `Roo::Excelx::Coordinate`.
-- Building the whole `Sheet#cells` hash (`#to_csv`, `#set`, `#each` with
+- Building the whole `Sheet#cells` hash (`#set`, `#each` with
   options, …) after a read that does not need it (a single-cell read,
   `#last_row`, `#row`, `#each` without options, `#parse` without a block)
   costs more than building it from the start, because the sheet is parsed
@@ -222,7 +223,7 @@ the first time it is read. `#row`, `#column`, `#each` without options, and
 only for a value that needs one (a hyperlink, a date with a time, a time). The
 records keep each value they hand out, so a cell built later holds that very
 object, as in roo. Anything that needs the whole `Sheet#cells` hash (`#each`
-with options, `#parse` with a block, `#to_csv`, `#set`, …) builds it from the
+with options, `#parse` with a block, `#set`, …) builds it from the
 records, keeping the cells and values already handed out. A sheet where some
 cell would raise, or opened with `expand_merged_ranges`, is built whole, as
 before.
@@ -272,10 +273,16 @@ change the workbook between rows.
 Under roo 4.0.0 it also replaces the private writer behind `#to_csv`. roo
 writes every slot from A1 to the last row and column through `#empty?`,
 `#cell`, and `#celltype`, which look the sheet and the cell up again for each
-slot. roo-calamine walks the `cells` hash once, in row and column order, and
-writes a line per row, formatting each cell as roo's `#cell_to_csv` does.
-When the hash is not in that order (merged ranges expanded, rows out of order
-in the XML, or keys written into it), it sorts the keys first. Under other roo
+slot. While the sheet's cells are kept in the native records, the extension
+writes the CSV from them in row and column order, without building the
+`cells` hash: it formats strings and booleans itself, hands numbers and dates
+to the same Ruby formatting roo uses, builds a cell only for a field that
+needs one (a hyperlink, a date with a time, a time), and asks the cells and
+values already handed out, which a caller may have changed. Otherwise
+roo-calamine walks the `cells` hash once, in row and column order, and writes
+a line per row, formatting each cell as roo's `#cell_to_csv` does. When the
+hash is not in that order (merged ranges expanded, rows out of order in the
+XML, or keys written into it), it sorts the keys first. Under other roo
 versions, roo writes the CSV itself.
 
 `each` without options, behind `each_with_index`, `to_a`, and `parse` without
