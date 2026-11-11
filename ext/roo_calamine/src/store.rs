@@ -312,11 +312,11 @@ impl Store {
 
     fn build(&self, ruby: &Ruby, record: u32) -> Result<Value, Error> {
         let built = ruby.get_inner(self.built);
-        let handed_out: Value = ruby.get_inner(self.handed_out).entry(record as isize)?;
         let key = self.records[record as usize].built_key();
         if let Some(cell) = built.get(key) {
             return Ok(cell);
         }
+        let handed_out: Value = ruby.get_inner(self.handed_out).entry(record as isize)?;
         let known = (!handed_out.is_nil()).then_some(handed_out);
         let raw = self.formulas.raw(&self.records, record);
         let (_, cell) = ruby

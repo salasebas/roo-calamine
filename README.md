@@ -262,7 +262,7 @@ These are by design.
 ## How it works
 
 A Rust extension parses worksheet XML with
-[quick-xml](https://github.com/tafia/quick-xml) on a background thread and
+[quick-xml](https://github.com/tafia/quick-xml), using a background thread for large streaming reads, and
 builds the same `Roo::Excelx::Cell` objects roo would. In short:
 
 - **Worksheets:** it prepends `Roo::Excelx::SheetDoc` and replaces the two
@@ -370,11 +370,14 @@ array the way roo does, `_x000D_` fix and rich-text HTML included.
 
 roo extracts every worksheet of a workbook to a temporary directory when it
 opens it. With the reader on, a workbook opened from a path or an IO is
-copied to that directory instead, and roo opens the copy.
+snapshotted instead. ZIPs up to 256 KiB stay in memory; larger ZIPs are copied
+to that directory. roo still creates the directory for its extractors and fallbacks.
 An IO is read once from its beginning. A `StringIO` still holds its input bytes.
 
-- **Worksheets stay in the copied zip.** The reader inflates the one it reads,
-  using a separate thread for large entries. A worksheet is extracted only
+- **Worksheets stay in the snapshot.** The reader inflates the one it reads.
+  Streaming entries below 256 KiB inflated are parsed on demand without starting a worker;
+  larger streaming entries use background threads for inflation and parsing.
+  A worksheet is extracted only
   when roo's own code reads it (`#dimensions`, or XML the reader hands back to
   roo).
 - **Opening a large workbook** writes the .xlsx once rather than every

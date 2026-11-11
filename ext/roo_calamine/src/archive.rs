@@ -11,9 +11,10 @@ use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::Arc;
 
 use flate2::read::DeflateDecoder;
-use magnus::{function, method, prelude::*, Error, RModule, Ruby, TryConvert, Value};
+use magnus::{function, method, prelude::*, Error, RModule, RString, Ruby, TryConvert, Value};
 
 use crate::reader::{Mode, SheetReader, Unsupported};
 use crate::{unsupported, without_gvl};
@@ -30,11 +31,36 @@ const CHUNK: usize = 256 * 1024;
 /// Chunks the inflating thread may run ahead of the parser.
 const CHUNKS_AHEAD: usize = 4;
 
-/// One file in the zip at `zip`, which each read opens.
+#[derive(Clone)]
+#[magnus::wrap(class = "Roo::Calamine::Native::ZipBuffer", free_immediately, size)]
+struct ZipBuffer(Arc<[u8]>);
+
+impl ZipBuffer {
+    fn new(bytes: RString) -> Self {
+        Self(unsafe { bytes.as_slice() }.into())
+    }
+}
+
+#[derive(Clone)]
+enum ZipSource {
+    Path(PathBuf),
+    Buffer(ZipBuffer),
+}
+
+impl TryConvert for ZipSource {
+    fn try_convert(value: Value) -> Result<Self, Error> {
+        match <&ZipBuffer>::try_convert(value) {
+            Ok(buffer) => Ok(Self::Buffer(buffer.clone())),
+            Err(_) => Ok(Self::Path(PathBuf::try_convert(value)?)),
+        }
+    }
+}
+
+/// One entry in a ZIP snapshot, held in a file or a shared byte buffer.
 #[derive(Clone)]
 #[magnus::wrap(class = "Roo::Calamine::Native::ZipEntry", free_immediately, size)]
 pub struct ZipEntry {
-    zip: PathBuf,
+    zip: ZipSource,
     offset: u64,
     compressed_size: u64,
     size: u64,
@@ -45,9 +71,10 @@ impl ZipEntry {
     /// `Native::ZipEntry.new(zip, offset, compressed_size, size, method)`:
     /// the entry rubyzip describes as `local_header_offset`,
     /// `compressed_size`, `size`, and `compression_method`.
+    /// `zip` is a path or a `Native::ZipBuffer`.
     fn new(
         ruby: &Ruby,
-        zip: PathBuf,
+        zip: ZipSource,
         offset: u64,
         compressed_size: u64,
         size: u64,
@@ -72,8 +99,16 @@ impl ZipEntry {
     /// local header disagrees with the central directory on what rubyzip
     /// reads from it: the encryption flag, the compression method, and a
     /// stored entry's size.
-    fn data(&self) -> io::Result<impl Read> {
-        let mut file = File::open(&self.zip)?;
+    fn data(&self) -> io::Result<Box<dyn Read + Send>> {
+        match &self.zip {
+            ZipSource::Path(path) => Ok(Box::new(self.entry_data(File::open(path)?)?)),
+            ZipSource::Buffer(buffer) => Ok(Box::new(
+                self.entry_data(io::Cursor::new(buffer.0.clone()))?,
+            )),
+        }
+    }
+
+    fn entry_data<R: Read + Seek>(&self, mut file: R) -> io::Result<io::Take<R>> {
         file.seek(SeekFrom::Start(self.offset))?;
         let mut header = [0; LOCAL_HEADER_LENGTH];
         file.read_exact(&mut header)?;
@@ -110,7 +145,7 @@ impl ZipEntry {
         let bytes: Box<dyn Read + Send> = if self.deflated {
             Box::new(DeflateDecoder::new(data))
         } else {
-            Box::new(data)
+            data
         };
         Ok(SizeLimited {
             inner: bytes,
@@ -373,6 +408,10 @@ impl TryConvert for Source {
 }
 
 impl Source {
+    pub fn small(&self) -> bool {
+        matches!(self, Self::Entry(entry) if entry.size < CHUNK as u64)
+    }
+
     pub fn input(&self, ruby: &Ruby) -> Result<Input, Error> {
         Ok(match self {
             Self::Path(path) => Input::File(BufReader::with_capacity(
@@ -389,6 +428,8 @@ impl Source {
 }
 
 pub fn define(ruby: &Ruby, native: RModule) -> Result<(), Error> {
+    let buffer = native.define_class("ZipBuffer", ruby.class_object())?;
+    buffer.define_singleton_method("new", function!(ZipBuffer::new, 1))?;
     let entry = native.define_class("ZipEntry", ruby.class_object())?;
     entry.define_singleton_method("new", function!(ZipEntry::new, 5))?;
     entry.define_method("extract", method!(ZipEntry::extract, 1))?;
@@ -428,7 +469,7 @@ mod tests {
         file.write_all(&header).unwrap();
         file.write_all(&data).unwrap();
         ZipEntry {
-            zip,
+            zip: ZipSource::Path(zip),
             offset: 0,
             compressed_size: data.len() as u64,
             size,
@@ -440,7 +481,10 @@ mod tests {
     fn opens_small_entries_on_first_read() {
         let entry = entry(b"x", true, 1);
         let mut input = entry.input();
-        std::fs::remove_file(&entry.zip).unwrap();
+        let ZipSource::Path(path) = &entry.zip else {
+            unreachable!()
+        };
+        std::fs::remove_file(path).unwrap();
         assert_eq!(
             input.fill_buf().unwrap_err().kind(),
             io::ErrorKind::NotFound
@@ -460,7 +504,10 @@ mod tests {
                     let entry = entry(&bytes, deflated, declared as u64);
                     let mut actual = Vec::new();
                     let result = entry.input().read_to_end(&mut actual);
-                    std::fs::remove_file(&entry.zip).unwrap();
+                    let ZipSource::Path(path) = &entry.zip else {
+                        unreachable!()
+                    };
+                    std::fs::remove_file(path).unwrap();
                     if declared == size {
                         result.unwrap();
                         assert_eq!(actual, bytes);
