@@ -9,7 +9,7 @@ module Roo
     #
     # roo's single-cell lookups read Sheet#cell_at instead of Sheet#cells, and
     # rows read Sheet#row, so they build only the cells their values need.
-    # #each without options reads its rows through Sheet#row, or through a
+    # #each without options reads the native store sequentially, or uses a
     # RowIndex once every cell is built.
     module Excelx
       def each(options = {}, &)
@@ -17,7 +17,7 @@ module Roo
 
         if options.empty?
           build_cells
-          return row_index? ? each_without_options(&) : super
+          return native_rows? ? each_without_options(&) : super
         end
         return super unless Calamine.enabled?
 
@@ -104,16 +104,6 @@ module Roo
           cells ||= sheet_for(nil).cells
           row[key] = safe_send(cells[normalize(line, column)], :value)
         end
-      end
-
-      # Roo::Base#each without options: `1.upto(last_row) { |line| yield row(line) }`.
-      def each_without_options
-        index = RowIndex.new(self)
-        1.upto(last_row) { |line| yield index.row(line, @calamine_set_calls) }
-      end
-
-      def row_index?
-        Calamine.enabled? && !sheet_for(nil).lazy_cells && method(:row).owner.equal?(::Roo::Excelx)
       end
 
       # Roo::Base#each, up to its loop over the rows.

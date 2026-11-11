@@ -820,6 +820,9 @@ class EdgeCasesTest < Minitest::Test
       _, counts = Oracle.read(native: true) { Roo::Excelx.new(path, expand_merged_ranges: true).each.to_a }
 
       assert_equal rows_from_roo, counts[:sheet_rows]
+      _, counts = Oracle.read(native: true) { Roo::Excelx.new(path).each.to_a }
+
+      assert_equal 0, counts[:sheet_rows], "lazy rows did not use the native iterator"
     end
   end
 
