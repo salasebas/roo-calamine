@@ -211,12 +211,10 @@ These are by design.
 <summary>Behavior and performance</summary>
 
 - **Building `Sheet#cells` late costs more.** Building the whole hash (`#set`,
-  `#each` with options, …) after a read that does not need it (a single-cell
-  read, `#last_row`, `#row`, `#each` without options, `#parse` without a
-  block) costs more than building it from the start, because the sheet is
-  parsed before any cell is built rather than alongside. On the 100k-row
-  benchmark files, a single-cell read and then `#each(headers: true)` take
-  about 20% longer than `#each(headers: true)` alone.
+  `clean: true`, …) after a read that does not need it (a single-cell read,
+  `#last_row`, `#row`, `#each`, `#parse`) costs more than building it from the
+  start, because the sheet is parsed before any cell is built rather than
+  alongside.
 - **Non-UTF-8 text set by hand.** A cell value set to non-ASCII text in an
   encoding other than UTF-8 can make `to_csv` raise
   `Encoding::CompatibilityError`, where roo writes it, when its line also
@@ -275,13 +273,13 @@ through roo's own constructors.
   `#excelx_value`, `#formatted_value`, `#excelx_format`, `#font`, `#empty?`)
   and `#first_row` … `#last_column` build only the cells they read, the first
   time each is read.
-- **`#row`, `#column`, `#each` without options, and `#parse` without a
-  block** read values straight from the records, and build a cell only for a
+- **`#row`, `#column`, `#each`, and `#parse`** read values straight from the
+  records, and build a cell only for a
   value that needs one (a hyperlink, a date with a time, a time).
 - The records keep each value they hand out, so a cell built later holds that
   very object, as in roo.
-- **Anything that needs the whole `Sheet#cells` hash** (`#each` with options,
-  `#parse` with a block, `#set`, …) builds it from the records, keeping the
+- **Anything that needs the whole `Sheet#cells` hash** (`#set`, `clean: true`,
+  …) builds it from the records, keeping the
   cells and values already handed out.
 - A sheet where some cell would raise, or one opened with
   `expand_merged_ranges`, is **built whole**, as before.
@@ -298,8 +296,10 @@ copies of roo's loops turn them into the same hyperlinks and merged cells.
   header handling and build each row's Hash with less work than roo's one
   `#cell` call per value. `parse` without a block builds each Hash from the
   records, or, on a sheet built whole, groups the cells by row in one pass.
-  `each`, and `parse` with a block, look up each value in the `cells` hash,
-  because the block may change the workbook between rows.
+  `each`, and `parse` with a block, resolve the current sheet on each row
+  and read its records until its `cells` hash is built. A block that calls
+  `set` or `reload`, or changes `default_sheet`, sees the change from the
+  next row on. `clean: true` builds the cells before iterating, as in roo.
 - **Without options**, `each` (behind `each_with_index`, `to_a`, and `parse`
   without options) is roo's own loop over `#row`, so a block that calls `set`
   or `reload`, or changes `default_sheet`, sees the change from the next row

@@ -16,27 +16,18 @@ module Roo
         return super unless block_given?
 
         if options.empty?
-          build_cells(lazy: true)
+          build_cells
           return row_index? ? each_without_options(&) : super
         end
         return super unless Calamine.enabled?
 
-        headers = header_columns(options)
-        @header_line.upto(last_row) do |line|
-          # The block may set cells, switch sheets, reload, or close; roo sees
-          # that from the next #cell call on, and makes none without headers.
-          cells = nil
-          yield(headers.each_with_object({}) do |(key, column), row|
-            cells ||= sheet_for(nil).cells
-            row[key] = safe_send(cells[normalize(line, column)], :value)
-          end)
-        end
+        each_with_headers(header_columns(options), &)
       end
 
       def parse(options = {})
         return super if block_given? || options.empty? || !Calamine.enabled?
 
-        rows = rows_for(header_columns(options, lazy: true))
+        rows = rows_for(header_columns(options))
         options[:headers] == true ? rows : rows.drop(1)
       end
 
@@ -98,6 +89,23 @@ module Roo
 
       private
 
+      def each_with_headers(headers)
+        first, last = headers.map(&:last).minmax
+        slots = headers.map { |key, column| [key, column - first] }
+        @header_line.upto(last_row) do |line|
+          lazy = sheet_for(nil).lazy_cells unless headers.empty?
+          yield(lazy ? lazy.hash_row(line, first, last, slots) : cells_header_row(line, headers))
+        end
+      end
+
+      def cells_header_row(line, headers)
+        cells = nil
+        headers.each_with_object({}) do |(key, column), row|
+          cells ||= sheet_for(nil).cells
+          row[key] = safe_send(cells[normalize(line, column)], :value)
+        end
+      end
+
       # Roo::Base#each without options: `1.upto(last_row) { |line| yield row(line) }`.
       def each_without_options
         index = RowIndex.new(self)
@@ -109,19 +117,18 @@ module Roo
       end
 
       # Roo::Base#each, up to its loop over the rows.
-      def header_columns(options, lazy: false)
+      def header_columns(options)
         clean_sheet_if_need(options)
-        build_cells(lazy:)
+        build_cells
         search_or_set_header(options)
         @headers || (first_column..last_column).to_h { |column| [cell(@header_line, column), column] }
       end
 
-      # Builds every cell before roo's next step, which reads them all, unless
-      # it reads them `lazy` and the lazy cells answer it. When that raises,
+      # Builds every cell before roo's next step unless the lazy cells answer it. When that raises,
       # roo's own read raises the same error where roo raises it.
-      def build_cells(lazy: false)
+      def build_cells
         sheet = sheet_for(nil)
-        sheet.cells unless lazy && sheet.lazy_cells
+        sheet.cells unless sheet.lazy_cells
       rescue StandardError
         nil
       end

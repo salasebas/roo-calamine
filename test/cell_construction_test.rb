@@ -60,6 +60,25 @@ class CellConstructionTest < Minitest::Test
     end
   end
 
+  def test_header_iteration_does_not_build_full_temporal_cells
+    path = write_serials(%w[45000.5 45001.5 45002.5])
+    GC.disable
+
+    %i[each parse].each do |method|
+      roo, = Oracle.read(native: false) { Roo::Excelx.new(path).public_send(method, headers: true) { |row| row } }
+      before = ObjectSpace.each_object(Roo::Excelx::Cell::DateTime).count
+      native, = Oracle.read(native: true) do
+        Roo::Excelx.new(path).public_send(method, headers: true) { |row| row }
+      end
+
+      assert_equal roo, native
+      assert_equal before, ObjectSpace.each_object(Roo::Excelx::Cell::DateTime).count,
+                   "#{method} built full cells to read their values"
+    end
+  ensure
+    GC.enable
+  end
+
   def test_temporal_overflow_keeps_roos_values_and_errors
     %w[-1e20 1e20 -1e308 1e308].each do |text|
       path = write_serials(["45000.5", text])
