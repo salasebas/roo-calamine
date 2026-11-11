@@ -3,10 +3,11 @@
 # Compares plain roo, roo with roo-calamine, and calx (a reader that skips
 # roo's cell model, as a reference) on generated workbooks.
 #
-#   cd bench && bundle install && bundle exec ruby run.rb [RUNS]
+#   cd bench && bundle install && bundle exec ruby run.rb [RUNS] [LIBRARY...]
 #
 # Each run is a fresh process. The table shows the median wall time and peak
-# RSS of RUNS timed runs (default 3). Before timing, one run of roo and one of
+# RSS of RUNS timed runs (default 3). LIBRARY limits the timed runs to those
+# libraries; the others show "-". Before timing, one run of roo and one of
 # roo-calamine hash every value they read; the two hashes must match.
 require "etc"
 require "json"
@@ -15,6 +16,9 @@ require "rbconfig"
 
 RUNS = Integer(ARGV.fetch(0, "3"))
 LIBRARIES = %w[roo roo-calamine calx].freeze
+TIMED = ARGV.drop(1).then { |names| names.empty? ? LIBRARIES : names }
+raise "unknown library: #{(TIMED - LIBRARIES).join(", ")}" unless (TIMED - LIBRARIES).empty?
+
 SCENARIOS = {
   "stream" => "`Roo::Spreadsheet.open` + `each_row_streaming`",
   "parse" => "`parse(headers: true)`",
@@ -49,6 +53,8 @@ def cpu
 end
 
 def describe(result)
+  return "-" unless result
+
   seconds = result[:seconds]
   time = seconds < 0.1 ? format("%.1f ms", seconds * 1000) : format("%.2f s", seconds)
   "#{time}, #{result[:peak_rss] / MB} MB"
@@ -63,8 +69,8 @@ FIXTURES.each do |fixture|
     digests = COMPARED.map { |library| scenario(library, name, path, "digest")["digest"] }
     raise "roo-calamine read different values than roo: #{fixture} #{name}" unless digests.uniq.size == 1
 
-    roo, calamine, calx = LIBRARIES.map { |library| timed(library, name, path) }
-    speedup = format("%.1f×", roo[:seconds] / calamine[:seconds])
+    roo, calamine, calx = LIBRARIES.map { |library| timed(library, name, path) if TIMED.include?(library) }
+    speedup = roo && calamine ? format("%.1f×", roo[:seconds] / calamine[:seconds]) : "-"
     puts "| #{fixture} | #{label} | #{describe(roo)} | #{describe(calamine)} | #{speedup} | #{describe(calx)} |"
   end
 end
