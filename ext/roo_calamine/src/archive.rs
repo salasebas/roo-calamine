@@ -119,7 +119,7 @@ impl ZipEntry {
     }
 
     fn input(&self) -> io::Result<Input> {
-        if self.size < CHUNK as u64 {
+        if self.size.max(self.compressed_size) < CHUNK as u64 {
             let mut bytes = Vec::with_capacity(self.size as usize);
             self.inflated()?.read_to_end(&mut bytes)?;
             Ok(Input::Bytes(io::Cursor::new(bytes)))
@@ -411,7 +411,7 @@ mod tests {
 
     #[test]
     fn reads_entry_bytes_and_checks_sizes_across_the_chunk_boundary() {
-        for size in [0, CHUNK - 1, CHUNK, CHUNK + 1] {
+        for size in [0, 1, CHUNK - 1, CHUNK, CHUNK + 1] {
             let bytes: Vec<_> = (0..size).map(|i| (i % 251) as u8).collect();
             for deflated in [false, true] {
                 for declared in [size, size.saturating_sub(1)] {
