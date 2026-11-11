@@ -740,17 +740,18 @@ class EdgeCasesTest < Minitest::Test
                  %(<row r="100000000"><c r="B100000000"><v>1</v></c></row>))
     script = <<~RUBY
       require ARGV[0]
+      require "objspace"
       Roo::Excelx.new(ARGV[1], expand_merged_ranges: true).each_with_index do |_, i|
         next if i <= Roo::Calamine::RowIndex::ROO_ROWS
 
-        print Integer(`ps -o rss= -p \#{Process.pid}`)
+        print ObjectSpace.memsize_of_all / 1024
         break
       end
     RUBY
-    rss_kb = IO.popen([RbConfig.ruby, "-I", File.expand_path("../lib", __dir__), "-e", script, "roo/calamine", path],
-                      &:read)
+    kilobytes = IO.popen([RbConfig.ruby, "-I", File.expand_path("../lib", __dir__), "-e", script, "roo/calamine", path],
+                         &:read)
 
-    assert_operator Integer(rss_kb), :<, 300_000
+    assert_operator Integer(kilobytes), :<, 300_000
   end
 
   # A blank String is no value for the bounds, so each sheet's blank cell lies
