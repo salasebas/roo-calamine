@@ -12,15 +12,15 @@
 //! that Nokogiri reads the sheet as quick-xml does; anything it rejects is
 //! left to roo.
 
-use std::io::BufRead;
+use std::io::{self, BufRead, Read};
 use std::panic::resume_unwind;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use magnus::{prelude::*, Error, Ruby};
+use magnus::{prelude::*, Error, RString, Ruby};
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::XmlVersion;
 
-use crate::archive::{Input, Source};
+use crate::archive::{Input, Source, ZipEntry};
 use crate::reader::{Mode, Unsupported};
 use crate::{unsupported, without_gvl};
 
@@ -201,7 +201,31 @@ fn sheet_parts(
 
 pub fn define(native: magnus::RModule) -> std::result::Result<(), Error> {
     native.define_singleton_method("sheet_parts", magnus::function!(sheet_parts, 1))?;
+    native.define_singleton_method("metadata_bytes", magnus::function!(metadata_bytes, 1))?;
     Ok(())
+}
+
+/// Inflates a workbook metadata entry without an intermediate file, using
+/// the same local-header and size checks as native extraction.
+fn metadata_bytes(ruby: &Ruby, entry: &ZipEntry) -> std::result::Result<RString, Error> {
+    let entry = entry.clone();
+    let bytes = without_gvl(move |interrupted| -> io::Result<Vec<u8>> {
+        let mut input = entry.inflated()?;
+        let mut bytes = Vec::new();
+        let mut chunk = [0; 8192];
+        loop {
+            if interrupted.load(Ordering::Acquire) {
+                return Err(io::Error::from(io::ErrorKind::Interrupted));
+            }
+            let read = input.read(&mut chunk)?;
+            if read == 0 {
+                return Ok(bytes);
+            }
+            bytes.extend_from_slice(&chunk[..read]);
+        }
+    })?
+    .map_err(|error| Error::new(ruby.exception_io_error(), error.to_string()))?;
+    Ok(ruby.str_from_slice(&bytes))
 }
 
 #[cfg(test)]
