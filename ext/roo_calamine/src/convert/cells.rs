@@ -4,7 +4,8 @@
 //! otherwise, and for any value it does not compute exactly the way roo
 //! does, it calls roo's constructor with the same arguments.
 
-use magnus::value::{Lazy, LazyId, ReprValue};
+use magnus::rb_sys::{AsRawId, AsRawValue};
+use magnus::value::{IntoId, Lazy, LazyId, ReprValue};
 use magnus::{prelude::*, Error, IntoValue, RArray, RClass, RObject, RString, Ruby, Value};
 
 use super::{
@@ -38,6 +39,18 @@ enum NumericCell {
     DateFromNumber(f64),
     DateTime(f64),
     Time(f64),
+}
+
+impl NumericCell {
+    fn temporal(number: f64) -> Self {
+        if number < 1.0 {
+            Self::Time(number)
+        } else if (number - number.floor()).abs() > 0.000001 {
+            Self::DateTime(number)
+        } else {
+            Self::DateFromNumber(number)
+        }
+    }
 }
 
 struct Common {
@@ -138,7 +151,7 @@ impl Converter {
 
     /// The `value` of the cell [`Self::cell`] builds for `raw` without its
     /// constructor, without building it. `None` when that cell would come
-    /// from its constructor, and for a `Cell::DateTime` or `Cell::Time`.
+    /// from its constructor.
     pub fn known_value(
         &self,
         ruby: &Ruby,
@@ -172,7 +185,9 @@ impl Converter {
                 NumericCell::Number(number_format)
             }
             (Kind::ByFormat, ValueType::Date) => NumericCell::DateFromText,
-            (Kind::ByFormat, ValueType::DateTime | ValueType::Time) => return Ok(None),
+            (Kind::ByFormat, ValueType::DateTime | ValueType::Time) => {
+                NumericCell::temporal(ruby.str_new(text).funcall("to_f", ())?)
+            }
         };
         Ok(self.computed(ruby, numeric, text)?.map(|(value, _)| value))
     }
@@ -200,21 +215,31 @@ impl Converter {
         rest: &[(&LazyId, Value)],
     ) -> Result<Value, Error> {
         let cell = Self::allocate(ruby, class)?;
-        cell.ivar_set(*CELL_VALUE, cell_value)?;
-        if let Some(cell_type) = cell_type {
-            cell.ivar_set(*CELL_TYPE, cell_type)?;
-        }
-        if let Some(formula) = common.formula {
-            cell.ivar_set(*FORMULA, formula)?;
-        }
-        if !matches!(i64::try_convert(common.style), Ok(1)) {
-            cell.ivar_set(*STYLE, common.style)?;
-        }
-        cell.ivar_set(*COORDINATE_IVAR, common.coordinate)?;
-        cell.ivar_set(*VALUE, value)?;
-        for (name, value) in rest {
-            cell.ivar_set(***name, *value)?;
-        }
+        let fields = [
+            Some((*CELL_VALUE, cell_value)),
+            cell_type.map(|value| (*CELL_TYPE, value.as_value())),
+            common.formula.map(|value| (*FORMULA, value.as_value())),
+            (!matches!(i64::try_convert(common.style), Ok(1))).then(|| (*STYLE, common.style)),
+            Some((*COORDINATE_IVAR, common.coordinate)),
+            Some((*VALUE, value)),
+        ];
+        magnus::rb_sys::protect(|| unsafe {
+            for (name, value) in fields.into_iter().flatten() {
+                rb_sys::rb_ivar_set(
+                    cell.as_raw(),
+                    name.into_id_with(ruby).as_raw(),
+                    value.as_raw(),
+                );
+            }
+            for (name, value) in rest {
+                rb_sys::rb_ivar_set(
+                    cell.as_raw(),
+                    (***name).into_id_with(ruby).as_raw(),
+                    value.as_raw(),
+                );
+            }
+            cell.as_raw()
+        })?;
         Ok(cell.as_value())
     }
 
@@ -272,14 +297,7 @@ impl Converter {
             ValueType::Number => NumericCell::Number(number_format),
             ValueType::Date => NumericCell::DateFromText,
             ValueType::DateTime | ValueType::Time => {
-                let number: f64 = content.funcall("to_f", ())?;
-                if number < 1.0 {
-                    NumericCell::Time(number)
-                } else if (number - number.floor()).abs() > 0.000001 {
-                    NumericCell::DateTime(number)
-                } else {
-                    NumericCell::DateFromNumber(number)
-                }
+                NumericCell::temporal(content.funcall("to_f", ())?)
             }
         };
         let (class, cell_value, base) = match numeric {
@@ -305,9 +323,12 @@ impl Converter {
         let excelx_type = ruby.ary_new_from_values(&[numeric_or_formula, format]);
         if self.builds(common) {
             let cell_type = Some(excelx_type);
-            let computed = match known {
-                Some(value) => Some((value, None)),
-                None => self.computed(ruby, numeric, text)?,
+            let computed = match (known, numeric) {
+                (Some(value), NumericCell::Time(_)) => self
+                    .computed(ruby, numeric, text)?
+                    .map(|(_, datetime)| (value, datetime)),
+                (Some(value), _) => Some((value, None)),
+                (None, _) => self.computed(ruby, numeric, text)?,
             };
             match computed {
                 Some((value, None)) => {

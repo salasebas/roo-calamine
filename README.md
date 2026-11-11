@@ -228,12 +228,14 @@ records, keeping the cells and values already handed out. A sheet where some
 cell would raise, or opened with `expand_merged_ranges`, is built whole, as
 before.
 
-It also prepends `Roo::Excelx::SharedStrings#to_a` and `#to_html`. The first
-time either is called, the extension reads `sharedStrings.xml` with quick-xml
-and builds both arrays the way roo does, `_x000D_` fix and rich-text HTML
-included, then leaves them where roo memoizes them. roo's code and the native
-reader then use the same strings. `disable_html_wrapper` skips the HTML array
-until something asks for it. If the file uses XML that Nokogiri reads
+It also prepends `Roo::Excelx::SharedStrings#to_a` and `#to_html`. The extension
+reads `sharedStrings.xml` with quick-xml and builds the requested array the
+way roo does, `_x000D_` fix and rich-text HTML included. HTML stays in a compact
+native table until a cell needs rich text or something calls `#to_html`.
+Public arrays hold the same mutable strings the reader uses.
+`disable_html_wrapper` skips the native HTML table until something asks for it.
+Reading `#to_html` before `#to_a` reads the file again for the plain array.
+If the file uses XML that Nokogiri reads
 differently (see below), or a `vertAlign` without `val` (roo raises on it),
 roo builds the arrays itself.
 

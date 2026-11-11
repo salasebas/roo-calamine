@@ -7,6 +7,16 @@ require "json"
 require "roo"
 require "roo/excelx"
 
+# roo's specs sometimes retain only a sheet or extractor. roo 4.0.0's
+# workbook finalizer removes their files, so keep the owners alive in both
+# runs until this suite's process exits. Explicit #close still takes effect.
+workbooks = []
+Roo::Excelx.singleton_class.prepend(Module.new do
+  define_method(:new) do |*args, **options, &block|
+    super(*args, **options, &block).tap { |workbook| workbooks << workbook }
+  end
+end)
+
 counts = Hash.new(0)
 
 if ENV.fetch("PARITY_MODE") == "plugin"

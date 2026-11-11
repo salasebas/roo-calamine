@@ -75,7 +75,8 @@ class EdgeCasesTest < Minitest::Test
 
   def roo_sheet_hyperlinks(path)
     Roo::Calamine.enabled = false
-    Roo::Excelx.new(path).sheet_for(nil).hyperlinks
+    workbook = Roo::Excelx.new(path)
+    workbook.sheet_for(nil).hyperlinks
   ensure
     Roo::Calamine.enabled = true
   end
@@ -263,7 +264,10 @@ class EdgeCasesTest < Minitest::Test
     # roo hands out its own shared-string objects, so changing one in place
     # changes what roo's use_html? sees for the next cell.
     edit = ->(value, index) { (index.zero? ? value.replace("edited") : value).dup }
-    edit_first = -> { Roo::Excelx.new(path).each_row_streaming.with_index.map { |row, i| edit.call(row.first.value, i) } }
+    edit_first = lambda do
+      workbook = Roo::Excelx.new(path)
+      workbook.each_row_streaming.with_index.map { |row, i| edit.call(row.first.value, i) }
+    end
     edit_first_value = -> { Roo::Calamine.each_row_values(path).with_index.map { |(value), i| edit.call(value, i) } }
     roo, = Oracle.read(native: false, &edit_first)
     native, = Oracle.read(native: true, &edit_first)
@@ -282,7 +286,8 @@ class EdgeCasesTest < Minitest::Test
     rows = texts.each_with_index.map { |text, i| %(<row r="#{i + 1}"><c r="A#{i + 1}" s="1"><v>#{text}</v></c></row>) }
     path = write(rows.join, styles:)
     stream = lambda do
-      Roo::Excelx.new(path).each_row_streaming.map do |row|
+      workbook = Roo::Excelx.new(path)
+      workbook.each_row_streaming.map do |row|
         yield row.first
         row.first.value
       end
@@ -346,7 +351,8 @@ class EdgeCasesTest < Minitest::Test
 
   def test_the_store_reports_the_memory_of_its_records
     path = write((1..1000).map { |i| %(<row r="#{i}"><c r="A#{i}"><v>#{i}</v></c></row>) }.join)
-    store = Roo::Excelx.new(path).sheet_for(nil).lazy_cells
+    workbook = Roo::Excelx.new(path)
+    store = workbook.sheet_for(nil).lazy_cells
 
     assert_operator ObjectSpace.memsize_of(store), :>, 1000 * 20
   end
@@ -976,7 +982,8 @@ class EdgeCasesTest < Minitest::Test
   def test_an_exception_while_waiting_for_a_batch_arrives_as_itself
     skip "needs File.mkfifo" unless File.respond_to?(:mkfifo)
 
-    doc = Roo::Excelx.new(write("")).sheet_for(nil).instance_variable_get(:@sheet)
+    workbook = Roo::Excelx.new(write(""))
+    doc = workbook.sheet_for(nil).instance_variable_get(:@sheet)
     fifo = File.join(@dir, "sheet.fifo")
     File.mkfifo(fifo)
     doc.instance_variable_set(:@path, fifo)
@@ -1041,7 +1048,8 @@ class EdgeCasesTest < Minitest::Test
     %w[0 false OFF].each do |value|
       ENV["ROO_CALAMINE"] = value
       Oracle.counts.clear
-      Roo::Excelx.new(path).each_row_streaming.to_a
+      workbook = Roo::Excelx.new(path)
+      workbook.each_row_streaming.to_a
 
       refute_predicate Roo::Calamine, :enabled?
       assert_equal 0, Oracle.counts[:native_readers]
