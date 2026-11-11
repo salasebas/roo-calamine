@@ -99,9 +99,9 @@ on 11f2a02. These are single measurements, separate from the medians above.
 
 | Call | roo 4.0.0 | Before | Now | Speedup over roo |
 |---|---:|---:|---:|---:|
-| `to_yaml` | 24.97 s | 8.21 s | 1.30 s | 19.2× |
+| `to_yaml` | 24.97 s | 8.21 s | 1.29 s | 19.3× |
 | `to_xml` | 53.29 s | 38.21 s | 1.05 s | 50.6× |
-| `to_matrix` | 20.70 s | 2.30 s | 0.69 s | 30.0× |
+| `to_matrix` | 20.70 s | 2.30 s | 0.69 s | 30.1× |
 
 The three full-output SHA-256 digests match roo. YAML and XML compare the
 exact bytes; Matrix compares its inspected values. Native formatting uses

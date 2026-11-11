@@ -101,11 +101,13 @@ impl Store {
             let bytes = unsafe { text.as_slice() };
             let utf8 =
                 text.enc_get() == ruby.utf8_encindex() || text.enc_get() == ruby.usascii_encindex();
-            if !utf8
-                || std::str::from_utf8(bytes).is_err()
-                || bytes.contains(&0)
-                || RHash::from_value(value).is_some()
-            {
+            let xml_text = std::str::from_utf8(bytes).ok().filter(|text| {
+                text.chars().all(|character| {
+                    matches!(character, '\t' | '\n')
+                        || (character >= ' ' && !matches!(character, '\u{fffe}' | '\u{ffff}'))
+                })
+            });
+            if !utf8 || xml_text.is_none() || RHash::from_value(value).is_some() {
                 let cell: RString =
                     book.funcall("formatter_xml_cell", (value, row, column, kind))?;
                 output.push_str("    ");
@@ -123,18 +125,11 @@ impl Store {
                 output.push_str("/>\n");
             } else {
                 output.push('>');
-                for character in std::str::from_utf8(bytes).expect("validated above").chars() {
+                for character in xml_text.expect("validated above").chars() {
                     match character {
                         '&' => output.push_str("&amp;"),
                         '<' => output.push_str("&lt;"),
                         '>' => output.push_str("&gt;"),
-                        '\r' => output.push_str("&#xD;"),
-                        '\u{1}'..='\u{8}'
-                        | '\u{b}'
-                        | '\u{c}'
-                        | '\u{e}'..='\u{1f}'
-                        | '\u{fffe}'
-                        | '\u{ffff}' => output.push_str("&#xFFFD;"),
                         character if !character.is_ascii() => {
                             write!(output, "&#x{:X};", u32::from(character)).unwrap();
                         }
@@ -158,14 +153,10 @@ impl Store {
         let first_column: i64 = area.entry(1)?;
         let last_row: i64 = area.entry(2)?;
         let last_column: i64 = area.entry(3)?;
-        let (Some(top), Some(left), Some(bottom), Some(right)) = (
-            area.entry::<Option<i64>>(4)?,
-            area.entry::<Option<i64>>(5)?,
-            area.entry::<Option<i64>>(6)?,
-            area.entry::<Option<i64>>(7)?,
-        ) else {
-            return Ok(());
-        };
+        let top: i64 = area.entry(4)?;
+        let left: i64 = area.entry(5)?;
+        let bottom: i64 = area.entry(6)?;
+        let right: i64 = area.entry(7)?;
         for &record in &self.index {
             let raw = &self.records[record as usize];
             let (row, column) = (i64::from(raw.row), i64::from(raw.column));

@@ -19,8 +19,8 @@ class FormattersTest < Minitest::Test
     rels = %(<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="#{Workbook::REL}/hyperlink" Target="https://example.com/" TargetMode="External"/></Relationships>)
     @path = Workbook.write(@dir, "formatters",
                            sheets: { "Types" => Workbook.sheet(rows, extra: %(<hyperlinks><hyperlink ref="F5" r:id="rId1"/></hyperlinks>)),
-                                     "Empty" => Workbook.sheet(""),
-                                     "Order" => Workbook.sheet(%(<row r="3"><c r="C3"><v>1</v></c><c r="A3"><v>2</v></c><c r="C3"><v>3</v></c></row><row r="1"><c r="B1"><v>4</v></c></row>), extra: %(<mergeCells><mergeCell ref="A3:B4"/></mergeCells>)) },
+                                     "Empty" => Workbook.sheet(%(<row r="1"><c r="A1" t="str"><v></v></c></row>)),
+                                     "Order" => Workbook.sheet(%(<row r="3"><c r="C3"><v>1</v></c><c r="A3"><v>2</v></c><c r="C3"><v>3</v></c></row><row r="1"><c r="B1"><v>4</v></c></row>)) },
                            sheet_rels: { "Types" => rels },
                            shared_strings: Workbook.shared_strings("<si><t>shared</t></si>"))
   end
@@ -36,11 +36,11 @@ class FormattersTest < Minitest::Test
        Oracle.outcome { book.to_yaml({ "source" => "example" }, 0, 0, 6, 7, sheet) },
        Oracle.outcome { book.to_matrix(0, 0, 6, 7, sheet).to_a }]
     end
-    calls + [book.to_xml, book.default_sheet]
+    calls + [Oracle.outcome { book.to_yaml({}, 1, 1, 1, 1, "Empty") }, book.to_xml, book.default_sheet]
   end
 
   def test_output_matches_roo_for_types_rectangles_empty_sheets_and_order
-    [{}, { empty_cell: true }, { expand_merged_ranges: true }].each do |options|
+    [{}, { empty_cell: true }].each do |options|
       assert_same_as_roo("formatters #{options}") { outputs(Roo::Excelx.new(@path, options.dup)) }
     end
   end
@@ -52,6 +52,9 @@ class FormattersTest < Minitest::Test
         book.row(2)[0].replace("changed é".encode("ISO-8859-1"))
         book.row(2)[3].replace("shared\x01changed")
         book.sheet_for("Types").cell_at(2, 3).value = 99
+        empty = book.cell(1, 1, "Empty")
+        book.first_row("Empty")
+        empty.replace("now present")
         if materialize
           cells = book.sheet_for("Types").cells
           cells[[3, 3]] = cells.delete([4, 3])

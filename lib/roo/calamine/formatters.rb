@@ -11,7 +11,7 @@ module Roo
 
         area = formatter_area(sheet, [from_row, from_column, to_row, to_column])
         store = sheet_for(sheet).lazy_cells
-        return super unless store && area.first(4).all?(Integer)
+        return super unless store && area.all?(Integer)
 
         store.to_yaml(self, prefix, area)
       end
@@ -24,7 +24,7 @@ module Roo
 
         area = formatter_rectangle(sheet, [from_row, from_column, to_row, to_column])
         store = sheet_for(sheet).lazy_cells
-        return super unless store && area.first(4).all?(Integer)
+        return super unless store && area.all?(Integer)
 
         ::Matrix.rows(store.matrix_rows(area))
       end
