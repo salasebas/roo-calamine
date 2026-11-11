@@ -135,18 +135,21 @@ class ToCsvTest < Minitest::Test
     end
   end
 
+  # The types book with values it handed out, and cells it built, changed.
+  def changed_in_place(path)
+    workbook = Roo::Excelx.new(path)
+    row = workbook.row(2) # columns B to M
+    row[0].replace('row "value"')
+    row[1].replace("é".encode("ISO-8859-1"))
+    workbook.row(4)[9].replace("shared")
+    workbook.cell(5, 5).replace("built é".encode("ISO-8859-1"))
+    workbook.sheet_for("Types").cell_at([2, 5]).value = 99.5
+    describe_csv(workbook)
+  end
+
   def test_values_and_cells_changed_in_place_before_to_csv
     path = types_book
-    change = lambda do
-      workbook = Roo::Excelx.new(path)
-      row = workbook.row(2) # columns B to M
-      row[0].replace('row "value"')
-      row[1].replace("é".encode("ISO-8859-1"))
-      workbook.row(4)[9].replace("shared")
-      workbook.cell(5, 5).replace("built é".encode("ISO-8859-1"))
-      workbook.sheet_for("Types").cell_at([2, 5]).value = 99.5
-      describe_csv(workbook)
-    end
+    change = -> { changed_in_place(path) }
     roo, = Oracle.read(native: false, &change)
     _, _, (_, csv), = roo.last.first
 
