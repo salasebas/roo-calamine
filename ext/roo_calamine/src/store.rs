@@ -9,7 +9,7 @@ use magnus::rb_sys::AsRawValue;
 use magnus::typed_data::Obj;
 use magnus::value::{Opaque, ReprValue};
 use magnus::{
-    prelude::*, DataTypeFunctions, Error, Integer, RArray, RHash, Ruby, TypedData, Value,
+    prelude::*, DataTypeFunctions, Error, Integer, RArray, RHash, RString, Ruby, TypedData, Value,
 };
 
 use crate::archive::Source;
@@ -196,6 +196,45 @@ impl Records {
             }
         }
         Some(())
+    }
+}
+
+/// [`Store::write_csv`] prints its text at the end of the line that takes
+/// it past this many bytes.
+const CSV_CHUNK: usize = 64 * 1024;
+
+/// The CSV text [`Store::write_csv`] has not printed yet.
+struct CsvOutput {
+    io: Value,
+    bytes: Vec<u8>,
+    separator: Vec<u8>,
+}
+
+impl CsvOutput {
+    fn separators(&mut self, count: i64) {
+        for _ in 0..count {
+            self.bytes.extend_from_slice(&self.separator);
+        }
+    }
+
+    /// Ends the line with `separators` separators and a newline.
+    fn end_line(&mut self, ruby: &Ruby, separators: i64) -> Result<(), Error> {
+        self.separators(separators);
+        self.bytes.push(b'\n');
+        if self.bytes.len() >= CSV_CHUNK {
+            self.print(ruby)?;
+        }
+        Ok(())
+    }
+
+    fn print(&mut self, ruby: &Ruby) -> Result<(), Error> {
+        if self.bytes.is_empty() {
+            return Ok(());
+        }
+        let text = ruby.enc_str_new(&self.bytes, ruby.utf8_encoding());
+        self.bytes.clear();
+        self.io.funcall::<_, _, Value>("print", (text,))?;
+        Ok(())
     }
 }
 
@@ -552,6 +591,127 @@ impl Store {
     }
 }
 
+/// What [`Store::write_csv`] writes: `rows` lines of `width` fields, with
+/// the fields outside the sheet's first and last row and column left empty.
+struct CsvArea {
+    rows: i64,
+    width: i64,
+    first_row: i64,
+    last_row: i64,
+    first_column: i64,
+    last_column: i64,
+}
+
+impl Store {
+    /// `Roo::Calamine::CSV#write_csv_lines` for the cells of this store, with
+    /// `book` the `Roo::Excelx` whose CSV helpers format the fields Ruby
+    /// formats, and `area` `[rows, width, first_row, last_row, first_column,
+    /// last_column]`. When a field raises, `io` holds the text up to it, as
+    /// in roo.
+    fn write_csv(
+        ruby: &Ruby,
+        rb_self: &Self,
+        io: Value,
+        book: Value,
+        separator: RString,
+        area: RArray,
+    ) -> Result<(), Error> {
+        let area = CsvArea {
+            rows: area.entry(0)?,
+            width: area.entry(1)?,
+            first_row: area.entry(2)?,
+            last_row: area.entry(3)?,
+            first_column: area.entry(4)?,
+            last_column: area.entry(5)?,
+        };
+        let mut output = CsvOutput {
+            io,
+            bytes: Vec::with_capacity(CSV_CHUNK * 2),
+            separator: unsafe { separator.as_slice() }.to_vec(),
+        };
+        let written = rb_self.csv_lines(ruby, book, &mut output, &area);
+        output.print(ruby).and(written)
+    }
+
+    fn csv_lines(
+        &self,
+        ruby: &Ruby,
+        book: Value,
+        output: &mut CsvOutput,
+        area: &CsvArea,
+    ) -> Result<(), Error> {
+        let CsvArea { rows, width, .. } = *area;
+        let mut line_row = 0;
+        let mut written = 0;
+        for &record in &self.index {
+            let (row, column) = self.records[record as usize].key();
+            let (row, column) = (i64::from(row), i64::from(column));
+            if row > rows {
+                break;
+            }
+            if row < 1 || column < 1 || column > width {
+                continue;
+            }
+            if row != line_row {
+                if line_row > 0 {
+                    output.end_line(ruby, width - 1 - written)?;
+                }
+                for _ in line_row + 1..row {
+                    output.end_line(ruby, width - 1)?;
+                }
+                line_row = row;
+                written = 0;
+            }
+            output.separators(column - 1 - written);
+            written = column - 1;
+            let in_bounds = (area.first_row..=area.last_row).contains(&row)
+                && (area.first_column..=area.last_column).contains(&column);
+            self.csv_field(ruby, book, record, in_bounds, &mut output.bytes)?;
+        }
+        if line_row > 0 {
+            output.end_line(ruby, width - 1 - written)?;
+        }
+        for _ in line_row + 1..=rows {
+            output.end_line(ruby, width - 1)?;
+        }
+        Ok(())
+    }
+
+    /// Appends the field of `record`, empty when its cell is empty or
+    /// outside the sheet's bounds. A cell already built may have been changed
+    /// since, so it is asked, as is one whose field needs the cell.
+    fn csv_field(
+        &self,
+        ruby: &Ruby,
+        book: Value,
+        record: u32,
+        in_bounds: bool,
+        out: &mut Vec<u8>,
+    ) -> Result<(), Error> {
+        let key = self.records[record as usize].built_key();
+        let cell = match ruby.get_inner(self.built).get(key) {
+            Some(cell) => cell,
+            None if !in_bounds => return Ok(()),
+            None => {
+                let kept: Value = ruby.get_inner(self.handed_out).entry(record as isize)?;
+                let kept = (!kept.is_nil()).then_some(kept);
+                let raw = self.formulas.raw(&self.records, record);
+                let converter = ruby.get_inner(self.converter);
+                if converter.csv_field(ruby, book, &self.text, &raw, kept, out)? {
+                    return Ok(());
+                }
+                self.build(ruby, record)?
+            }
+        };
+        if cell.funcall::<_, _, Value>("empty?", ())?.to_bool() || !in_bounds {
+            return Ok(());
+        }
+        let field: RString = book.funcall("csv_field", (cell,))?;
+        out.extend_from_slice(unsafe { field.as_slice() });
+        Ok(())
+    }
+}
+
 pub fn define(ruby: &Ruby, native: magnus::RModule) -> Result<(), Error> {
     let store = native.define_class("Store", ruby.class_object())?;
     store.define_singleton_method("read", magnus::function!(Store::read, 2))?;
@@ -561,5 +721,6 @@ pub fn define(ruby: &Ruby, native: magnus::RModule) -> Result<(), Error> {
     store.define_method("column", magnus::method!(Store::column, 3))?;
     store.define_method("hash_row", magnus::method!(Store::hash_row, 4))?;
     store.define_method("cells", magnus::method!(Store::cells, 0))?;
+    store.define_method("write_csv", magnus::method!(Store::write_csv, 4))?;
     Ok(())
 }

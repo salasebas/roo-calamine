@@ -3,6 +3,7 @@
 //! values those cells return from `#value`.
 
 mod cells;
+mod csv;
 
 use std::cell::{Cell as StdCell, RefCell};
 use std::os::raw::c_int;
