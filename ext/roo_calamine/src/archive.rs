@@ -105,7 +105,7 @@ impl ZipEntry {
 
     /// The entry's inflated bytes. Fails once more than `size` bytes come
     /// out, where rubyzip raises or warns (`Zip.validate_entry_sizes`).
-    fn inflated(&self) -> io::Result<impl Read> {
+    pub(crate) fn inflated(&self) -> io::Result<impl Read> {
         let data = self.data()?;
         let bytes: Box<dyn Read + Send> = if self.deflated {
             Box::new(DeflateDecoder::new(data))

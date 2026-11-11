@@ -82,5 +82,7 @@ if RUBY_ENGINE == "ruby"
   Roo::Excelx.prepend(Roo::Calamine::DeferredSheets)
   Roo::Excelx.prepend(Roo::Calamine::Excelx)
   Roo::Excelx::SharedStrings.prepend(Roo::Calamine::SharedStrings)
+  Roo::Excelx::Workbook.prepend(Roo::Calamine::MetadataDocument)
+  Roo::Excelx::Styles.prepend(Roo::Calamine::MetadataDocument)
   Roo::Excelx.prepend(Roo::Calamine::CSV)
 end

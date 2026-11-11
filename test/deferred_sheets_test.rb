@@ -19,7 +19,7 @@ class DeferredSheetsTest < Minitest::Test
   ROWS = %(<row r="1"><c r="A1"><v>1</v></c><c r="B1" t="inlineStr"><is><t>one</t></is></c></row>
            <row r="2"><c r="A2"><v>2.5</v></c><c r="B2" t="str"><v>two</v></c></row>)
   HYPERLINK = %(<hyperlinks><hyperlink ref="B1" r:id="rId1"/></hyperlinks>)
-  EXTRACTED = %w[xl/sharedStrings.xml xl/worksheets/sheet1.xml].freeze
+  EXTRACTED = %w[xl/sharedStrings.xml xl/worksheets/sheet1.xml xl/workbook.xml xl/_rels/workbook.xml.rels xl/styles.xml].freeze
   HYPERLINK_RELS = %(<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="#{Workbook::REL}/hyperlink" Target="https://example.com/" TargetMode="External"/></Relationships>).freeze
 
   def setup
@@ -70,6 +70,61 @@ class DeferredSheetsTest < Minitest::Test
 
     assert_equal Zip::DestinationExistsError, roo[1]
     assert_same_as_roo("twice", native_only: false, &read)
+  end
+
+  def test_metadata_stays_in_memory_and_survives_disabling_the_reader
+    xlsx = Roo::Excelx.new(write)
+    tmpdir = xlsx.instance_variable_get(:@tmpdir)
+
+    assert_empty Dir.children(tmpdir).grep(/roo_(workbook|styles)/)
+    Roo::Calamine.enabled = false
+    GC.start
+
+    assert_equal %w[Sheet1 Sheet2], xlsx.sheets
+    assert_equal Date.new(1899, 12, 30), xlsx.workbook.base_date
+    assert_equal "0.00", xlsx.styles.style_format(5)
+    assert_equal 1, xlsx.cell(1, 1)
+  ensure
+    Roo::Calamine.enabled = true
+    xlsx&.close
+  end
+
+  def test_duplicate_styles_destinations_raise_as_in_roo
+    path = write
+    Zip::File.open(path) do |zip|
+      zip.get_output_stream("xl/extra/styles.xml") { |io| io.write(Workbook::STYLES) }
+    end
+    read = -> { Roo::Excelx.new(path) }
+    roo, = Oracle.read(native: false, &read)
+
+    assert_equal Zip::DestinationExistsError, roo[1]
+    assert_same_as_roo("duplicate styles", native_only: false, &read)
+  end
+
+  def test_missing_metadata_parts_raise_as_in_roo
+    %w[xl/workbook.xml xl/_rels/workbook.xml.rels xl/styles.xml].each_with_index do |name, index|
+      path = write("missing#{index}")
+      Zip::File.open(path) { |zip| zip.remove(name) }
+
+      assert_same_as_roo("missing #{name}", native_only: false) do
+        xlsx = Roo::Excelx.new(path)
+        [xlsx.sheets, xlsx.workbook.base_date, xlsx.styles.style_format(5), xlsx.cell(1, 1)]
+      end
+    end
+  end
+
+  def test_malformed_metadata_parses_as_in_roo
+    parts = %w[xl/workbook.xml xl/_rels/workbook.xml.rels xl/styles.xml]
+    malformed = ["", "<", "\x00", "<root><child>", "<root/>trailing", "<root a='1' a='2'/>"]
+    parts.product(malformed).each_with_index do |(name, xml), index|
+      path = write("malformed#{index}")
+      Zip::File.open(path) { |zip| zip.get_output_stream(name) { |io| io.write(xml) } }
+
+      assert_same_as_roo("#{name} #{xml.inspect}", native_only: false) do
+        xlsx = Roo::Excelx.new(path)
+        [xlsx.sheets, xlsx.workbook.base_date, xlsx.styles.style_format(5), Oracle.describe_cells(xlsx)]
+      end
+    end
   end
 
   def test_hyperlinks_and_merged_ranges_are_read_from_the_zip
