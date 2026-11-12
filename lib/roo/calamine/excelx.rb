@@ -34,12 +34,8 @@ module Roo
 
       def cell(row, col, sheet = nil)
         row, col = normalize(row, col) if row.is_a?(String) || col.is_a?(String)
-        sheet = sheet_for(sheet)
-        lazy = sheet.lazy_cells
-        return lazy.value_at(row, col) if lazy
-
-        cell = sheet.cell_at(row, col)
-        cell.value if cell.respond_to?(:value)
+        lazy = sheet_for(sheet).lazy_cells
+        lazy ? lazy.value_at(row, col) : super
       end
 
       def formula(row, col, sheet = nil)
@@ -57,12 +53,8 @@ module Roo
 
       def celltype(row, col, sheet = nil)
         row, col = normalize(row, col) if row.is_a?(String) || col.is_a?(String)
-        sheet = sheet_for(sheet)
-        lazy = sheet.lazy_cells
-        return lazy.type_at(row, col) if lazy
-
-        cell = sheet.cell_at(row, col)
-        cell.type if cell.respond_to?(:type)
+        lazy = sheet_for(sheet).lazy_cells
+        lazy ? lazy.type_at(row, col) : super
       end
 
       def excelx_type(row, col, sheet = nil)
@@ -106,6 +98,14 @@ module Roo
 
         store.clean(self)
         @cleaned[name] = true
+      end
+
+      def validate_sheet!(sheet)
+        case sheet
+        when String then super unless sheets.include?(sheet)
+        else
+          super
+        end
       end
 
       def each_with_headers(headers)
