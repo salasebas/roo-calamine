@@ -28,3 +28,17 @@ Verdict: changes. No findings declined.
 Round 1 scoped source/report changes were frozen while the reviewer ran.
 Generated measurement files were excluded from that round and regenerated
 against the updated baseline before filing.
+
+## Round 2
+
+Verdict: APPROVE. Claude Fable 5.2 high verified S1 through S4 as resolved
+and reported no new findings. It checked the first-byte guard, short buffers,
+Interrupted retry/error propagation, routing through both XML entry points,
+workspace costs, source counts, and usage. It did not re-run tests or audit
+generated measurements; those are verified by the parent.
+
+Two rounds total; no findings declined. The initial experiment diff was
+71 files with 29,986 added and 50 removed lines, mostly unchanged upstream.
+At review-fix commit 33b9b8a, it is 75 files with 30,095 added and
+50 removed lines. Production changes after round 1 are the 12-line encoding
+guard; the other edits correct tests, scripts, and the report.

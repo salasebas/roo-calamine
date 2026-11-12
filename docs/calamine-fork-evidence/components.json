@@ -2,127 +2,127 @@
   {
     "backend": "baseline",
     "run": 0,
-    "open_and_records": 0.0016049999994720565,
-    "first_native_cells": 0.0016059999998105923,
-    "cell_values": 0.00023499999952036887,
-    "warm_native_values": 0.0011859999995067483,
-    "warm_public_values": 0.0032700000010663643
+    "open_and_records": 0.0021070000002509914,
+    "first_native_cells": 0.001659999999901629,
+    "cell_values": 0.0002319999985047616,
+    "warm_native_values": 0.0013620000008813804,
+    "warm_public_values": 0.0037479999991774093
   },
   {
     "backend": "candidate",
     "run": 0,
-    "open_and_records": 0.0013900000012654345,
-    "first_native_cells": 0.0015619999994669342,
+    "open_and_records": 0.0019589999992604135,
+    "first_native_cells": 0.0015870000006543705,
     "cell_values": 0.000227999998969608,
-    "warm_native_values": 0.001169000001027598,
-    "warm_public_values": 0.003329999999550637
-  },
-  {
-    "backend": "candidate",
-    "run": 1,
-    "open_and_records": 0.001623000000108732,
-    "first_native_cells": 0.0015789999997650739,
-    "cell_values": 0.00021800000104121864,
-    "warm_native_values": 0.0011629999989963835,
-    "warm_public_values": 0.0033149999999295687
-  },
-  {
-    "backend": "baseline",
-    "run": 1,
-    "open_and_records": 0.0015210000001388835,
-    "first_native_cells": 0.0015469999998458661,
-    "cell_values": 0.00023800000053597614,
     "warm_native_values": 0.0011640000011539087,
-    "warm_public_values": 0.003277999998317682
-  },
-  {
-    "backend": "baseline",
-    "run": 2,
-    "open_and_records": 0.001485000000684522,
-    "first_native_cells": 0.0015789999997650739,
-    "cell_values": 0.00023399999918183312,
-    "warm_native_values": 0.0011580000009416835,
-    "warm_public_values": 0.0032929999997577397
+    "warm_public_values": 0.0033060000005207257
   },
   {
     "backend": "candidate",
-    "run": 2,
-    "open_and_records": 0.0014620000001741573,
-    "first_native_cells": 0.0015600000006088521,
-    "cell_values": 0.0002229999990959186,
-    "warm_native_values": 0.0011570000006031478,
-    "warm_public_values": 0.0033000000003085006
+    "run": 1,
+    "open_and_records": 0.0016390000000683358,
+    "first_native_cells": 0.0016540000015083933,
+    "cell_values": 0.0002449999992677476,
+    "warm_native_values": 0.001194000000396045,
+    "warm_public_values": 0.0033019999991665827
   },
   {
     "backend": "baseline",
-    "run": 3,
-    "open_and_records": 0.0015399999992951052,
-    "first_native_cells": 0.0015829999993002275,
-    "cell_values": 0.00023700000019744039,
-    "warm_native_values": 0.001180999999633059,
-    "warm_public_values": 0.003280000000813743
-  },
-  {
-    "backend": "candidate",
-    "run": 3,
-    "open_and_records": 0.0013010000002395827,
-    "first_native_cells": 0.0015700000003562309,
-    "cell_values": 0.00023699999837845098,
-    "warm_native_values": 0.0011730000005627517,
-    "warm_public_values": 0.003258000000641914
-  },
-  {
-    "backend": "candidate",
-    "run": 4,
-    "open_and_records": 0.0013729999991483055,
-    "first_native_cells": 0.0015459999995073304,
-    "cell_values": 0.00022600000011152588,
-    "warm_native_values": 0.0011709999998856802,
-    "warm_public_values": 0.0033000000003085006
-  },
-  {
-    "backend": "baseline",
-    "run": 4,
-    "open_and_records": 0.001344000000244705,
-    "first_native_cells": 0.0016080000004876638,
-    "cell_values": 0.00024200000007112976,
-    "warm_native_values": 0.001156000000264612,
-    "warm_public_values": 0.0033329999987472547
-  },
-  {
-    "backend": "baseline",
-    "run": 5,
-    "open_and_records": 0.0017979999993258389,
-    "first_native_cells": 0.0016410000007454073,
-    "cell_values": 0.000240999999732594,
-    "warm_native_values": 0.0011979999999311985,
+    "run": 1,
+    "open_and_records": 0.002007999999477761,
+    "first_native_cells": 0.0015990000010788208,
+    "cell_values": 0.0002459999996062834,
+    "warm_native_values": 0.0011969999995926628,
     "warm_public_values": 0.0033660000008239876
   },
   {
+    "backend": "baseline",
+    "run": 2,
+    "open_and_records": 0.0014780000001337612,
+    "first_native_cells": 0.0015970000004017493,
+    "cell_values": 0.00022899999930814374,
+    "warm_native_values": 0.0012620000015886035,
+    "warm_public_values": 0.0033370000001013977
+  },
+  {
+    "backend": "candidate",
+    "run": 2,
+    "open_and_records": 0.002290000000357395,
+    "first_native_cells": 0.0016099999993457459,
+    "cell_values": 0.00022600000011152588,
+    "warm_native_values": 0.0011880000001838198,
+    "warm_public_values": 0.0033220000004803296
+  },
+  {
+    "backend": "baseline",
+    "run": 3,
+    "open_and_records": 0.0013770000005024485,
+    "first_native_cells": 0.0016390000000683358,
+    "cell_values": 0.00023499999952036887,
+    "warm_native_values": 0.001202999999804888,
+    "warm_public_values": 0.003351999999722466
+  },
+  {
+    "backend": "candidate",
+    "run": 3,
+    "open_and_records": 0.001357000001007691,
+    "first_native_cells": 0.0016169999998965068,
+    "cell_values": 0.00023499999952036887,
+    "warm_native_values": 0.0011849999991682125,
+    "warm_public_values": 0.0033230000008188654
+  },
+  {
+    "backend": "candidate",
+    "run": 4,
+    "open_and_records": 0.0014009999995323597,
+    "first_native_cells": 0.0016309999991790392,
+    "cell_values": 0.0002390000008745119,
+    "warm_native_values": 0.001164999999673455,
+    "warm_public_values": 0.0034149999992223457
+  },
+  {
+    "backend": "baseline",
+    "run": 4,
+    "open_and_records": 0.0019220000012865057,
+    "first_native_cells": 0.0016120000000228174,
+    "cell_values": 0.00023099999998521525,
+    "warm_native_values": 0.001189999999041902,
+    "warm_public_values": 0.003364000000146916
+  },
+  {
+    "backend": "baseline",
+    "run": 5,
+    "open_and_records": 0.0012759999990521464,
+    "first_native_cells": 0.0015350000012404053,
+    "cell_values": 0.00023599999985890463,
+    "warm_native_values": 0.0011639999993349193,
+    "warm_public_values": 0.0032600000013189856
+  },
+  {
     "backend": "candidate",
     "run": 5,
-    "open_and_records": 0.0013910000016039703,
-    "first_native_cells": 0.001580999998623156,
-    "cell_values": 0.00023300000066228677,
-    "warm_native_values": 0.0011849999991682125,
-    "warm_public_values": 0.0033920000005309703
+    "open_and_records": 0.0012079999996785773,
+    "first_native_cells": 0.001501000000644126,
+    "cell_values": 0.00023599999985890463,
+    "warm_native_values": 0.0012170000009064097,
+    "warm_public_values": 0.003396000000066124
   },
   {
     "backend": "baseline",
     "run": 6,
-    "open_and_records": 0.0024979999998322455,
-    "first_native_cells": 0.0016189999987545889,
-    "cell_values": 0.00023599999985890463,
-    "warm_native_values": 0.0012300000016693957,
-    "warm_public_values": 0.0033429999984946335
+    "open_and_records": 0.0013810000000376021,
+    "first_native_cells": 0.0015750000002299203,
+    "cell_values": 0.00023300000066228677,
+    "warm_native_values": 0.0011799999992945231,
+    "warm_public_values": 0.0033170000006066402
   },
   {
     "backend": "candidate",
     "run": 6,
-    "open_and_records": 0.0013589999998657731,
-    "first_native_cells": 0.0015919999987090705,
-    "cell_values": 0.00022900000112713315,
-    "warm_native_values": 0.0011779999986174516,
-    "warm_public_values": 0.0033170000006066402
+    "open_and_records": 0.001476000001275679,
+    "first_native_cells": 0.0016429999996034894,
+    "cell_values": 0.00023300000066228677,
+    "warm_native_values": 0.0012200000001030276,
+    "warm_public_values": 0.0034629999991011573
   }
 ]

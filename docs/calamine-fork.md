@@ -178,12 +178,10 @@ record the exact flags.
 
 ## Compatibility and distribution
 
-The starting baseline and initial candidate pass `bundle exec rake test`
-with 717 runs and 18,496 assertions. After rebasing on #71, the candidate
-passes 718 runs and 18,503 assertions. After the BOM fix, the full suite
-passes 719 runs and 18,529 assertions, with zero failures, errors, or skips.
-The shared-string test was then extended with both byte-order marks; its
-21 tests and 173 assertions pass separately.
+The final candidate passes `bundle exec rake test` with 719 runs and
+18,537 assertions, with zero failures, errors, or skips. The starting baseline
+and initial candidate passed 717 runs and 18,496 assertions before #71
+and the new BOM regression.
 The rebased candidate also passes `bundle exec rake parity`: the six upstream suites have identical
 results with and without the plugin, including the two existing skips.
 Native-reader counters confirm the candidate uses the native path.
