@@ -48,6 +48,7 @@ class DeferredSheetsTest < Minitest::Test
       xlsx.parse(headers: true)
 
       assert_empty extracted_sheets(xlsx), source.class.to_s
+      refute_path_exists File.join(xlsx.instance_variable_get(:@tmpdir), "roo_calamine.xlsx")
     ensure
       xlsx&.close
       source.close if source.respond_to?(:close)
@@ -199,11 +200,16 @@ class DeferredSheetsTest < Minitest::Test
   end
 
   def test_a_workbook_reads_the_same_after_its_file_is_deleted
-    { "plain" => {}, "hyperlinked" => { extra: HYPERLINK, sheet_rels: { "Sheet1" => HYPERLINK_RELS } } }
+    { "plain" => {}, "large" => {}, "hyperlinked" => { extra: HYPERLINK, sheet_rels: { "Sheet1" => HYPERLINK_RELS } } }
       .each do |label, options|
       runs = 0
       describe = lambda do |turn_off: false|
         path = write("#{label}#{runs += 1}", **options)
+        if label == "large"
+          Zip::File.open(path) do |zip|
+            zip.get_output_stream("padding", compression_method: Zip::Entry::STORED) { |io| io.write("x" * 300_000) }
+          end
+        end
         xlsx = Roo::Excelx.new(path)
         File.delete(path)
         Roo::Calamine.enabled = false if turn_off

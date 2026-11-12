@@ -7,8 +7,9 @@ module Roo
     # workbook leaves its worksheets in the zip instead:
     # the native reader inflates the one it reads, and roo's own code finds
     # the file extracted the first time it reads it (DeferredSheetDoc). roo
-    # reads the workbook's file only while it opens it, so it opens a copy in
-    # its temporary directory, and the workbook reads the same after its file
+    # reads the workbook's file only while it opens it, so it opens a snapshot
+    # in memory for small ZIPs or in its temporary directory for large ones.
+    # The workbook reads the same after its file
     # is changed, moved, or deleted. The native extension also writes the
     # files roo does extract, such as sharedStrings.xml: rubyzip's inflating
     # leaves several times the file's size in short-lived Strings, which
@@ -20,7 +21,8 @@ module Roo
       METADATA_FILES = %w[roo_workbook.xml roo_workbook.xml.rels roo_styles.xml].freeze
       # Nokogiri's memory parser passes the byte length as a signed C int.
       MAX_METADATA_SIZE = (2**31) - 1
-      private_constant :ROO_VERSIONS, :COMPRESSION_METHODS, :METADATA_FILES, :MAX_METADATA_SIZE
+      MEMORY_ZIP_SIZE = 256 * 1024
+      private_constant :ROO_VERSIONS, :COMPRESSION_METHODS, :METADATA_FILES, :MAX_METADATA_SIZE, :MEMORY_ZIP_SIZE
 
       # `path` as the native extension takes it. On Windows, Ruby opens a
       # binary path's bytes as UTF-8, where magnus refuses a binary string.
@@ -87,7 +89,7 @@ module Roo
         @calamine_copy ? super(@calamine_copy) : super
       end
 
-      # The workbook's file for roo to open: a copy in roo's temporary
+      # The snapshot roo opens: a stream, a copy in roo's temporary
       # directory, or the file roo wrote there itself for a URL or
       # `packed: :zip`. An empty file is left to roo: rubyzip's error names
       # the file it opened.
@@ -103,7 +105,15 @@ module Roo
         write_calamine_copy(source)
       end
 
+      def memory_copy(source)
+        size = is_stream?(source) ? (source.size if source.respond_to?(:size)) : ::File.size(source)
+        ::StringIO.new(is_stream?(source) ? source.read : ::File.binread(source)) if size&.between?(1, MEMORY_ZIP_SIZE)
+      end
+
       def write_calamine_copy(source)
+        copy = memory_copy(source)
+        return copy if copy
+
         path = "#{@tmpdir}/roo_calamine.xlsx"
         # StringIO#read shares its full String; IO.copy_stream's partial reads copy its buffer.
         if source.is_a?(::StringIO)
@@ -118,7 +128,9 @@ module Roo
         if @calamine_copy
           @shared.extend(MetadataShared)
           @shared.calamine_metadata = {}
-          native_entries(entries)
+          copy = @calamine_copy
+          zip = copy.is_a?(::StringIO) ? Native::ZipBuffer.new(copy.string) : DeferredSheets.native_path(copy)
+          native_entries(entries, zip)
         end
         super
       end
@@ -126,8 +138,7 @@ module Roo
       # Makes each entry the native extension can read a NativeEntry. roo
       # raises or warns while extracting an entry that is not a file,
       # encrypted, or compressed by another method; rubyzip still extracts it.
-      def native_entries(entries)
-        zip = DeferredSheets.native_path(@calamine_copy)
+      def native_entries(entries, zip)
         metadata = metadata_entries(entries)
         entries.each do |entry|
           next unless entry.file? && !entry.encrypted? && COMPRESSION_METHODS.include?(entry.compression_method)
@@ -144,11 +155,8 @@ module Roo
       def metadata_entries(entries)
         metadata = [entries.find { |entry| entry.name[/workbook.xml$/] },
                     entries.find { |entry| entry.name[/workbook.xml.rels$/] }]
-        styles = entries.select do |entry|
-          entry.name.downcase.match?(/styles.xml$/) && !entry.name.downcase[/richdata/]
-        end
-        metadata << styles.first if styles.one?
-        metadata
+        styles = entries.select { |entry| entry.name.downcase[/styles.xml$/] && !entry.name.downcase[/richdata/] }
+        metadata + (styles.one? ? styles : [])
       end
 
       def extract_worksheet_ids(entries, path)
