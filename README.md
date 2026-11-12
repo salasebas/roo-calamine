@@ -151,10 +151,12 @@ These are by design.
   - its `#cell`, `#celltype`, `#empty?`, or roo's private `#cell_to_csv`
     inside `to_csv`;
   - redefinitions of the
-    [single-cell reads](docs/how-it-works.md#reading-cells) in `Roo::Excelx`
+    [single-cell reads](docs/how-it-works.md#cells-and-values) in `Roo::Excelx`
     or `Roo::Excelx::Sheet` themselves (subclasses work);
   - under roo 4.0.0, an override of `initialize` on a `Cell` class or on
-    `Roo::Excelx::Coordinate`.
+    `Roo::Excelx::Coordinate`;
+  - under roo 4.0.0, `Sheet#pad_cells` redefined in `Roo::Excelx::Sheet`
+    itself (subclasses and prepended overrides work).
 
 </details>
 
@@ -171,7 +173,7 @@ These are by design.
   `Encoding::CompatibilityError`, where roo writes it, when its line also
   holds non-ASCII UTF-8 text. Cells read from a file are always UTF-8.
 - **Writes straight into `cells`.** On a
-  [sheet built whole](docs/how-it-works.md#reading-cells), inside an `each`
+  [sheet built whole](docs/how-it-works.md#cells-and-values), inside an `each`
   block without options, a write straight into `sheet_for(...).cells` (not
   through `set`) does not show in later rows.
 - **Broken XML.** On XML that breaks partway, `each_row_streaming` raises the

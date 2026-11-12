@@ -1,182 +1,106 @@
 # How roo-calamine works
 
-roo-calamine keeps roo in place and reroutes the reads that dominate its run
-time. When it loads, it prepends modules to roo's classes (`Module#prepend`):
-a call such as `sheet.each_row_streaming` reaches roo-calamine's method
-first. That method either does the work in the Rust extension and returns the
-objects roo would return, or calls `super` and lets roo do it.
+roo-calamine keeps roo's API and replaces its busiest read paths with a Rust
+extension. It returns roo's objects and follows roo's value rules. Unsupported
+files go through roo's own reader.
 
-Everything else stays roo's code: styles, number formats, the base date,
-comments, images, and every open option.
-
-## Where roo spends its time
+## Where the time goes
 
 | roo 4.0.0 | roo-calamine |
 |---|---|
-| Extracts every worksheet of the zip to a temporary directory when it opens a workbook | Keeps the worksheets in the zip and inflates one only when it is read |
-| Loads each sheet into a Nokogiri DOM and walks it with XPath | Streams the XML with [quick-xml](https://github.com/tafia/quick-xml) |
-| Builds a `Roo::Excelx::Cell` for every cell, even to read one | Keeps the sheet in compact native records and builds a cell the first time it is read |
-| Writes `to_csv`, `to_yaml`, `to_xml`, and `to_matrix` slot by slot through `#cell` | Writes them from the native records |
+| Extracts every worksheet when opening a workbook | Leaves worksheets in a ZIP snapshot until needed |
+| Loads worksheet XML into Nokogiri and walks it with XPath | Reads rows with [quick-xml](https://github.com/tafia/quick-xml) |
+| Builds every cell before reading the sheet | Keeps compact records and builds cells when requested |
+| Writes whole-sheet output through repeated cell lookups | Visits the native records in order |
+
+Styles, formats, comments, images, and open options keep roo's behavior.
 
 ## Ruby and Rust
 
-The extension is a native library, like Nokogiri's, written in Rust instead of
-C. `rake compile` (or the precompiled gem) produces `roo_calamine.bundle` or
-`.so`. Requiring it runs the function marked `#[magnus::init]`, which defines
-`Roo::Calamine::Native` and its classes. [magnus](https://github.com/matsadler/magnus)
-converts values between the two languages through Ruby's C API.
+The extension uses [magnus](https://github.com/matsadler/magnus) and Ruby's C API
+to build the same classes roo builds. Parsing releases Ruby's VM lock. Large
+streams inflate and parse ahead while Ruby consumes the available rows.
 
-While the extension parses, it releases Ruby's global VM lock
-(`rb_thread_call_without_gvl`), so other Ruby threads keep running.
-Large streaming reads also inflate and parse on background threads while Ruby
-consumes the rows that are ready.
+Under roo 4.0.0, known cell layouts are filled directly. Non-text links and
+unusual number text still use roo's constructors. Other roo versions keep
+their constructors throughout.
 
-## Building cells
+## Cells and values
 
-Under roo 4.0.0 the extension sets each cell's instance variables the way
-roo's constructors do, without running them. Some cells still go through roo's
-own constructors:
-- non-text cells with a hyperlink;
-- number text that is not plainly written;
-- every cell under other roo versions.
+Single-cell reads build only the cells they request. Rows, columns, and
+iteration read values from the records. Inline and `t="str"` links become
+`Roo::Link` values without a full cell; shared-string links still build one.
 
-## Reading cells
+A value already returned stays the same object when its full cell is built.
+Requesting `Sheet#cells`, writing with `set`, or cleaning the sheet builds
+the whole cell hash. Sheets with merged-range expansion, or a cell that would
+raise, are also built whole.
 
-- **Single-cell reads** (`#cell`, `#celltype`, `#formula`, `#excelx_type`,
-  `#excelx_value`, `#formatted_value`, `#excelx_format`, `#font`, `#empty?`)
-  and `#first_row` … `#last_column` build only the cells they read, the first
-  time each is read.
-- **`#row`, `#column`, `#each`, and `#parse`** read values straight from the
-  records. Linked inline and `t="str"` text becomes a `Roo::Link` without a
-  cell. Shared-string links, non-text links, and other values that need roo's
-  constructors still build a cell.
-- **The records keep each value they hand out**, so a cell built later holds
-  that very object, as in roo.
-- **Anything that needs the whole `Sheet#cells` hash** (`#set`, `clean: true`,
-  …) builds it from the records, keeping the cells and values already handed
-  out.
-- **A sheet built whole:** a sheet where some cell would raise, or one opened
-  with `expand_merged_ranges`, is built whole, as in roo.
+Link targets and single-cell references are read natively. Metadata uses the
+same XML checks as the cell reader. Range links and merged cells follow roo's
+rules.
 
-roo finds a sheet's hyperlinks, and its merged ranges under
-`expand_merged_ranges`, with XPath on a Nokogiri document of the whole sheet.
-The extension reads relationship targets and resolves single-cell hyperlink
-references natively. Metadata extraction shares the native XML validator's
-pass over the sheet. Range hyperlinks and merged cells keep roo's rules.
+## Iteration
 
-## `each` and `parse`
+`each` without options walks the native records in order. Once full cells
+exist, large sheets use a row index. A block that writes, reloads, or changes
+the active sheet sees that change on the next row, as in roo.
 
-- **With options** (`headers`, `header_search`, header queries, `clean`):
-  - roo-calamine's `#parse` and `#each` keep roo's header handling, and build
-    each row's Hash without roo's one `#cell` call per value.
-  - `parse` without a block builds each Hash from the records. On a sheet built
-    whole, it groups the cells by row in one pass.
-  - `each`, and `parse` with a block, resolve the current sheet on each row and
-    read its records until its `cells` hash is built.
-  - `clean: true` builds the cells before iterating, as in roo.
-- **Without options**, `each` (behind `each_with_index`, `to_a`, and `parse`
-  without options) walks the records in order. On a sheet built whole of
-  3,000 rows or more, it answers the rows past the first 1,000 from an index
-  built in one pass over the sheet's cells.
+Header queries and `parse` retain roo's header handling. Each row hash comes
+from the native records; `clean: true` first builds the full cells.
 
-Either way, a block that calls `set` or `reload`, or changes `default_sheet`,
-sees the change from the next row on, as in roo's `Base#each`.
+`each_row_streaming` returns roo cells and preserves its padding, offsets,
+and row limits. `Roo::Calamine.each_row_values` returns the same values as a
+padded stream, without the cell wrappers.
 
 ## Whole-sheet output
 
-Under roo 4.0.0 roo-calamine replaces the writers behind `#to_csv`,
-`#to_yaml`, `#to_xml`, and `#to_matrix`. roo writes every slot from A1 to the
-last row and column through `#empty?`, `#cell`, and `#celltype`, which look
-the sheet and the cell up again for each slot.
+CSV, YAML, XML, and Matrix output visit records in row and column order. The
+writers reuse values and cells already returned to the caller, including
+in-place edits. Numbers and dates keep roo's formatting.
 
-- **While the cells are in the native records**, the extension writes the
-  output from them in row and column order, without building the `cells` hash:
-  - it formats strings and booleans itself;
-  - it hands numbers and dates to the same Ruby formatting roo uses;
-  - it builds a cell only for a field that needs one;
-  - it asks the cells and values already handed out, which a caller may have
-    changed.
-- **Once the `cells` hash is built**, roo writes YAML, XML, and Matrix itself.
-  roo-calamine still writes the CSV: it walks the hash once in row and column
-  order, and sorts the keys first when the hash is out of order.
-- **Under other roo versions**, roo writes all four.
+Once full cells exist, roo writes YAML, XML, and Matrix. The extension still
+writes CSV, sorting cell coordinates when needed. If a field raises, CSV
+leaves the same partial file as roo. Other roo versions use roo's writers.
 
 ## Shared strings
 
-roo-calamine prepends `Roo::Excelx::SharedStrings#to_a` and `#to_html`. The
-extension reads `sharedStrings.xml` and builds the requested array the way
-roo does, `_x000D_` fix and rich-text HTML included.
+Plain strings and rich-text HTML follow roo's decoding rules, including the
+`_x000D_` fix. HTML stays in a compact native table until requested. Public
+arrays contain the same mutable strings used by the reader.
 
-- **HTML is built only when needed:** it stays in a compact native table until
-  a cell needs rich text or something calls `#to_html`. `disable_html_wrapper`
-  skips that table until something asks for it.
-- **Public arrays** hold the same mutable strings the reader uses.
-- **Reading `#to_html` before `#to_a`** reads the file again for the plain
-  array.
-- **Back to roo:** if the file uses XML that Nokogiri reads differently (see
-  [Fallback to roo](#fallback-to-roo)), or a `vertAlign` without `val` (roo
-  raises on it), roo builds the arrays itself.
+Reading HTML before plain text reads the part again for plain strings.
+Unsupported XML and malformed rich text go back to roo.
 
 ## Opening a workbook
 
-roo extracts every worksheet of a workbook to a temporary directory when it
-opens it. With the reader on, roo-calamine takes a snapshot of the workbook,
-whether it is opened from a path or an IO:
-- ZIPs up to 256 KiB stay in memory;
-- larger ZIPs are copied to roo's temporary directory, which roo still creates
-  for its extractors and fallbacks;
-- an IO is read once, from its beginning.
+Opening takes a snapshot, so later edits or deletion of the original file do
+not change the workbook being read.
 
-- **Worksheets stay in the snapshot.**
-  - The reader inflates the one it reads.
-  - Streaming entries under 256 KiB inflated are parsed on demand, without a
-    worker thread.
-  - A worksheet is extracted only when roo's own code reads it (`#dimensions`,
-    or XML the reader hands back to roo).
-- **The parts roo still extracts** (`sharedStrings.xml`, styles, comments,
-  relationships, images) are inflated by the extension, not rubyzip. That keeps
-  a workbook with many unique strings from growing by several times its
-  `sharedStrings.xml`.
-- **An entry the extension cannot extract**, such as an encrypted one or one
-  that inflates past its size, is left to rubyzip, which raises or warns as in
-  roo.
-- **As with roo**, a workbook reads the same after its file is changed or
-  deleted.
+- ZIPs up to 256 KiB stay in memory; larger ZIPs use roo's temporary directory.
+- Worksheets stay compressed until read. Small streaming sheets parse on
+  demand; larger ones use background workers.
+- The extension inflates metadata and shared strings instead of rubyzip.
+  Entries it cannot extract go through rubyzip and keep roo's errors.
 
-## Fallback to roo
+## Fallback
 
-When a sheet uses XML the reader does not reproduce exactly the way Nokogiri
-does (a non-UTF-8 encoding, a DTD, custom entities, or malformed XML), it hands
-the sheet back to roo. A stream that hits such a spot continues in roo from the
-next row. Shared strings follow the same rules, and also go back to roo when
-the part holds a processing instruction or a `<t>` holds markup other than text
-and CDATA.
+Non-UTF-8 encodings, DTDs, custom entities, and malformed XML go through roo
+when the native reader cannot reproduce Nokogiri's result. A stream resumes
+in roo after the rows already yielded. Shared strings use the same checks.
 
-## How it is tested
+## Verification
 
-roo is the oracle: every check takes roo's own output as the expected result.
+Tests compare results with plain roo, including object identity and errors.
 
-| Suite | What it compares with roo |
+| Check | Coverage |
 |---|---|
-| `rake parity` | roo 4.0.0's own Excelx tests and specs, run with and without roo-calamine |
-| `test/roo_fixtures_test.rb` | All 84 `.xlsx`/`.xlsm` files in roo's `test/files`. For each cell it compares the class, value, type, formatted value, and every instance variable. It covers open options, streaming options, `parse` and `each` under nine option sets with and without a block, and the single-cell reads. |
-| `test/edge_cases_test.rb` | Edge cases, listed below |
-| `test/shared_strings_test.rb` | `SharedStrings#to_a` and `#to_html`, read in either order |
-| `test/to_csv_test.rb` | The bytes `to_csv` returns and writes |
+| `rake parity` | roo's Excelx tests and specs with and without the extension |
+| `roo_fixtures_test.rb` | roo's workbook fixtures, cell state, options, and public reads |
+| `edge_cases_test.rb` | Types, formats, XML recovery, merges, and edits during iteration |
+| `cell_construction_test.rb` | Lazy values, links, and identity after cell construction |
+| `shared_strings_test.rb` | Plain text, HTML, and mutable arrays |
+| `to_csv_test.rb` | Output bytes, edits, separators, and partial-file errors |
 
-The edge-case suite covers:
-- Integer vs Float, dates, and times under every number and date style;
-- number text only roo's constructors read;
-- the 1904 date system;
-- merged ranges, rich text, inline strings, shared formulas, and error cells;
-- `parse` and `each` after `set`, or with a block that changes the workbook.
-
-The CSV suite covers:
-- every cell type, separator, sheet, and file argument;
-- cells out of order, repeated, or merged;
-- values changed in place before the call;
-- the file roo leaves behind when a cell raises.
-
-Both the fixture and the edge-case suites also compare
-`Roo::Calamine.each_row_values` with the values of roo's
-`each_row_streaming(pad_cells: true)`, with the native reader on and off.
+Fixture and edge-case tests also compare value-only reads with padded roo
+streams, with the native reader enabled and disabled.

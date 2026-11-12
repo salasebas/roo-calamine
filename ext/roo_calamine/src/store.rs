@@ -2,7 +2,6 @@
 //! it is read, for `Roo::Excelx#cell` and the other single-cell lookups.
 
 use std::ops::Range;
-use std::sync::atomic::Ordering;
 
 mod formatters;
 
@@ -16,8 +15,8 @@ use magnus::{
 
 use crate::archive::Source;
 use crate::convert::{Converter, CsvOutput};
-use crate::reader::{Body, Kind, Mode, RawCell, RawRow, Reference, Style};
-use crate::{unsupported, without_gvl};
+use crate::reader::{Body, Kind, RawCell, RawRow, Reference, Style};
+use crate::Reader;
 
 type Span = (u32, u32);
 
@@ -201,14 +200,14 @@ impl Records {
     }
 }
 
-/// The records [`read`] reads with the GVL released before it checks them.
-const BATCH_RECORDS: usize = 16_384;
+/// Cells parsed ahead while Ruby-dependent checks hold the GVL.
+const BATCH_CELLS: usize = 16_384;
 
 /// Reads every row with the GVL released, in batches. `None` as soon as a
 /// record does not fit in a [`Record`], or `converter` might not build it
 /// safely.
-fn read(ruby: &Ruby, source: &Source, converter: &Converter) -> Result<Option<Records>, Error> {
-    let mut sheet = source.open(ruby, Mode::Document)?;
+fn read(ruby: &Ruby, source: Source, converter: &Converter) -> Result<Option<Records>, Error> {
+    let reader = Reader::new(ruby, source, false, BATCH_CELLS)?;
     let mut records = Records {
         text: String::new(),
         records: Vec::new(),
@@ -218,22 +217,16 @@ fn read(ruby: &Ruby, source: &Source, converter: &Converter) -> Result<Option<Re
     let mut rows = 0;
     let mut checked: u32 = 0;
     loop {
-        let batch_end = checked as usize + BATCH_RECORDS;
-        let read = without_gvl(|interrupted| {
-            while !interrupted.load(Ordering::Acquire) && records.records.len() < batch_end {
-                let Some(row) = sheet.next_row()? else {
-                    return Ok(Some(true));
-                };
-                rows += 1;
-                if records.add(row, rows, empty_cell).is_none() {
-                    return Ok(None);
-                }
+        let batch = reader.read_batch(ruby)?;
+        if batch.is_empty() {
+            break;
+        }
+        for row in batch {
+            rows += 1;
+            if records.add(row, rows, empty_cell).is_none() {
+                return Ok(None);
             }
-            Ok(Some(false))
-        })?;
-        let Some(done) = read.map_err(|e| unsupported(ruby, e))? else {
-            return Ok(None);
-        };
+        }
         let Ok(end) = u32::try_from(records.records.len()) else {
             return Ok(None);
         };
@@ -244,9 +237,6 @@ fn read(ruby: &Ruby, source: &Source, converter: &Converter) -> Result<Option<Re
             return Ok(None);
         }
         checked = end;
-        if done {
-            break;
-        }
     }
     records.text.shrink_to_fit();
     records.records.shrink_to_fit();
@@ -263,7 +253,7 @@ impl Store {
             text,
             records,
             formulas,
-        }) = read(ruby, &source, &converter)?
+        }) = read(ruby, source, &converter)?
         else {
             return Ok(None);
         };
@@ -331,8 +321,11 @@ impl Store {
     /// built, else as that cell will hold it.
     fn value(&self, ruby: &Ruby, record: u32) -> Result<Value, Error> {
         let raw = &self.records[record as usize];
-        if let Some(cell) = ruby.get_inner(self.built).get(raw.built_key()) {
-            return cell.funcall("value", ());
+        let built = ruby.get_inner(self.built);
+        if !built.is_empty() {
+            if let Some(cell) = built.get(raw.built_key()) {
+                return cell.funcall("value", ());
+            }
         }
         let handed_out = ruby.get_inner(self.handed_out);
         let kept: Value = handed_out.entry(record as isize)?;

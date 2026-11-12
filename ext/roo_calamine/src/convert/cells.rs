@@ -4,7 +4,7 @@
 //! otherwise, and for any value it does not compute exactly the way roo
 //! does, it calls roo's constructor with the same arguments.
 
-use magnus::rb_sys::{AsRawId, AsRawValue};
+use magnus::rb_sys::{AsRawId, AsRawValue, FromRawValue};
 use magnus::value::{IntoId, Lazy, LazyId, ReprValue};
 use magnus::{prelude::*, Error, IntoValue, RArray, RClass, RObject, RString, Ruby, Value};
 
@@ -73,11 +73,15 @@ impl Converter {
         if !self.build_cells {
             return class.new_instance((row, column));
         }
-        let coordinate = RArray::from_value(class.obj_alloc()?).expect("Coordinate is an Array");
-        coordinate.push(row)?;
-        coordinate.push(column)?;
-        coordinate.freeze();
-        Ok(coordinate.as_value())
+        let row = row.into_value_with(ruby);
+        let column = column.into_value_with(ruby);
+        let coordinate = magnus::rb_sys::protect(|| unsafe {
+            let coordinate = rb_sys::rb_obj_alloc(class.as_raw());
+            rb_sys::rb_ary_push(coordinate, row.as_raw());
+            rb_sys::rb_ary_push(coordinate, column.as_raw());
+            rb_sys::rb_obj_freeze(coordinate)
+        })?;
+        Ok(unsafe { Value::from_raw(coordinate) })
     }
 
     /// Builds the cell `SheetDoc#cell_from_xml` builds for `raw`. `None` means
@@ -228,7 +232,7 @@ impl Converter {
         value: Value,
         rest: &[(&LazyId, Value)],
     ) -> Result<Value, Error> {
-        let cell = Self::allocate(ruby, class)?;
+        let class = ruby.get_inner(class);
         let fields = [
             Some((*CELL_VALUE, cell_value)),
             cell_type.map(|value| (*CELL_TYPE, value.as_value())),
@@ -237,24 +241,17 @@ impl Converter {
             Some((*COORDINATE_IVAR, common.coordinate)),
             Some((*VALUE, value)),
         ];
-        magnus::rb_sys::protect(|| unsafe {
+        let cell = magnus::rb_sys::protect(|| unsafe {
+            let cell = rb_sys::rb_obj_alloc(class.as_raw());
             for (name, value) in fields.into_iter().flatten() {
-                rb_sys::rb_ivar_set(
-                    cell.as_raw(),
-                    name.into_id_with(ruby).as_raw(),
-                    value.as_raw(),
-                );
+                rb_sys::rb_ivar_set(cell, name.into_id_with(ruby).as_raw(), value.as_raw());
             }
             for (name, value) in rest {
-                rb_sys::rb_ivar_set(
-                    cell.as_raw(),
-                    (***name).into_id_with(ruby).as_raw(),
-                    value.as_raw(),
-                );
+                rb_sys::rb_ivar_set(cell, (***name).into_id_with(ruby).as_raw(), value.as_raw());
             }
-            cell.as_raw()
+            cell
         })?;
-        Ok(cell.as_value())
+        Ok(unsafe { Value::from_raw(cell) })
     }
 
     /// `Cell::String.new(value, formula, style, link, coordinate)`.

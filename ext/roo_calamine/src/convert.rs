@@ -355,15 +355,40 @@ impl Converter {
         }
     }
 
-    /// `SheetDoc#each_cell` for a streamed row: every cell, empty ones too.
-    pub fn row_cells(ruby: &Ruby, rb_self: &Self, row: &crate::Row) -> Result<RArray, Error> {
+    /// Streamed cells, with optional nil padding. `None` when padding needs
+    /// roo's coordinate or constructor rules.
+    pub fn row_cells(
+        ruby: &Ruby,
+        rb_self: &Self,
+        row: &crate::Row,
+        pad: bool,
+    ) -> Result<Option<RArray>, Error> {
+        if pad
+            && (!rb_self.build_cells
+                || row
+                    .raw()
+                    .cells
+                    .iter()
+                    .any(|raw| !matches!(raw.reference, Reference::At { .. })))
+        {
+            return Ok(None);
+        }
         let cells = ruby.ary_new_capa(row.raw().cells.len());
+        let mut last_column = 0;
         for (index, raw) in row.raw().cells.iter().enumerate() {
             if let Some((_, cell)) = rb_self.cell(ruby, &row.raw().text, raw, 0, index + 1, None)? {
+                if pad {
+                    if let Reference::At { column, .. } = raw.reference {
+                        for _ in last_column + 1..column {
+                            cells.push(ruby.qnil())?;
+                        }
+                        last_column = column;
+                    }
+                }
                 cells.push(cell)?;
             }
         }
-        Ok(cells)
+        Ok(Some(cells))
     }
 
     /// `SheetDoc#extract_cells` for one row, adding to `cells`.

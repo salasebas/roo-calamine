@@ -1,12 +1,10 @@
 # Benchmark results
 
-Every scenario `run.rb --all` runs, except the default table in
-[README.md](README.md#results). Apple M5 Pro, Ruby 3.4.12, roo 4.0.0,
-calx 0.1.0, xsv 1.4.1. Most rows are from 7250ff9, with medians of 3–10
-runs, stopping after 10 s. The hyperlink rows' roo-calamine and calx times
-are from this change, with seven fresh processes per scenario; roo and xsv
-keep their earlier measurements. All roo and roo-calamine digest comparisons
-passed. The [hyperlink follow-up](#hyperlink-reads-issue-64) records its baseline.
+Detailed results beyond the default tables in [README.md](README.md#results).
+Apple M5 Pro, Ruby 3.4.12, roo 4.0.0, calx 0.1.0, and xsv 1.4.1. Each timed
+run starts a fresh process and includes opening the workbook. Values are
+checked against roo before timing. Iteration rows use five runs; unchanged
+operations retain their earlier measurements.
 
 | File | Scenario | roo | roo + roo-calamine | Faster | Less memory | calx (reference) | Time vs calx | xsv (reference) | Flag |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---|
@@ -27,7 +25,7 @@ passed. The [hyperlink follow-up](#hyperlink-reads-issue-64) records its baselin
 | mixed-100k.xlsx | `parse(headers: true) { }` | 20.08 s, 3292 MB | 0.74 s, 216 MB | 27.0× | 15.2× | - | - | - |  |
 | mixed-100k.xlsx | `each_row_streaming(offset: 5000)` | 12.68 s, 141 MB | 0.58 s, 62 MB | 22.0× | 2.2× | - | - | - |  |
 | mixed-100k.xlsx | `each_row_streaming(max_rows: 1000)` | 0.21 s, 118 MB | 13.8 ms, 49 MB | 15.1× | 2.4× | - | - | - |  |
-| mixed-100k.xlsx | `each_row_streaming(pad_cells: true)` | 13.22 s, 118 MB | 0.91 s, 51 MB | 14.6× | 2.3× | - | - | - |  |
+| mixed-100k.xlsx | `each_row_streaming(pad_cells: true)` | 13.22 s, 118 MB | 0.56 s, 51 MB | 23.7× | 2.3× | - | - | - |  |
 | mixed-100k.xlsx | `each_row_streaming` from a `StringIO` | 13.32 s, 124 MB | 0.59 s, 60 MB | 22.7× | 2.1× | - | - | - |  |
 | mixed-100k.xlsx | `sheet_for(...).cells` | 17.82 s, 3348 MB | 1.43 s, 647 MB | 12.5× | 5.2× | - | - | - |  |
 | mixed-100k.xlsx | 1,000 `set`, then `each` | 19.18 s, 3354 MB | 2.04 s, 614 MB | 9.4× | 5.5× | - | - | - |  |
@@ -95,8 +93,8 @@ passed. The [hyperlink follow-up](#hyperlink-reads-issue-64) records its baselin
 | multi-sheet.xlsx | `sheets` | 29.5 ms, 113 MB | 2.1 ms, 42 MB | 13.8× | 2.7× | - | - | - |  |
 | multi-sheet.xlsx | `sheet(n)` + one `cell` per sheet | 3.75 s, 963 MB | 0.12 s, 58 MB | 30.5× | 16.4× | - | - | - |  |
 | multi-sheet.xlsx | `dimensions` of every sheet | 30.3 ms, 113 MB | 19.7 ms, 42 MB | 1.5× | 2.7× | - | - | - | < 5× roo |
-| links-merges-10k.xlsx | `Roo::Spreadsheet.open` + `each_row_streaming` | 0.46 s, 170 MB | 51.8 ms, 58 MB | 8.9× | 2.9× | 13.3 ms, 31 MB | 3.9× | 0.27 s, 51 MB | > 1.2× calx |
-| links-merges-10k.xlsx | `each` (one Array of values per row) | 0.37 s, 187 MB | 44.4 ms, 52 MB | 8.3× | 3.6× | 11.6 ms, 31 MB | 3.8× | 0.25 s, 50 MB | > 1.2× calx |
+| links-merges-10k.xlsx | `Roo::Spreadsheet.open` + `each_row_streaming` | 0.46 s, 170 MB | 49.2 ms, 60 MB | 9.4× | 2.8× | 13.0 ms, 31 MB | 3.8× | 0.27 s, 51 MB | > 1.2× calx |
+| links-merges-10k.xlsx | `each` (one Array of values per row) | 0.37 s, 187 MB | 40.5 ms, 55 MB | 9.1× | 3.4× | 11.4 ms, 31 MB | 3.6× | 0.25 s, 50 MB | > 1.2× calx |
 | links-merges-10k.xlsx | `to_csv` | 0.43 s, 188 MB | 51.5 ms, 52 MB | 8.3× | 3.6× | 14.7 ms, 31 MB | 3.5× | 0.26 s, 49 MB | > 1.2× calx |
 | links-merges-10k.xlsx | 10,000 random `hyperlink` | 0.39 s, 183 MB | 42.1 ms, 51 MB | 9.3× | 3.6× | - | - | - |  |
 | links-merges-10k.xlsx | 10,000 random `hyperlink?` | 0.38 s, 183 MB | 42.5 ms, 51 MB | 8.9× | 3.6× | - | - | - |  |
@@ -191,27 +189,12 @@ plain values against roo's cells.
   there is nothing to time.
 - `.ods` and `.xls`: the bench cannot write them, and `.xls` needs roo-xls.
 
-## Hyperlink reads (issue #64)
+## Comparing with calx
 
-Ruby 3.4.12, roo 4.0.0, Apple M5 Pro, median of seven fresh processes.
-On `3df99e4`, `each` took 71.1 ms and 67 MB; this change takes 44.4 ms and
-52 MB, or 38% less time. `sheet_for(...).hyperlinks` drops from 37.7 to
-23.8 ms. `each` is 2.31× the no-hyperlinks read, down from 3.78×. The main
-table contains the updated timings for all eight affected rows.
+Calx returns plain values without roo cells or hyperlink targets. It has no
+hyperlink lookup, merged-range expansion, or `to_csv` API. Its CSV reference
+reads rows and joins values with commas, without quoting fields.
 
-Relationship targets and single-cell references come from the native reader.
-Metadata validation shares its XML pass. Document reads index links by row
-and column and return inline and `t="str"` linked text without full cells.
-Non-text links and merged ranges keep their existing storage and constructors.
-
-Calx 0.1.0 takes 13.3 ms for `each_row` with each value visited, and 11.6 ms
-with each row visited. It returns plain values without hyperlink targets and
-has no hyperlink lookup, merge expansion, or `to_csv` API. Its 14.7 ms CSV
-reference in the table reads rows and joins values with commas; it does not
-quote CSV fields.
-
-Run from the repository root with Ruby 3.4.12:
-
-```sh
-BUNDLE_GEMFILE=bench/Gemfile bundle exec ruby bench/run.rb --scenario stream,each,csv,no_hyperlinks,hyperlinks,hyperlink,is-hyperlink,expand_merged_ranges --fixture links-merges-10k 7 roo-calamine calx
-```
+Calx loads the whole XLSX sheet before yielding rows. roo-calamine streams
+with bounded memory. Compare their outputs with care: `each_row_streaming` returns roo cells,
+while `each_row_values` returns their values without those wrappers.

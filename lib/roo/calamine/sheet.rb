@@ -84,9 +84,11 @@ module Roo
         by_line
       end
 
-      # roo's loop over #each_cell only copies the cells when it pads none.
+      # Custom padding stays in roo's loop over #each_cell.
       def cells_for_row_element(row_element, options = {})
-        (@sheet.native_row_cells(row_element) unless options[:pad_cells]) || super
+        return super if options[:pad_cells] && !method(:pad_cells).owner.equal?(::Roo::Excelx::Sheet)
+
+        @sheet.native_row_cells(row_element, pad_cells: options[:pad_cells]) || super
       end
 
       def first_last_row_col
