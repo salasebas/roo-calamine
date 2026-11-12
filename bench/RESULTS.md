@@ -37,7 +37,7 @@ on be4ab9b. Ratios use the published roo time and memory figures. Other
 operations retain their earlier measurements.
 
 The roo and roo-calamine results for `dates-10k.xlsx`'s `each`, `to_csv`, and
-`formatted_value` include the #66 optimization. They are medians of nine fresh
+`formatted_value` include the date and time optimization. They are medians of nine fresh
 processes per version, including workbook opening, on the same Ruby 3.4.12.
 Value hashes match roo. The calx and xsv references keep their earlier results.
 Repeat with `bundle exec ruby run.rb 9 --scenario csv,formatted_value,each --fixture dates-10k roo roo-calamine` from `bench`.
