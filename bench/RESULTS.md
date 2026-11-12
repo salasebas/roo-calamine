@@ -1,96 +1,23 @@
 # Benchmark results
 
-## Single-cell reads after #68 investigation
+## Single-cell reads
 
-The first table records the original change before rebasing onto 21f9da6.
-The post-rebase comparison below uses all three versions in the same session.
+Apple M5 Pro, Ruby 3.4.12, roo 4.0.0. Median of 21 fresh processes per
+version on `small.xlsx` and seven on `mixed-100k.xlsx`, comparing 21f9da6
+and 4252cf7. Each run includes opening the workbook and 10,000 seeded random
+reads. Result hashes match. Memory is peak RSS in MiB.
 
-Apple M5 Pro, Ruby 3.4.12, roo 4.0.0. Each number is the median of nine
-fresh processes, including opening `small.xlsx` and 10,000 seeded random
-reads. The benchmark verified identical roo and roo-calamine result hashes
-before timing. The baseline is 3df99e4.
+| File | Scenario | Before | After | Time saved | Peak RSS before → after |
+|---|---|---:|---:|---:|---:|
+| small.xlsx | `cell` | 11.98 ms | 10.63 ms | 11% | 42.4 → 42.4 MiB |
+| small.xlsx | `celltype` | 15.54 ms | 10.29 ms | 34% | 42.5 → 42.1 MiB |
+| mixed-100k.xlsx | `cell` | 211 ms | 204 ms | 4% | 109.7 → 108.0 MiB |
 
-| Read | roo-calamine before | roo-calamine after | Time reduction | roo after | Faster than roo |
-|---|---:|---:|---:|---:|---:|
-| `cell` | 7.9 ms | 6.8 ms | 14% | 19.6 ms | 2.9× |
-| `celltype` | 9.6 ms | 6.4 ms | 33% | 21.2 ms | 3.3× |
-
-Peak RSS is 41 MB on the small sheet. On `mixed-100k.xlsx`, five fresh-process
-runs of `cell` measured 0.47 s and 105 MB both before and after. Scalar reads
-reuse the store's existing value conversion and type classification.
-Heap values stay in their cells, so a late lookup does not allocate value
-slots for every preceding record. Reads after materialization use the public
-cells hash. Parity tests cover every single-cell API, with regressions for
-late-read memory growth and custom coordinate normalization.
-
-This does not meet #68's 4× target. The change keeps the measured improvement
-small in scope. Sheet names are still validated on every call, and native
-lookups reuse method and type IDs. A paged value cache recovered some extra
-speed but added state and memory on random reads. Native public entry points,
-native sheet validation, and rectangular indexing did not provide enough
-benefit to retain.
-
-```sh
-BUNDLE_GEMFILE=bench/Gemfile bundle exec ruby bench/run.rb 9 \
-  --scenario cell,celltype,formula,excelx_type,excelx_value,formatted_value,excelx_format,font \
-  --fixture small roo roo-calamine
-BUNDLE_GEMFILE=bench/Gemfile bundle exec ruby bench/run.rb 5 \
-  --scenario cell --fixture mixed-100k roo-calamine
-```
-
-### Rebase onto 21f9da6
-
-Apple M5 Pro, Ruby 3.4.12, roo 4.0.0. Compare the prior PR head 1c5a95c,
-current `main` at 21f9da6, and the rebased implementation at 4252cf7.
-All versions were rebuilt in release mode. Each sample starts a fresh
-process, opens the workbook, and performs the existing 10,000 seeded random
-reads. Checkout order rotates after each sample. Medians use 21 samples per
-version for `small.xlsx` and seven for `mixed-100k.xlsx`.
-Result hashes match across all three versions.
-
-| File / read | Prior PR | Current main | Rebased PR | Change from prior PR | Time saved against current main |
-|---|---:|---:|---:|---:|---:|
-| `small.xlsx` / `cell` | 9.55 ms | 11.98 ms | 10.63 ms | 11% slower | 11% |
-| `small.xlsx` / `celltype` | 9.28 ms | 15.54 ms | 10.29 ms | 11% slower | 34% |
-| `mixed-100k.xlsx` / `cell` | 566 ms | 211 ms | 204 ms | 64% faster | 4% |
-
-The small-sheet times did not stay unchanged after integrating main. The
-scalar changes still save 11% and 34% against current main, while the merged
-reader changes make the large-sheet run much faster. Other processes were
-using the machine, so compare versions within this rotating run rather than
-comparing absolute times with the earlier table. An earlier two-version
-rotating run also found slower small-sheet reads, by 12% and 15%, and a
-63% faster large-sheet read.
-
-Median peak RSS stays around 42 MiB for the small sheet. On the large sheet
-it is 105.5 MiB for the prior PR, 109.7 MiB for main, and 108.0 MiB for the
-rebased PR. The scalar path still allocates no per-record value array.
-
-The rebase preserves main's clean-value cache and reader changes. A scalar
-lookup checks a built cell, then the cleaned value, then raw conversion.
-Main's existing clean test failed without the cleaned-value check and passes
-with it. No new tests were added for the rebase. `formatted_value` moved
-unchanged into the existing `Formatters` module to keep the Ruby modules
-within the linter's size limit.
-
-Reproduce one sample from each checkout with:
-
-```sh
-BUNDLE_GEMFILE=bench/Gemfile bundle exec ruby bench/scenario.rb \
-  roo-calamine cell /absolute/path/to/bench/fixtures/small.xlsx
-```
-
-Pin Ruby 3.4.12 in `PATH`, use `celltype` for the other small-sheet read, and
-use `mixed-100k.xlsx` for the large-sheet read. Rotate checkout order between
-samples and take the median JSON `seconds` and `peak_rss` fields. Add
-`digest` as the last argument to compare result hashes before timing.
-
-## Cleaning strings, issue 65
+## Cleaning strings
 
 Apple M5 Pro, Ruby 3.4.12, roo 4.0.0, `mixed-100k.xlsx` with 100k rows and
 20 mixed columns. Median of five fresh processes per scenario and version,
-alternating the original code at 3df99e4 and the issue 65 change at 3655290,
-before rebasing onto #69 and #72.
+alternating 3df99e4 and 3655290.
 The timer includes opening the workbook. Memory is peak RSS in MiB.
 
 | Scenario | Before | After | Time saved | Peak RSS before → after |
