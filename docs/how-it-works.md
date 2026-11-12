@@ -27,8 +27,10 @@ their constructors throughout.
 
 ## Cells and values
 
-Single-cell reads build only the cells they request. Rows, columns, and
-iteration read values from the records. Inline and `t="str"` links become
+`cell` reads immediate values and shared strings from the records; other
+values stay in their roo cells. `celltype` reads known types from the records.
+Single-cell metadata reads build only the cells they request. Rows, columns,
+and iteration read values from the records. Inline and `t="str"` links become
 `Roo::Link` values without a full cell; shared-string links still build one.
 
 A value already returned stays the same object when its full cell is built.

@@ -7,7 +7,8 @@ module Roo
     # cells hash, one cell at a time. These keep roo's header handling (its own
     # private methods) and read the cells with less work per cell.
     #
-    # roo's single-cell lookups read Sheet#cell_at instead of Sheet#cells, and
+    # Value and type lookups read the store; other single-cell lookups read
+    # Sheet#cell_at instead of Sheet#cells, and
     # rows read Sheet#row, so they build only the cells their values need.
     # #each without options reads the native store sequentially, or uses a
     # RowIndex once every cell is built.

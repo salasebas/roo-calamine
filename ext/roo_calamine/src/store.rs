@@ -150,8 +150,8 @@ pub struct Store {
     /// The cells built so far, by [`key`].
     built: Opaque<RHash>,
     /// By record, the values [`Store::value`] handed out before their cell
-    /// was built, which that cell then holds: `nil`, or a non-shared value
-    /// (the converter picks the same shared string again).
+    /// was built, which that cell then holds: `nil`, or an object that is
+    /// not a shared string (the converter picks the same one again).
     handed_out: Opaque<RArray>,
     /// Sanitized values, separate from the original values roo's cells retain.
     cleaned: Opaque<RArray>,
@@ -476,18 +476,23 @@ impl Store {
         let Some(record) = rb_self.record_at(row, column) else {
             return Ok(None);
         };
-        let handed_out = ruby.get_inner(rb_self.handed_out);
-        if ruby.get_inner(rb_self.built).is_empty() {
-            let value: Value = handed_out.entry(record as isize)?;
-            if !value.is_nil() {
+        let raw = &rb_self.records[record as usize];
+        let built = ruby.get_inner(rb_self.built);
+        if !built.is_empty() {
+            if let Some(cell) = built.get(raw.built_key()) {
+                return cell.funcall("value", ()).map(Some);
+            }
+        }
+        let cell = rb_self.formulas.raw(&rb_self.records, record);
+        if let Some(value) =
+            ruby.get_inner(rb_self.converter)
+                .known_value(ruby, &rb_self.text, &cell)?
+        {
+            if rb_sys::SPECIAL_CONST_P(value.as_raw()) || raw.shared_string() {
                 return Ok(Some(value));
             }
         }
-        let value = rb_self.value(ruby, record)?;
-        if !rb_self.records[record as usize].shared_string() {
-            handed_out.store(record as isize, value)?;
-        }
-        Ok(Some(value))
+        rb_self.build(ruby, record)?.funcall("value", ()).map(Some)
     }
 
     fn type_at(
