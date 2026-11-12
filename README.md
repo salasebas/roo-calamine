@@ -91,6 +91,52 @@ bundle exec ruby run.rb 5 roo-calamine   # a fixed run count, and only the libra
 
 </details>
 
+### Array row iteration
+
+`each` without options walks the native store in order. After every block
+call it checks whether the current sheet or its store changed. If so, the
+remaining rows go through `row`, so `set`, `reload`, and `default_sheet=`
+take effect on the next row, as in roo 4.0.0's `Base#each`.
+
+On the same Apple M5 Pro and Ruby 3.4.12, medians of 5 fresh processes
+including opening the workbook, compared with e979933:
+
+| File | Before `each` | Now `each` | Less time | `each_row_values` |
+|---|---:|---:|---:|---:|
+| Mixed, 100k rows | 0.663 s | 0.640 s | 3.5% | 0.442 s |
+| Shared strings, 100k rows | 0.325 s | 0.309 s | 4.8% | 0.190 s |
+
+The remaining gap is about 0.20 s on mixed and 0.12 s on shared strings. A
+separate 7-run measurement isolates the work after loading the store:
+
+| File | Load before rows | Loop over `row(n)` | Native `each` | Native walk without checking block changes |
+|---|---:|---:|---:|---:|
+| Mixed | 459 ms | 174 ms | 154 ms | 137 ms |
+| Shared strings | 232 ms | 88 ms | 74 ms | 60 ms |
+
+The load column measures opening the workbook and reading, validating, and
+indexing records before yielding: 459 ms and 232 ms, compared with 442 ms
+and 190 ms for complete streaming reads. Walking the retained store adds
+154 ms and 74 ms, including about 17 ms and 14 ms for block-change checks.
+The store retains mutable values for later cell reads; streaming converts
+and discards rows as it reads them. The medians come from separate runs
+and need not sum to the full-call medians.
+
+Removing only the checks does not bring `each` within 10% of
+`each_row_values`, and stops it from seeing changes made by the block.
+These measurements attribute the remaining cost for
+[#52](https://github.com/salasebas/roo-calamine/issues/52).
+
+After generating the fixtures, run from the repository root:
+
+```sh
+BUNDLE_GEMFILE=bench/Gemfile bundle exec ruby -Ilib bench/each.rb each bench/fixtures/mixed-100k.xlsx
+```
+
+Use `row` or `unchecked` for the other walks; `unchecked` ignores block
+changes. Repeat modes in fresh processes and take medians. `bench/scenario.rb`
+measures full `each` and `values` calls and checks output with `digest`.
+
 ### Whole-sheet formatters
 
 On `mixed-100k.xlsx`, a single fresh-process run per entry, including opening

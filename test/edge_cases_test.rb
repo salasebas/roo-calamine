@@ -821,6 +821,9 @@ class EdgeCasesTest < Minitest::Test
 
       assert_equal rows_from_roo, counts[:sheet_rows]
     end
+    _, counts = Oracle.read(native: true) { Roo::Excelx.new(dense).each.to_a }
+
+    assert_equal 0, counts[:sheet_rows], "lazy rows did not use the native iterator"
   end
 
   def test_each_without_options_indexes_cells_not_rows

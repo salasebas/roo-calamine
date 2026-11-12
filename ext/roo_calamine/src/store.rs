@@ -437,28 +437,64 @@ impl Store {
         first_column: i64,
         last_column: i64,
     ) -> Result<RArray, Error> {
+        let row = Integer::from_value(row).and_then(|n| n.to_u32().ok());
+        let from = u32::try_from(first_column.max(0)).unwrap_or(u32::MAX);
+        let mut start = row.map_or(0, |row| {
+            rb_self.position((row, from)).unwrap_or_else(|start| start)
+        });
+        rb_self.row_values(ruby, row, first_column, last_column, &mut start)
+    }
+
+    fn row_values(
+        &self,
+        ruby: &Ruby,
+        row: Option<u32>,
+        first_column: i64,
+        last_column: i64,
+        start: &mut usize,
+    ) -> Result<RArray, Error> {
         let width = usize::try_from(last_column - first_column + 1).unwrap_or(0);
         let values = ruby.ary_new_capa(width);
         let mut column = first_column;
-        if let Some(row) = Integer::from_value(row).and_then(|n| n.to_u32().ok()) {
-            let from = u32::try_from(first_column.max(0)).unwrap_or(u32::MAX);
-            let start = rb_self.position((row, from)).unwrap_or_else(|start| start);
-            for &record in &rb_self.index[start..] {
-                let (record_row, record_column) = rb_self.records[record as usize].key();
+        if let Some(row) = row {
+            while let Some(&record) = self.index.get(*start) {
+                let (record_row, record_column) = self.records[record as usize].key();
                 if record_row != row || i64::from(record_column) > last_column {
                     break;
                 }
                 for _ in column..i64::from(record_column) {
                     values.push(ruby.qnil())?;
                 }
-                values.push(rb_self.value(ruby, record)?)?;
+                values.push(self.value(ruby, record)?)?;
                 column = i64::from(record_column) + 1;
+                *start += 1;
             }
         }
         for _ in column..=last_column {
             values.push(ruby.qnil())?;
         }
         Ok(values)
+    }
+
+    /// Yields rows until the block returns false, then returns the next row number.
+    fn each_row(
+        ruby: &Ruby,
+        rb_self: &Self,
+        last_row: u32,
+        first_column: i64,
+        last_column: i64,
+    ) -> Result<u64, Error> {
+        let mut start = 0;
+        let from = u32::try_from(first_column.max(0)).unwrap_or(u32::MAX);
+        for row in 1..=last_row {
+            start = rb_self.position_from(start, (row, from));
+            let values =
+                rb_self.row_values(ruby, Some(row), first_column, last_column, &mut start)?;
+            if !ruby.yield_value::<_, bool>(values)? {
+                return Ok(u64::from(row) + 1);
+            }
+        }
+        Ok(u64::from(last_row) + 1)
     }
 
     /// `first_row.upto(last_row).map { |row| cells[[row, column]]&.value }`,
@@ -738,6 +774,7 @@ pub fn define(ruby: &Ruby, native: magnus::RModule) -> Result<(), Error> {
     store.define_method("cell_at", magnus::method!(Store::cell_at, 2))?;
     store.define_method("bounds", magnus::method!(Store::bounds, 0))?;
     store.define_method("row", magnus::method!(Store::row, 3))?;
+    store.define_method("each_row", magnus::method!(Store::each_row, 3))?;
     store.define_method("column", magnus::method!(Store::column, 3))?;
     store.define_method("hash_row", magnus::method!(Store::hash_row, 4))?;
     store.define_method("cells", magnus::method!(Store::cells, 0))?;
