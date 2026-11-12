@@ -208,6 +208,10 @@ impl Converter {
                 NumericCell::temporal(ruby.str_new(text).funcall("to_f", ())?)
             }
         };
+        if let NumericCell::Time(number) = numeric {
+            return Ok(to_i64((number * SECONDS_IN_DAY).round())
+                .map(|seconds| ruby.integer_from_i64(seconds).as_value()));
+        }
         Ok(self.computed(ruby, numeric, text)?.map(|(value, _)| value))
     }
 

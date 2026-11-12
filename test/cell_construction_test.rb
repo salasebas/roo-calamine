@@ -28,6 +28,8 @@ class CellConstructionTest < Minitest::Test
     values = workbook.row(1)
 
     assert_equal [DateTime, Integer, Date, Integer], values.map(&:class)
+    workbook.to_csv
+
     assert_equal before, ObjectSpace.each_object(Roo::Excelx::Cell::DateTime).count
 
     cells = workbook.sheet_for(nil).cells.values

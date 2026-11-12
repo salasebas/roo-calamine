@@ -71,6 +71,8 @@ module Roo
       def formatted_value(row, col, sheet = nil)
         row, col = normalize(row, col) if row.is_a?(String) || col.is_a?(String)
         cell = sheet_for(sheet).cell_at(row, col)
+        return formatter_temporal_value(cell) if native_formatters? && cell.is_a?(Roo::Excelx::Cell::DateTime)
+
         cell.formatted_value if cell.respond_to?(:formatted_value)
       end
 

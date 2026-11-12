@@ -74,4 +74,38 @@ class FormattersTest < Minitest::Test
       assert_equal 0, lookups, "#{formatter} still reads each slot through #cell"
     end
   end
+
+  def temporal_workbook
+    formats = ["yyyy-mm-dd", "d-mmm-yy", "yyyy-mm-dd hh:mm:ss", "m/d/yy h:mm", "hh:mm:ss", "h:mm AM/PM", "[h]:mm:ss"]
+    styles = %(<styleSheet xmlns="#{Workbook::MAIN}"><numFmts count="7">) +
+             formats.each_with_index.map { |format, i| %(<numFmt numFmtId="#{164 + i}" formatCode="#{format}"/>) }.join +
+             %(</numFmts><cellXfs count="7">) +
+             formats.each_index.map { |i| %(<xf numFmtId="#{164 + i}"/>) }.join + "</cellXfs></styleSheet>"
+    rows = ["43831", "45000.1234565", "0.25", "-0.25"].each_with_index.map do |serial, row|
+      cells = formats.each_index.map { |i| %(<c r="#{("A".ord + i).chr}#{row + 1}" s="#{i}"><v>#{serial}</v></c>) }
+      %(<row r="#{row + 1}">#{cells.join}</row>)
+    end.join
+    Workbook.write(@dir, "temporal", sheets: { "Dates" => Workbook.sheet(rows) }, styles:)
+  end
+
+  def temporal_outputs(book)
+    formatted = (1..4).map { |row| (1..7).map { |column| book.formatted_value(row, column) } }
+    [formatted, formatted.flatten.map(&:encoding)]
+  end
+
+  def test_all_benchmark_temporal_styles_match_roo_after_format_changes
+    path = temporal_workbook
+
+    assert_same_as_roo("all temporal styles", lazy: true) do
+      book = Roo::Excelx.new(path)
+      csv = book.to_csv
+      before = temporal_outputs(book)
+      book.excelx_format(1, 1).force_encoding(Encoding::ISO_8859_1)
+      book.excelx_format(3, 5).force_encoding(Encoding::ISO_8859_1)
+      encoded = temporal_outputs(book)
+      book.excelx_format(1, 1).replace("dd/mm/yyyy")
+      book.excelx_format(3, 5).replace("ss:mm:hh")
+      [csv, before, encoded, temporal_outputs(book)]
+    end
+  end
 end
