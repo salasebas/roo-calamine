@@ -3,7 +3,7 @@
 **Decision: retain main's current backend. Reject adoption of this candidate.**
 The fork works end to end and shares Calamine's existing XLSX parser. It adds
 78 owned production lines and slows several public reads, including mixed-100k
-`cell` (open plus 10,000 random reads) by about 3.4×. The upstream merge was small. Merge
+`cell` (open plus 10,000 random reads) by about 3.7×. The upstream merge was small. Merge
 conflicts are not the reason for this recommendation.
 
 This is a second implementation for [#75](https://github.com/salasebas/roo-calamine/issues/75).
@@ -135,7 +135,7 @@ outside the production-line metric.
 [Measurements](calamine-shared-reader-evidence/timings.md) contain all 17
 public scenarios, variation, peak RSS, control measurements, warm queries,
 component phases, sparse probes and the Calx array reference. Raw samples
-and fixture hashes are alongside them. Baseline and candidate were measured
+and fixture hashes are alongside them. Baseline, candidate and control were measured together
 in fresh processes on the same Ruby 3.4.12 / Apple M5 Pro machine; every
 public scenario's digest matches plain Roo 4.0.0. No samples were removed.
 

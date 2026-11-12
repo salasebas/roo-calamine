@@ -1,0 +1,852 @@
+[
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "open",
+    "run": 0,
+    "seconds": 0.0024169999996956903,
+    "peak_rss": 37601280,
+    "allocations": 1211,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "open",
+    "run": 1,
+    "seconds": 0.001834000002418179,
+    "peak_rss": 37699584,
+    "allocations": 1211,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "open",
+    "run": 2,
+    "seconds": 0.0008770000022195745,
+    "peak_rss": 37715968,
+    "allocations": 1211,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "open",
+    "run": 3,
+    "seconds": 0.00536899999860907,
+    "peak_rss": 38076416,
+    "allocations": 1211,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "open",
+    "run": 4,
+    "seconds": 0.0007670000013604295,
+    "peak_rss": 37650432,
+    "allocations": 1211,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "cell",
+    "run": 0,
+    "seconds": 0.007644999997864943,
+    "peak_rss": 39026688,
+    "allocations": 25719,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "cell",
+    "run": 1,
+    "seconds": 0.007515000001149019,
+    "peak_rss": 39026688,
+    "allocations": 25719,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "cell",
+    "run": 2,
+    "seconds": 0.007639999999810243,
+    "peak_rss": 38912000,
+    "allocations": 25719,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "cell",
+    "run": 3,
+    "seconds": 0.06880000000091968,
+    "peak_rss": 38813696,
+    "allocations": 25719,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "cell",
+    "run": 4,
+    "seconds": 0.11970400000063819,
+    "peak_rss": 39075840,
+    "allocations": 25719,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "celltype",
+    "run": 0,
+    "seconds": 0.007069000002957182,
+    "peak_rss": 39026688,
+    "allocations": 21667,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "celltype",
+    "run": 1,
+    "seconds": 0.00674300000173389,
+    "peak_rss": 39010304,
+    "allocations": 21667,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "celltype",
+    "run": 2,
+    "seconds": 0.006848999997600913,
+    "peak_rss": 39010304,
+    "allocations": 21667,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "celltype",
+    "run": 3,
+    "seconds": 0.007410000001982553,
+    "peak_rss": 38895616,
+    "allocations": 21667,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "celltype",
+    "run": 4,
+    "seconds": 0.07344299999749637,
+    "peak_rss": 38928384,
+    "allocations": 21667,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "stream",
+    "run": 0,
+    "seconds": 0.0022439999993366655,
+    "peak_rss": 38420480,
+    "allocations": 9459,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "stream",
+    "run": 1,
+    "seconds": 0.0032609999980195425,
+    "peak_rss": 38273024,
+    "allocations": 9459,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "stream",
+    "run": 2,
+    "seconds": 0.0023590000018884894,
+    "peak_rss": 38223872,
+    "allocations": 9459,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "stream",
+    "run": 3,
+    "seconds": 0.0025359999999636784,
+    "peak_rss": 38109184,
+    "allocations": 9459,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "stream",
+    "run": 4,
+    "seconds": 0.030436000000918284,
+    "peak_rss": 38092800,
+    "allocations": 9459,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "stream-max-rows",
+    "run": 0,
+    "seconds": 0.002962999998999294,
+    "peak_rss": 38289408,
+    "allocations": 9459,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "stream-max-rows",
+    "run": 1,
+    "seconds": 0.01253999999971711,
+    "peak_rss": 38535168,
+    "allocations": 9459,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "stream-max-rows",
+    "run": 2,
+    "seconds": 0.003944000000046799,
+    "peak_rss": 38436864,
+    "allocations": 9459,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "stream-max-rows",
+    "run": 3,
+    "seconds": 0.10263199999826611,
+    "peak_rss": 38535168,
+    "allocations": 9459,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "stream-max-rows",
+    "run": 4,
+    "seconds": 0.003080999998928746,
+    "peak_rss": 38748160,
+    "allocations": 9459,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "each",
+    "run": 0,
+    "seconds": 0.0027179999997315463,
+    "peak_rss": 39190528,
+    "allocations": 2696,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "each",
+    "run": 1,
+    "seconds": 0.0022260000005189795,
+    "peak_rss": 38584320,
+    "allocations": 2696,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "each",
+    "run": 2,
+    "seconds": 0.0024259999991045333,
+    "peak_rss": 38764544,
+    "allocations": 2696,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "each",
+    "run": 3,
+    "seconds": 0.0031559999988530762,
+    "peak_rss": 38469632,
+    "allocations": 2696,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "each",
+    "run": 4,
+    "seconds": 0.0032749999991210643,
+    "peak_rss": 38502400,
+    "allocations": 2696,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "csv",
+    "run": 0,
+    "seconds": 0.0026519999992160592,
+    "peak_rss": 38600704,
+    "allocations": 3085,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "csv",
+    "run": 1,
+    "seconds": 0.002598999999463558,
+    "peak_rss": 38682624,
+    "allocations": 3085,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "csv",
+    "run": 2,
+    "seconds": 0.0025400000013178214,
+    "peak_rss": 38584320,
+    "allocations": 3085,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "csv",
+    "run": 3,
+    "seconds": 0.01309199999741395,
+    "peak_rss": 38338560,
+    "allocations": 3085,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "small.xlsx",
+    "scenario": "csv",
+    "run": 4,
+    "seconds": 0.0021809999998367857,
+    "peak_rss": 38486016,
+    "allocations": 3085,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "cell",
+    "run": 0,
+    "seconds": 0.21226599999863538,
+    "peak_rss": 107823104,
+    "allocations": 41078,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "cell",
+    "run": 1,
+    "seconds": 0.18577000000004773,
+    "peak_rss": 107200512,
+    "allocations": 41078,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "cell",
+    "run": 2,
+    "seconds": 0.19168899999931455,
+    "peak_rss": 107544576,
+    "allocations": 41078,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "cell",
+    "run": 3,
+    "seconds": 0.21077999999761232,
+    "peak_rss": 107724800,
+    "allocations": 41078,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "cell",
+    "run": 4,
+    "seconds": 0.20913600000130828,
+    "peak_rss": 108363776,
+    "allocations": 41078,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "celltype",
+    "run": 0,
+    "seconds": 0.18614600000000792,
+    "peak_rss": 104513536,
+    "allocations": 21725,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "celltype",
+    "run": 1,
+    "seconds": 0.19249200000194833,
+    "peak_rss": 104644608,
+    "allocations": 21725,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "celltype",
+    "run": 2,
+    "seconds": 0.19278699999995297,
+    "peak_rss": 103956480,
+    "allocations": 21725,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "celltype",
+    "run": 3,
+    "seconds": 0.1934240000009595,
+    "peak_rss": 105168896,
+    "allocations": 21725,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "celltype",
+    "run": 4,
+    "seconds": 0.1777299999994284,
+    "peak_rss": 103874560,
+    "allocations": 21725,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "stream",
+    "run": 0,
+    "seconds": 0.7116690000002563,
+    "peak_rss": 49070080,
+    "allocations": 7701820,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "stream",
+    "run": 1,
+    "seconds": 0.7097069999981613,
+    "peak_rss": 49692672,
+    "allocations": 7701820,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "stream",
+    "run": 2,
+    "seconds": 0.7115730000004987,
+    "peak_rss": 49152000,
+    "allocations": 7701820,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "stream",
+    "run": 3,
+    "seconds": 0.7367500000000291,
+    "peak_rss": 48791552,
+    "allocations": 7701820,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "stream",
+    "run": 4,
+    "seconds": 0.7206359999981942,
+    "peak_rss": 49283072,
+    "allocations": 7701820,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "stream-max-rows",
+    "run": 0,
+    "seconds": 0.014815000002272427,
+    "peak_rss": 48824320,
+    "allocations": 78822,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "stream-max-rows",
+    "run": 1,
+    "seconds": 0.050096000002668006,
+    "peak_rss": 48168960,
+    "allocations": 78822,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "stream-max-rows",
+    "run": 2,
+    "seconds": 0.014539000003424007,
+    "peak_rss": 49053696,
+    "allocations": 78822,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "stream-max-rows",
+    "run": 3,
+    "seconds": 0.013290999999298947,
+    "peak_rss": 48414720,
+    "allocations": 78822,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "stream-max-rows",
+    "run": 4,
+    "seconds": 0.01406200000201352,
+    "peak_rss": 48136192,
+    "allocations": 78822,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "each",
+    "run": 0,
+    "seconds": 1.1151350000000093,
+    "peak_rss": 181731328,
+    "allocations": 1001757,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "each",
+    "run": 1,
+    "seconds": 0.32130400000096415,
+    "peak_rss": 181485568,
+    "allocations": 1001757,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "each",
+    "run": 2,
+    "seconds": 0.34286900000006426,
+    "peak_rss": 179929088,
+    "allocations": 1001757,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "each",
+    "run": 3,
+    "seconds": 0.37706600000092294,
+    "peak_rss": 184320000,
+    "allocations": 1001757,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "each",
+    "run": 4,
+    "seconds": 0.3579730000019481,
+    "peak_rss": 182468608,
+    "allocations": 1001757,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "csv",
+    "run": 0,
+    "seconds": 0.5550240000011399,
+    "peak_rss": 126926848,
+    "allocations": 1401969,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "csv",
+    "run": 1,
+    "seconds": 0.5526229999995849,
+    "peak_rss": 122208256,
+    "allocations": 1401969,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "csv",
+    "run": 2,
+    "seconds": 0.5659059999998135,
+    "peak_rss": 123617280,
+    "allocations": 1401969,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "csv",
+    "run": 3,
+    "seconds": 0.5478060000023106,
+    "peak_rss": 125206528,
+    "allocations": 1401969,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "mixed-100k.xlsx",
+    "scenario": "csv",
+    "run": 4,
+    "seconds": 0.5528530000010505,
+    "peak_rss": 122568704,
+    "allocations": 1401969,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "shared-strings-100k.xlsx",
+    "scenario": "cell",
+    "run": 0,
+    "seconds": 0.10591700000077253,
+    "peak_rss": 72663040,
+    "allocations": 22028,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "shared-strings-100k.xlsx",
+    "scenario": "cell",
+    "run": 1,
+    "seconds": 0.20504699999946752,
+    "peak_rss": 73105408,
+    "allocations": 22028,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "shared-strings-100k.xlsx",
+    "scenario": "cell",
+    "run": 2,
+    "seconds": 0.11068099999829428,
+    "peak_rss": 73236480,
+    "allocations": 22028,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "shared-strings-100k.xlsx",
+    "scenario": "cell",
+    "run": 3,
+    "seconds": 0.10954900000069756,
+    "peak_rss": 72728576,
+    "allocations": 22028,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "shared-strings-100k.xlsx",
+    "scenario": "cell",
+    "run": 4,
+    "seconds": 0.12051900000005844,
+    "peak_rss": 73121792,
+    "allocations": 22028,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "shared-strings-100k.xlsx",
+    "scenario": "stream",
+    "run": 0,
+    "seconds": 0.2905879999998433,
+    "peak_rss": 49905664,
+    "allocations": 2302058,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "shared-strings-100k.xlsx",
+    "scenario": "stream",
+    "run": 1,
+    "seconds": 0.3023860000030254,
+    "peak_rss": 49872896,
+    "allocations": 2302058,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "shared-strings-100k.xlsx",
+    "scenario": "stream",
+    "run": 2,
+    "seconds": 0.28918699999849196,
+    "peak_rss": 49577984,
+    "allocations": 2302058,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "shared-strings-100k.xlsx",
+    "scenario": "stream",
+    "run": 3,
+    "seconds": 0.27451400000063586,
+    "peak_rss": 49643520,
+    "allocations": 2302058,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "shared-strings-100k.xlsx",
+    "scenario": "stream",
+    "run": 4,
+    "seconds": 0.266155000001163,
+    "peak_rss": 50135040,
+    "allocations": 2302058,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "unique-strings-100k.xlsx",
+    "scenario": "cell",
+    "run": 0,
+    "seconds": 1.1000669999993988,
+    "peak_rss": 165232640,
+    "allocations": 1021818,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "unique-strings-100k.xlsx",
+    "scenario": "cell",
+    "run": 1,
+    "seconds": 0.3750079999990703,
+    "peak_rss": 164937728,
+    "allocations": 1021818,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "unique-strings-100k.xlsx",
+    "scenario": "cell",
+    "run": 2,
+    "seconds": 0.37038699999902747,
+    "peak_rss": 180518912,
+    "allocations": 1021818,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "unique-strings-100k.xlsx",
+    "scenario": "cell",
+    "run": 3,
+    "seconds": 0.33586600000126055,
+    "peak_rss": 166182912,
+    "allocations": 1021818,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "unique-strings-100k.xlsx",
+    "scenario": "cell",
+    "run": 4,
+    "seconds": 0.3418039999996836,
+    "peak_rss": 164888576,
+    "allocations": 1021818,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "unique-strings-100k.xlsx",
+    "scenario": "stream",
+    "run": 0,
+    "seconds": 0.4895519999990938,
+    "peak_rss": 261144576,
+    "allocations": 3301847,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "unique-strings-100k.xlsx",
+    "scenario": "stream",
+    "run": 1,
+    "seconds": 0.5465199999998731,
+    "peak_rss": 260505600,
+    "allocations": 3301847,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "unique-strings-100k.xlsx",
+    "scenario": "stream",
+    "run": 2,
+    "seconds": 0.5328730000001087,
+    "peak_rss": 262193152,
+    "allocations": 3301847,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "unique-strings-100k.xlsx",
+    "scenario": "stream",
+    "run": 3,
+    "seconds": 0.612076999997953,
+    "peak_rss": 260374528,
+    "allocations": 3301847,
+    "digest": null
+  },
+  {
+    "backend": "control",
+    "file": "unique-strings-100k.xlsx",
+    "scenario": "stream",
+    "run": 4,
+    "seconds": 0.5310070000014093,
+    "peak_rss": 260915200,
+    "allocations": 3301847,
+    "digest": null
+  }
+]

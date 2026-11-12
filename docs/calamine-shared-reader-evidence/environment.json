@@ -9,5 +9,6 @@
   "cargo": "cargo 1.99.1 (5f94df478 2026-08-27)",
   "candidate_bundle_sha256": "24eee0a3dfc788dfc8df1bc93088bc6ff97bed6476434595bedd33a6b01be643",
   "baseline_bundle_sha256": "5be0e26739412ede2ad1fc7ac07c8fe9556caff11154595417cefb4056b3646d",
-  "note": "Final paired pass after all compilation/tests. Initial paired run retained separately; a brief lint overlapped it. Control/Calx measured separately, warm/sparse probes before final paired repeat. No samples dropped and no parallel benchmark jobs."
+  "note": "Final baseline/candidate/control pass rotates all three process positions, after compilation/tests. Earlier paired passes and noisy control retained separately. Warm/sparse/components/Calx probes are separate phase observations. No samples dropped, no concurrent benchmark jobs.",
+  "control_bundle_sha256": "f9af9623fd309eb059d55257a3b9f321762e6f800919ab5e9e705f7ea31e3f9b"
 }

@@ -37,7 +37,7 @@ cases.each do |file, scenarios|
     oracle["#{file}:#{scenario}"] = digests.first
 
     runs.times do |run|
-      order = run.even? ? paths.to_a : paths.to_a.reverse
+      order = paths.to_a.rotate(run % paths.size)
       order.each do |label, path|
         result = measurement([command.first, "-I", path, *command.drop(1)])
         results << { backend: label, file:, scenario:, run:, **result }

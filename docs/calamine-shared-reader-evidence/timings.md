@@ -1,32 +1,44 @@
 # Public API measurements
 
 Five fresh processes per backend/case; median [minimum, maximum] in ms,
-then median peak RSS in MiB. All 17 baseline/candidate/control digests match
-plain Roo 4.0.0. No samples were discarded. The initial run is retained in [paired-initial.json](paired-initial.json).
-The final paired pass followed compilation/tests. Control was measured in a separate
-pass after the paired run. `cell` and `celltype` include open and 10,000 random
-queries. [Environment](environment.json), [fixture hashes](fixtures.json),
-[paired samples/oracles](paired.json), [control samples](control.json).
+then median peak RSS in MiB. Baseline, candidate and no-fork control run
+in one pass with their process positions rotated. All 17 digests match
+plain Roo 4.0.0. This pass followed compilation and functional tests.
+`cell` and `celltype` include open and 10,000 random queries.
+
+[Environment](environment.json), [fixture hashes](fixtures.json),
+[all final samples/oracles](paired.json). [control.json](control.json) is a
+projection of those same final samples, not an additional experiment.
+Earlier runs are retained without discarding samples:
+[initial pair](paired-initial.json), [second pair](paired-two-backends.json),
+and [initial control](control-initial.json). The initial control overlapped
+compilation and had high variation; it is not used for the final comparison.
+
+Reproduce the final pass with:
+
+```sh
+ruby bench/fork_comparison.rb BASELINE_LIB docs/calamine-shared-reader-evidence/paired.json 5 CONTROL_LIB
+```
 
 | Fixture / scenario | Main ms / MiB | Shared fork ms / MiB | No-fork control ms / MiB |
 |---|---:|---:|---:|
-| small.xlsx / open | 0.805 [0.742, 0.841] / 36.0 | 0.827 [0.755, 0.937] / 36.0 | 1.834 [0.767, 5.369] / 36.0 |
-| small.xlsx / cell | 7.0 [6.772, 7.192] / 37.3 | 7.228 [7.104, 7.891] / 37.4 | 7.645 [7.515, 119.704] / 37.2 |
-| small.xlsx / celltype | 6.643 [6.377, 6.991] / 37.1 | 6.965 [6.923, 7.022] / 37.3 | 7.069 [6.743, 73.443] / 37.2 |
-| small.xlsx / stream | 2.001 [1.763, 2.142] / 36.4 | 2.409 [2.301, 2.549] / 36.5 | 2.536 [2.244, 30.436] / 36.5 |
-| small.xlsx / stream-max-rows | 2.025 [1.913, 2.114] / 36.5 | 2.4 [2.133, 3.227] / 36.7 | 3.944 [2.963, 102.632] / 36.8 |
-| small.xlsx / each | 1.756 [1.675, 1.853] / 36.3 | 2.018 [1.903, 2.08] / 36.5 | 2.718 [2.226, 3.275] / 36.8 |
-| small.xlsx / csv | 1.871 [1.596, 1.983] / 36.4 | 2.281 [2.03, 2.305] / 36.6 | 2.599 [2.181, 13.092] / 36.8 |
-| mixed-100k.xlsx / cell | 170.905 [170.185, 173.711] / 102.6 | 589.174 [587.858, 595.35] / 102.5 | 209.136 [185.77, 212.266] / 102.7 |
-| mixed-100k.xlsx / celltype | 162.447 [161.566, 163.675] / 99.3 | 567.143 [559.783, 577.908] / 99.5 | 192.492 [177.73, 193.424] / 99.7 |
-| mixed-100k.xlsx / stream | 540.314 [537.649, 558.934] / 46.1 | 563.604 [559.314, 567.817] / 43.0 | 711.669 [709.707, 736.75] / 46.9 |
-| mixed-100k.xlsx / stream-max-rows | 11.326 [11.243, 11.546] / 45.7 | 14.587 [14.424, 15.246] / 42.9 | 14.539 [13.291, 50.096] / 46.2 |
-| mixed-100k.xlsx / each | 300.353 [283.306, 301.867] / 173.1 | 703.51 [701.899, 712.423] / 173.2 | 357.973 [321.304, 1115.135] / 173.3 |
-| mixed-100k.xlsx / csv | 458.145 [449.653, 473.598] / 116.5 | 888.17 [870.316, 951.114] / 116.6 | 552.853 [547.806, 565.906] / 117.9 |
-| shared-strings-100k.xlsx / cell | 94.428 [90.515, 101.689] / 68.1 | 255.953 [253.929, 260.209] / 67.9 | 110.681 [105.917, 205.047] / 69.7 |
-| shared-strings-100k.xlsx / stream | 244.202 [243.282, 251.682] / 46.6 | 250.84 [245.341, 252.762] / 45.3 | 289.187 [266.155, 302.386] / 47.6 |
-| unique-strings-100k.xlsx / cell | 315.009 [305.213, 340.032] / 157.2 | 468.657 [442.785, 515.691] / 157.8 | 370.387 [335.866, 1100.067] / 157.6 |
-| unique-strings-100k.xlsx / stream | 513.856 [495.58, 575.703] / 249.4 | 508.364 [463.533, 521.148] / 249.9 | 532.873 [489.552, 612.077] / 248.8 |
+| small.xlsx / open | 0.996 [0.751, 26.548] / 35.7 | 1.006 [0.861, 18.875] / 35.8 | 0.91 [0.758, 1.187] / 35.9 |
+| small.xlsx / cell | 7.607 [7.045, 9.421] / 37.2 | 10.101 [7.693, 20.945] / 37.2 | 8.399 [7.056, 9.661] / 37.3 |
+| small.xlsx / celltype | 7.907 [7.326, 9.947] / 37.2 | 8.343 [7.37, 9.784] / 37.3 | 7.054 [6.976, 9.234] / 37.2 |
+| small.xlsx / stream | 2.655 [2.247, 2.9] / 36.6 | 3.531 [3.097, 17.326] / 37.0 | 2.982 [2.305, 3.162] / 36.4 |
+| small.xlsx / stream-max-rows | 2.65 [2.433, 60.294] / 36.7 | 3.145 [2.758, 3.533] / 36.8 | 2.938 [2.65, 3.155] / 36.6 |
+| small.xlsx / each | 2.528 [2.182, 70.368] / 36.5 | 2.655 [2.061, 3.009] / 36.5 | 2.196 [1.777, 37.364] / 36.4 |
+| small.xlsx / csv | 2.166 [1.812, 2.665] / 36.4 | 2.201 [2.077, 2.952] / 36.5 | 2.0 [1.675, 2.667] / 36.5 |
+| mixed-100k.xlsx / cell | 173.386 [173.038, 215.404] / 102.5 | 645.014 [598.277, 684.98] / 102.6 | 179.423 [173.122, 329.833] / 102.5 |
+| mixed-100k.xlsx / celltype | 200.166 [168.171, 281.932] / 99.5 | 601.034 [585.798, 680.594] / 99.3 | 179.525 [166.882, 263.579] / 99.2 |
+| mixed-100k.xlsx / stream | 630.787 [585.27, 650.202] / 46.4 | 616.784 [582.032, 699.291] / 44.8 | 616.056 [556.158, 630.082] / 46.4 |
+| mixed-100k.xlsx / stream-max-rows | 14.78 [13.467, 15.443] / 45.7 | 17.65 [17.39, 19.027] / 43.7 | 15.387 [12.926, 148.247] / 45.8 |
+| mixed-100k.xlsx / each | 355.286 [342.733, 428.076] / 175.2 | 830.61 [774.948, 860.006] / 176.7 | 366.07 [348.119, 386.833] / 175.7 |
+| mixed-100k.xlsx / csv | 546.45 [542.066, 556.121] / 118.7 | 1016.944 [988.035, 1041.372] / 118.5 | 545.891 [529.566, 575.3] / 118.0 |
+| shared-strings-100k.xlsx / cell | 101.764 [94.912, 121.504] / 68.0 | 280.392 [264.046, 328.835] / 68.6 | 104.783 [91.764, 119.512] / 68.3 |
+| shared-strings-100k.xlsx / stream | 297.563 [266.828, 305.774] / 47.7 | 297.004 [282.653, 313.628] / 46.1 | 294.429 [274.144, 329.6] / 47.9 |
+| unique-strings-100k.xlsx / cell | 385.146 [341.195, 497.835] / 160.0 | 519.197 [487.958, 615.532] / 159.2 | 387.335 [350.884, 474.868] / 158.8 |
+| unique-strings-100k.xlsx / stream | 510.252 [481.104, 1471.807] / 249.4 | 482.21 [445.496, 543.298] / 248.5 | 537.338 [492.533, 590.248] / 249.1 |
 
 ## Queries after open
 

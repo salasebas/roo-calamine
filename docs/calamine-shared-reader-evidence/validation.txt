@@ -88,4 +88,5 @@ advisories ok, bans ok, licenses ok, sources ok
 
 All Rust sources in the updated checkout equal vendor/calamine/src byte for byte.
 Format checks (root and fork), actionlint, zizmor and yamllint pass.
+Source whitespace checks exclude unchanged upstream and serialized patch context.
 Full platform/precompiled/JRuby matrix: see final PR checks.
