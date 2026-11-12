@@ -264,20 +264,36 @@ class SharedStringsTest < Minitest::Test
   end
 
   def test_document_selections_keep_the_original_objects_for_all_index_spellings
-    path = write("<si><r><rPr><b/></rPr><t>bold</t></r></si>", indices: %w[0 +0 -1 000])
+    ["<si><r><rPr><b/></rPr><t>bold</t></r></si>", "<si><t>plain</t></si>"].each do |item|
+      path = write(item, indices: %w[0 +0 -1 000])
+      read = lambda do
+        workbook = Roo::Excelx.new(path)
+        first = workbook.cell(1, 1)
+        first.replace("edited")
+        workbook.shared_strings.to_html[0] = "<u>replacement</u>"
+        workbook.shared_strings.to_a[0] = "new plain"
+        values = (1..4).map { workbook.cell(_1, 1) }
+        [values, values.all? { _1.equal?(first) }]
+      end
+      roo, = Oracle.read(native: false, &read)
+      native, = Oracle.read(native: true, &read)
+
+      assert_equal [:ok, [%w[edited edited edited edited], true]], roo
+      assert_equal roo, native
+    end
+  end
+
+  def test_extending_the_plain_table_does_not_extend_the_html_table
+    path = write("<si><t>plain</t></si>", indices: [1])
     read = lambda do
       workbook = Roo::Excelx.new(path)
-      first = workbook.cell(1, 1)
-      first.replace("edited")
-      workbook.shared_strings.to_html[0] = "<u>replacement</u>"
-      workbook.shared_strings.to_a[0] = "new plain"
-      values = (1..4).map { workbook.cell(_1, 1) }
-      [values, values.all? { _1.equal?(first) }]
+      workbook.shared_strings.to_a << "extra"
+      workbook.cell(1, 1)
     end
     roo, = Oracle.read(native: false, &read)
     native, = Oracle.read(native: true, &read)
 
-    assert_equal [:ok, [%w[edited edited edited edited], true]], roo
+    assert_equal [:error, NoMethodError], roo.first(2)
     assert_equal roo, native
   end
 

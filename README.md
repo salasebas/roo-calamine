@@ -68,6 +68,10 @@ every column is the median of 5 runs on 65bd561.
 <details>
 <summary>How the benchmark runs</summary>
 
+The [unique-string investigation](bench/unique_strings.md) measures the current
+selection cache against `2cd40eb`, with allocation counts, the Ruby string
+memory floor, and the remaining differences from calx's value-only contract.
+
 - Before timing, the benchmark checks that roo and roo-calamine read the same
   values.
 - For the values-only rows, plain roo runs the

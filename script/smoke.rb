@@ -46,7 +46,9 @@ Dir.mktmpdir do |dir|
   values = Roo::Spreadsheet.open(path).row(1).map(&:inspect)
   check values == ["\"name\"", "1.0", "2", "#<Date: 2023-03-15 ((2460019j,0s,0n),+0s,2299161j)>"],
         "Roo::Spreadsheet.open reads #{values.join(", ")}"
-  streamed = Roo::Excelx.new(path).each_row_streaming.map { |row| row.map(&:value) }
+  workbook = Roo::Excelx.new(path)
+  streamed = workbook.each_row_streaming.map { |row| row.map(&:value) }
+  workbook.close
   check streamed.flatten.size == 4, "each_row_streaming yields the row"
   check native_reads == 2, "both reads went through the native reader"
 end
