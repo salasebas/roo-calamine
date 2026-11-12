@@ -4,28 +4,25 @@ module Roo
   module Calamine
     # Prepended to Roo::Excelx::SheetDoc. roo finds a sheet's hyperlinks
     # (#hyperlinks, behind every read of a sheet with a hyperlink
-    # relationship) and its merged ranges (#expand_merged_ranges, under the
-    # option of that name) with XPath on a Nokogiri document of the whole
-    # sheet. Native.sheet_parts reads those elements alone, and copies of roo's
-    # loops turn them into the same results.
+    # relationship) and its merged ranges with XPath on the whole sheet.
+    # Native.sheet_parts resolves links without a Nokogiri document.
     module SheetParts
-      # roo versions whose #extract_hyperlinks and #expand_merged_ranges these
-      # methods copy; under any other version roo reads the whole document.
+      # roo versions whose hyperlink and merge rules these methods reproduce.
       ROO_VERSIONS = %w[4.0.0].freeze
 
-      private
+      def hyperlinks(relationships)
+        return super unless native? && ROO_VERSIONS.include?(Roo::VERSION)
+        return @hyperlinks if @hyperlinks
+        return @hyperlinks = {} if @options[:no_hyperlinks]
 
-      def extract_hyperlinks(relationships)
-        return super unless (parts = calamine_parts)
+        targets = relationships.calamine_hyperlink_targets
+        return @hyperlinks = {} unless targets
+        return super unless (parts = calamine_parts(targets))
 
-        parts.first.each_with_object({}) do |(ref, id, location), hash|
-          next unless (relationship = relationships[id])
-
-          target_link = relationship["Target"]
-          target_link += "##{location}" if location
-          Roo::Utils.coordinates_in_range(ref.to_s) { |coord| hash[coord] = target_link }
-        end
+        @hyperlinks = parts.first
       end
+
+      private
 
       def expand_merged_ranges(cells)
         return super unless (parts = calamine_parts)
@@ -48,14 +45,33 @@ module Roo
 
       # [hyperlinks, merge_cells] from Native.sheet_parts, or nil when roo
       # reads them from the whole document.
-      def calamine_parts
+      def calamine_parts(targets = {})
         return unless native? && ROO_VERSIONS.include?(Roo::VERSION)
 
-        @calamine_parts = Native.sheet_parts(sheet_source) if @calamine_parts.nil?
+        @calamine_parts = Native.sheet_parts(sheet_source, targets) if @calamine_parts.nil?
         @calamine_parts || nil
       rescue UnsupportedError
         @calamine_parts = false
         nil
+      end
+    end
+
+    # roo's relationship nodes stay lazy; hyperlink reads need only targets.
+    module HyperlinkRelationships
+      def calamine_hyperlink_targets
+        return targets_from_roo if @relationships || !doc_exists?
+
+        Native.hyperlink_targets(@path)
+      rescue UnsupportedError
+        targets_from_roo
+      end
+
+      private
+
+      def targets_from_roo
+        return unless include_type?("hyperlink")
+
+        to_a.transform_values { |relationship| relationship["Target"] }
       end
     end
   end

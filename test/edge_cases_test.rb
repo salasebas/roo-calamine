@@ -422,6 +422,28 @@ class EdgeCasesTest < Minitest::Test
     assert_every_path_same_as_roo(path, expand_merged_ranges: true)
   end
 
+  def test_hyperlink_relationship_markup_and_loaded_nodes
+    sheet = Workbook.sheet(%(<row r="1"><c r="A1" t="str"><v>link</v></c></row>),
+                           extra: %(<hyperlinks><hyperlink ref="A1" r:id="rId1"/><hyperlink ref="B1" r:id="rId1"/></hyperlinks>))
+    relationship = %(<Relationship Id="rId1" Type="#{Workbook::REL}/hyperlink" Target="https://example.org/?a=1&amp;b=2"/>)
+    markup = ["<Relationships>#{relationship}#{relationship.sub("example.org", "example.com")}</Relationships>",
+              %(<r:Relationships xmlns:r="rels">#{relationship.sub("Relationship", "r:Relationship")}</r:Relationships>),
+              %(<Relationships>#{relationship}<broken></Relationships>),
+              %(<!DOCTYPE Relationships [<!ENTITY target "https://example.com/">]><Relationships>#{relationship.sub("https://example.org/?a=1&amp;b=2", "&target;")}</Relationships>)]
+    markup.product([false, true]).each_with_index do |(rels, edit), index|
+      path = Workbook.write(@dir, "relationships#{index}", sheets: { "Sheet1" => sheet }, sheet_rels: { "Sheet1" => rels })
+      read = lambda do
+        workbook = Roo::Excelx.new(path)
+        workbook.sheet_for(nil).instance_variable_get(:@rels)["rId1"]["Target"] = "https://edited.example/" if edit
+        workbook.sheet_for(nil).hyperlinks[[1, 1]].replace("https://changed.example/")
+        [workbook.sheet_for(nil).hyperlinks, Oracle.describe_value(workbook.cell(1, 1))]
+      end
+
+      assert_equal :ok, Oracle.read(native: false, &read).first.first
+      assert_same_as_roo("relationship markup #{index}, edit=#{edit}", lazy: true, &read)
+    end
+  end
+
   def test_merged_ranges_roo_raises_on
     sheet = ->(ref) { Workbook.sheet(%(<row r="1"><c r="A1"><v>1</v></c></row>), extra: %(<mergeCells><mergeCell #{ref}/></mergeCells>)) }
     paths = { "no ref" => "", "one cell" => %(ref="A1"), "bad reference" => %(ref="1A:B2") }.to_h do |name, ref|
@@ -633,10 +655,14 @@ class EdgeCasesTest < Minitest::Test
       cleared = Roo::Excelx.new(path)
       cleared.cell(1, 2)
       cleared.sheet_for(nil).hyperlinks.clear
-      [Oracle.describe_value(added.cell(1, 2)), Oracle.describe_value(cleared.cell(1, 1))]
+      disabled = Roo::Excelx.new(path)
+      disabled.sheet_for(nil).hyperlinks[[1, 2]] = false
+      [Oracle.describe_value(added.cell(1, 2)), Oracle.describe_value(cleared.cell(1, 1)),
+       Oracle.describe_value(disabled.cell(1, 2))]
     end
 
-    assert_equal [:ok, [[String, false, "x"], [Roo::Link, false, "1", "https://example.com/"]]], Oracle.read(native: false, &edit).first
+    assert_equal [:ok, [[String, false, "x"], [Roo::Link, false, "1", "https://example.com/"], [String, false, "x"]]],
+                 Oracle.read(native: false, &edit).first
     assert_same_as_roo("hyperlinks", lazy: true, &edit)
   end
 

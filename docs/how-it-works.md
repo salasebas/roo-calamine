@@ -36,7 +36,7 @@ consumes the rows that are ready.
 Under roo 4.0.0 the extension sets each cell's instance variables the way
 roo's constructors do, without running them. Some cells still go through roo's
 own constructors:
-- cells with a hyperlink;
+- non-text cells with a hyperlink;
 - number text that is not plainly written;
 - every cell under other roo versions.
 
@@ -47,8 +47,9 @@ own constructors:
   and `#first_row` … `#last_column` build only the cells they read, the first
   time each is read.
 - **`#row`, `#column`, `#each`, and `#parse`** read values straight from the
-  records. They build a cell only for a value that needs one: a hyperlink, a
-  date with a time, or a time.
+  records. Linked inline and `t="str"` text becomes a `Roo::Link` without a
+  cell. Shared-string links, non-text links, and other values that need roo's
+  constructors still build a cell.
 - **The records keep each value they hand out**, so a cell built later holds
   that very object, as in roo.
 - **Anything that needs the whole `Sheet#cells` hash** (`#set`, `clean: true`,
@@ -59,8 +60,9 @@ own constructors:
 
 roo finds a sheet's hyperlinks, and its merged ranges under
 `expand_merged_ranges`, with XPath on a Nokogiri document of the whole sheet.
-The extension reads those `hyperlink` and `mergeCell` elements alone, and
-copies of roo's loops turn them into the same hyperlinks and merged cells.
+The extension reads relationship targets and resolves single-cell hyperlink
+references natively. Metadata extraction shares the native XML validator's
+pass over the sheet. Range hyperlinks and merged cells keep roo's rules.
 
 ## `each` and `parse`
 

@@ -289,6 +289,23 @@ impl<R: BufRead> SheetReader<R> {
         row
     }
 
+    /// Reads a validated XML event without building worksheet rows.
+    pub(crate) fn next_xml_event<'b>(&mut self, buf: &'b mut Vec<u8>) -> Result<Event<'b>> {
+        let depth = self.open_elements;
+        let event = self.read_event(buf)?;
+        if depth == 0 {
+            self.check_top_level(&event)?;
+        }
+        match &event {
+            Event::Decl(decl) => check_encoding(decl)?,
+            Event::Eof if depth != 0 => {
+                return Err(Unsupported("unexpected end of the document".into()));
+            }
+            _ => {}
+        }
+        Ok(event)
+    }
+
     fn find_row(&mut self, buf: &mut Vec<u8>) -> Result<Option<RawRow>> {
         if self.done {
             return Ok(None);

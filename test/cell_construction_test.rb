@@ -39,6 +39,31 @@ class CellConstructionTest < Minitest::Test
     GC.enable
   end
 
+  def test_linked_text_values_do_not_build_full_cells_and_keep_their_identity
+    rows = %(<row r="1"><c r="A1" t="inlineStr"><is><t>inline</t></is></c><c r="B1" t="str"><v>text</v></c></row>)
+    sheet = Workbook.sheet(rows, extra: %(<hyperlinks><hyperlink ref="A1:B1" r:id="rId1"/></hyperlinks>))
+    rels = %(<Relationships><Relationship Id="rId1" Type="#{Workbook::REL}/hyperlink" Target="https://example.com/"/></Relationships>)
+    path = Workbook.write(@dir, "links", sheets: { "Sheet1" => sheet }, sheet_rels: { "Sheet1" => rels })
+    workbook = Roo::Excelx.new(path)
+    GC.disable
+    before = ObjectSpace.each_object(Roo::Excelx::Cell::String).count
+    values = workbook.row(1)
+
+    assert_equal before, ObjectSpace.each_object(Roo::Excelx::Cell::String).count
+    described = values.map { |value| [value.class, value.to_s, value.href] }
+
+    assert_equal [[Roo::Link, "inline", "https://example.com/"], [Roo::Link, "text", "https://example.com/"]],
+                 described
+
+    values.first.replace("edited")
+    cells = workbook.sheet_for(nil).cells.values
+
+    assert_same values.first, cells.first.value
+    assert_equal %w[inline text], cells.map(&:cell_value)
+  ensure
+    GC.enable
+  end
+
   def test_temporal_values_keep_roos_rounding_identity_and_full_cell_state
     path = write_serials(%w[45000.1234565 45000.9999999 1.0000009 1.0000011 0.0000005 -0.25 -60000000000000.25])
     [false, true].each do |date1904|
@@ -77,6 +102,20 @@ class CellConstructionTest < Minitest::Test
     end
   ensure
     GC.enable
+  end
+
+  def test_false_hyperlinks_keep_temporal_value_identity
+    sheet = Workbook.sheet(%(<row r="1"><c r="A1" s="1"><v>45000</v></c></row>))
+    path = Workbook.write(@dir, "false_link", sheets: { "Sheet1" => sheet })
+    read = lambda do
+      workbook = Roo::Excelx.new(path)
+      workbook.sheet_for(nil).hyperlinks[[1, 1]] = false
+      value = workbook.row(1).first
+      value.equal?(workbook.sheet_for(nil).cells[[1, 1]].value)
+    end
+
+    assert_equal [:ok, true], Oracle.read(native: false, &read).first
+    assert_same_as_roo("false hyperlink value identity", lazy: true, &read)
   end
 
   def test_temporal_overflow_keeps_roos_values_and_errors

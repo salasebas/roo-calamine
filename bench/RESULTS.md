@@ -2,9 +2,11 @@
 
 Every scenario `run.rb --all` runs, except the default table in
 [README.md](README.md#results). Apple M5 Pro, Ruby 3.4.12, roo 4.0.0,
-calx 0.1.0, xsv 1.4.1, on 7250ff9. Each row is the median of 3–10 runs,
-stopping after 10 s, and roo and roo-calamine read the same values in every
-row.
+calx 0.1.0, xsv 1.4.1. Most rows are from 7250ff9, with medians of 3–10
+runs, stopping after 10 s. The hyperlink rows' roo-calamine and calx times
+are from this change, with seven fresh processes per scenario; roo and xsv
+keep their earlier measurements. All roo and roo-calamine digest comparisons
+passed. The [hyperlink follow-up](#hyperlink-reads-issue-64) records its baseline.
 
 | File | Scenario | roo | roo + roo-calamine | Faster | Less memory | calx (reference) | Time vs calx | xsv (reference) | Flag |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---|
@@ -93,14 +95,14 @@ row.
 | multi-sheet.xlsx | `sheets` | 29.5 ms, 113 MB | 2.1 ms, 42 MB | 13.8× | 2.7× | - | - | - |  |
 | multi-sheet.xlsx | `sheet(n)` + one `cell` per sheet | 3.75 s, 963 MB | 0.12 s, 58 MB | 30.5× | 16.4× | - | - | - |  |
 | multi-sheet.xlsx | `dimensions` of every sheet | 30.3 ms, 113 MB | 19.7 ms, 42 MB | 1.5× | 2.7× | - | - | - | < 5× roo |
-| links-merges-10k.xlsx | `Roo::Spreadsheet.open` + `each_row_streaming` | 0.46 s, 170 MB | 64.9 ms, 75 MB | 7.1× | 2.3× | 13.0 ms, 31 MB | 5.0× | 0.27 s, 51 MB | > 1.2× calx |
-| links-merges-10k.xlsx | `each` (one Array of values per row) | 0.37 s, 187 MB | 66.4 ms, 67 MB | 5.5× | 2.8× | 11.3 ms, 31 MB | 5.9× | 0.25 s, 50 MB | > 1.2× calx |
-| links-merges-10k.xlsx | `to_csv` | 0.43 s, 188 MB | 72.7 ms, 67 MB | 5.9× | 2.8× | 14.3 ms, 31 MB | 5.1× | 0.26 s, 49 MB | > 1.2× calx |
-| links-merges-10k.xlsx | 10,000 random `hyperlink` | 0.39 s, 183 MB | 56.1 ms, 63 MB | 6.9× | 2.9× | - | - | - |  |
-| links-merges-10k.xlsx | 10,000 random `hyperlink?` | 0.38 s, 183 MB | 56.1 ms, 63 MB | 6.7× | 2.9× | - | - | - |  |
-| links-merges-10k.xlsx | `sheet_for(...).hyperlinks` | 66.0 ms, 160 MB | 35.8 ms, 62 MB | 1.8× | 2.5× | - | - | - | < 5× roo |
-| links-merges-10k.xlsx | `expand_merged_ranges: true` + `each` | 0.39 s, 188 MB | 82.4 ms, 80 MB | 4.7× | 2.3× | - | - | - | < 5× roo |
-| links-merges-10k.xlsx | `no_hyperlinks: true` + `each` | 0.32 s, 172 MB | 18.4 ms, 44 MB | 17.4× | 3.8× | - | - | - |  |
+| links-merges-10k.xlsx | `Roo::Spreadsheet.open` + `each_row_streaming` | 0.46 s, 170 MB | 51.8 ms, 58 MB | 8.9× | 2.9× | 13.3 ms, 31 MB | 3.9× | 0.27 s, 51 MB | > 1.2× calx |
+| links-merges-10k.xlsx | `each` (one Array of values per row) | 0.37 s, 187 MB | 44.4 ms, 52 MB | 8.3× | 3.6× | 11.6 ms, 31 MB | 3.8× | 0.25 s, 50 MB | > 1.2× calx |
+| links-merges-10k.xlsx | `to_csv` | 0.43 s, 188 MB | 51.5 ms, 52 MB | 8.3× | 3.6× | 14.7 ms, 31 MB | 3.5× | 0.26 s, 49 MB | > 1.2× calx |
+| links-merges-10k.xlsx | 10,000 random `hyperlink` | 0.39 s, 183 MB | 42.1 ms, 51 MB | 9.3× | 3.6× | - | - | - |  |
+| links-merges-10k.xlsx | 10,000 random `hyperlink?` | 0.38 s, 183 MB | 42.5 ms, 51 MB | 8.9× | 3.6× | - | - | - |  |
+| links-merges-10k.xlsx | `sheet_for(...).hyperlinks` | 66.0 ms, 160 MB | 23.8 ms, 48 MB | 2.8× | 3.3× | - | - | - | < 5× roo |
+| links-merges-10k.xlsx | `expand_merged_ranges: true` + `each` | 0.39 s, 188 MB | 69.4 ms, 66 MB | 5.6× | 2.8× | - | - | - |  |
+| links-merges-10k.xlsx | `no_hyperlinks: true` + `each` | 0.32 s, 172 MB | 19.2 ms, 45 MB | 16.7× | 3.8× | - | - | - |  |
 | comments-formulas-10k.xlsx | `Roo::Spreadsheet.open` + `each_row_streaming` | 0.36 s, 73 MB | 25.6 ms, 49 MB | 14.1× | 1.5× | 15.0 ms, 32 MB | 1.7× | 0.27 s, 51 MB | > 1.2× calx |
 | comments-formulas-10k.xlsx | `each` (one Array of values per row) | 0.29 s, 165 MB | 21.6 ms, 46 MB | 13.6× | 3.5× | 13.4 ms, 32 MB | 1.6× | 0.27 s, 51 MB | > 1.2× calx |
 | comments-formulas-10k.xlsx | `to_csv` | 0.37 s, 164 MB | 21.7 ms, 45 MB | 17.1× | 3.6× | 17.1 ms, 32 MB | 1.3× | 0.28 s, 51 MB | > 1.2× calx |
@@ -145,7 +147,7 @@ row.
 ## Flagged
 
 A row is flagged when roo-calamine is less than 5× faster than roo, or more
-than 1.2× slower than calx. 59 of 133 rows are; the reasons:
+than 1.2× slower than calx. 58 of 133 rows are; the reasons:
 
 - **roo's own code.** These reads still run roo's code, so roo-calamine only
   saves the time it takes to open the workbook:
@@ -159,19 +161,17 @@ than 1.2× slower than calx. 59 of 133 rows are; the reasons:
   19–25× faster on `mixed-10k.xlsx`.
 - **`to_s`** is `cells.inspect`: 97% of its time is Ruby inspecting every
   cell, which roo's output requires.
-- **Cells built by roo's constructors** (from #49). Hyperlink cells and
-  date-with-time cells are still built by roo's code, and
-  `expand_merged_ranges` builds the sheet whole:
-  - `links-merges-10k.xlsx` is 5–7× faster than roo but 5–6× slower than
-    calx, and `expand_merged_ranges` is 4.7×;
+- **Non-text links, temporal values, and merged ranges.** Linked text now uses the native
+  cell builder. Non-text links still use roo's constructors; temporal values
+  keep roo's rounding and object types. `expand_merged_ranges` builds the
+  sheet whole:
+  - `links-merges-10k.xlsx` is about 8× faster than roo for `each`, but
+    3.8× slower than calx, which returns plain values without link targets;
   - on `dates-10k.xlsx`, `to_csv` is 5.0×, `to_yaml` 4.9×, and
     `formatted_value` 3.7×;
-  - `sheet_for(...).hyperlinks` reads the links natively, yet is only 1.8×
-    faster. Half its time is roo's `Roo::Utils.coordinates_in_range` on each
-    link's cell reference, a quarter is roo parsing the sheet's relationships
-    with Nokogiri, and 15% is reading each link's target from those nodes.
+  - `sheet_for(...).hyperlinks` is 2.8× faster than roo. Its 23.8 ms still
+    includes validating the sheet XML and building the coordinate Hash.
 
-  These are the leads to work on next.
 - **roo's objects.** On the other 10k files, roo-calamine is 1.2–1.7× slower
   than calx because it returns what roo returns: `Roo::Excelx::Cell`s, HTML
   for rich text, and roo's value rules. `comments-formulas-10k.xlsx` has the
@@ -190,3 +190,28 @@ plain values against roo's cells.
 - A sheet where some cell would raise: every read raises under roo too, so
   there is nothing to time.
 - `.ods` and `.xls`: the bench cannot write them, and `.xls` needs roo-xls.
+
+## Hyperlink reads (issue #64)
+
+Ruby 3.4.12, roo 4.0.0, Apple M5 Pro, median of seven fresh processes.
+On `3df99e4`, `each` took 71.1 ms and 67 MB; this change takes 44.4 ms and
+52 MB, or 38% less time. `sheet_for(...).hyperlinks` drops from 37.7 to
+23.8 ms. `each` is 2.31× the no-hyperlinks read, down from 3.78×. The main
+table contains the updated timings for all eight affected rows.
+
+Relationship targets and single-cell references come from the native reader.
+Metadata validation shares its XML pass. Document reads index links by row
+and column and return inline and `t="str"` linked text without full cells.
+Non-text links and merged ranges keep their existing storage and constructors.
+
+Calx 0.1.0 takes 13.3 ms for `each_row` with each value visited, and 11.6 ms
+with each row visited. It returns plain values without hyperlink targets and
+has no hyperlink lookup, merge expansion, or `to_csv` API. Its 14.7 ms CSV
+reference in the table reads rows and joins values with commas; it does not
+quote CSV fields.
+
+Run from the repository root with Ruby 3.4.12:
+
+```sh
+BUNDLE_GEMFILE=bench/Gemfile bundle exec ruby bench/run.rb --scenario stream,each,csv,no_hyperlinks,hyperlinks,hyperlink,is-hyperlink,expand_merged_ranges --fixture links-merges-10k 7 roo-calamine calx
+```

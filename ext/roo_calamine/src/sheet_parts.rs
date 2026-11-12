@@ -8,20 +8,19 @@
 //!
 //! roo removes the document's namespaces first, so names compare by local
 //! name. Nokogiri recovers from XML that is not well-formed into a tree this
-//! reader does not reproduce, so a [`SheetReader`] checks on another thread
-//! that Nokogiri reads the sheet as quick-xml does; anything it rejects is
-//! left to roo.
+//! reader does not reproduce, so each event passes through [`SheetReader`]'s
+//! XML checks. Anything it rejects is left to roo.
 
+use std::collections::HashMap;
 use std::io::{self, BufRead, Read};
-use std::panic::resume_unwind;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use magnus::{prelude::*, Error, RString, Ruby};
+use magnus::{prelude::*, Error, RArray, RHash, RString, Ruby, Value};
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::XmlVersion;
 
 use crate::archive::{Input, Source, ZipEntry};
-use crate::reader::{Mode, Unsupported};
+use crate::reader::{parse_reference, Mode, SheetReader, Unsupported};
 use crate::{unsupported, without_gvl};
 
 type Result<T> = std::result::Result<T, Unsupported>;
@@ -38,7 +37,7 @@ enum Section {
 }
 
 pub struct SheetPartsReader<R: BufRead> {
-    xml: quick_xml::Reader<R>,
+    xml: SheetReader<R>,
     buf: Vec<u8>,
     depth: usize,
     root_is_worksheet: bool,
@@ -46,18 +45,22 @@ pub struct SheetPartsReader<R: BufRead> {
     pub hyperlinks: Vec<Hyperlink>,
     /// Each `mergeCell`'s `ref`.
     pub merge_cells: Vec<Option<String>>,
+    pub relationships: HashMap<Option<String>, (Option<String>, Option<String>)>,
+    root_is_relationships: bool,
 }
 
 impl<R: BufRead> SheetPartsReader<R> {
     pub fn new(input: R) -> Self {
         Self {
-            xml: quick_xml::Reader::from_reader(input),
+            xml: SheetReader::new(input, Mode::Document),
             buf: Vec::new(),
             depth: 0,
             root_is_worksheet: false,
             section: Section::Other,
             hyperlinks: Vec::new(),
             merge_cells: Vec::new(),
+            relationships: HashMap::new(),
+            root_is_relationships: false,
         }
     }
 
@@ -71,13 +74,17 @@ impl<R: BufRead> SheetPartsReader<R> {
     }
 
     fn read_event(&mut self, buf: &mut Vec<u8>) -> Result<bool> {
-        match self.xml.read_event_into(buf)? {
+        match self.xml.next_xml_event(buf)? {
             Event::Start(e) => {
                 self.depth += 1;
                 let (depth, root_is_worksheet, section) =
                     (self.depth, self.root_is_worksheet, self.section);
                 match (depth, e.local_name().as_ref()) {
-                    (1, name) => self.root_is_worksheet = name == "worksheet",
+                    (1, name) => {
+                        self.root_is_worksheet = name == "worksheet";
+                        self.root_is_relationships = name == "Relationships";
+                    }
+                    (2, "Relationship") if self.root_is_relationships => self.relationship(&e)?,
                     (2, "hyperlinks") if root_is_worksheet => self.section = Section::Hyperlinks,
                     (2, "mergeCells") if root_is_worksheet => self.section = Section::MergeCells,
                     (3, _) if section != Section::Other => self.take(&e)?,
@@ -86,6 +93,11 @@ impl<R: BufRead> SheetPartsReader<R> {
             }
             Event::Empty(e) if self.depth == 2 && self.section != Section::Other => {
                 self.take(&e)?;
+            }
+            Event::Empty(e) if self.depth == 1 && self.root_is_relationships => {
+                if e.local_name().as_ref() == "Relationship" {
+                    self.relationship(&e)?;
+                }
             }
             Event::End(_) => {
                 if self.depth == 2 {
@@ -112,6 +124,12 @@ impl<R: BufRead> SheetPartsReader<R> {
             }
             _ => {}
         }
+        Ok(())
+    }
+
+    fn relationship(&mut self, e: &BytesStart<'_>) -> Result<()> {
+        let [id, kind, target] = attributes(e, ["Id", "Type", "Target"])?;
+        self.relationships.insert(id, (kind, target));
         Ok(())
     }
 }
@@ -152,57 +170,79 @@ fn until(interrupted: &AtomicBool, mut step: impl FnMut() -> Result<bool>) -> Re
     Ok(false)
 }
 
-/// Reads the parts of the worksheet `source` with the GVL released, while
-/// another thread checks that Nokogiri reads the sheet the same way.
+/// Reads and validates worksheet or relationship parts with the GVL released.
 fn read(ruby: &Ruby, source: &Source) -> std::result::Result<SheetPartsReader<Input>, Error> {
-    let mut check = source.open(ruby, Mode::Document)?;
     let mut parts = SheetPartsReader::new(source.input(ruby)?);
-    let (mut checked, mut read) = (false, false);
-    while !(checked && read) {
-        let (checking, reading) = without_gvl(|interrupted| {
-            std::thread::scope(|scope| {
-                let checking = if checked {
-                    None
-                } else {
-                    let thread = std::thread::Builder::new()
-                        .name("roo-calamine".into())
-                        .spawn_scoped(scope, || {
-                            until(interrupted, || Ok(check.next_row()?.is_some()))
-                        })
-                        .map_err(|e| Unsupported(e.to_string()))?;
-                    Some(thread)
-                };
-                let reading = read || until(interrupted, || parts.next_event())?;
-                let checking = match checking {
-                    Some(thread) => thread.join().unwrap_or_else(|panic| resume_unwind(panic))?,
-                    None => true,
-                };
-                Ok((checking, reading))
-            })
-        })?
-        .map_err(|e| unsupported(ruby, e))?;
-        (checked, read) = (checking, reading);
-    }
+    while !without_gvl(|interrupted| until(interrupted, || parts.next_event()))?
+        .map_err(|e| unsupported(ruby, e))?
+    {}
     Ok(parts)
 }
 
-/// `Native.sheet_parts(source)`, for a worksheet's path or `Native::ZipEntry`:
-/// `[hyperlinks, merge_cells]`, where each
-/// hyperlink is `[ref, id, location]` and each merged range its `ref`, in
-/// document order, with `nil` for a missing attribute. Raises
+/// `Native.sheet_parts(source, targets)`, for a worksheet's path or
+/// `Native::ZipEntry`: `[hyperlinks, merge_cells]`, with resolved targets
+/// keyed by roo coordinates and merged references in document order. Raises
 /// `Roo::Calamine::UnsupportedError` for a sheet roo reads differently.
 fn sheet_parts(
     ruby: &Ruby,
     source: Source,
-) -> std::result::Result<(Vec<Hyperlink>, Vec<Option<String>>), Error> {
+    targets: RHash,
+) -> std::result::Result<(RHash, Vec<Option<String>>), Error> {
     let parts = read(ruby, &source)?;
-    Ok((parts.hyperlinks, parts.merge_cells))
+    let hyperlinks = ruby.hash_new();
+    let coordinate_class: magnus::RClass = ruby.eval("Roo::Excelx::Coordinate")?;
+    let utils: Value = ruby.eval("Roo::Utils")?;
+    for (reference, id, location) in parts.hyperlinks {
+        let Some(mut target) = targets.get(id) else {
+            continue;
+        };
+        if let Some(location) = location {
+            target = target.funcall("+", (ruby.str_new(&format!("#{location}")),))?;
+        } else {
+            target = target.funcall("dup", ())?;
+        }
+        match reference.as_deref().and_then(parse_reference) {
+            Some((row, column)) => {
+                let coordinate = RArray::from_value(coordinate_class.obj_alloc()?)
+                    .expect("Coordinate is an Array");
+                coordinate.push(row)?;
+                coordinate.push(column)?;
+                coordinate.freeze();
+                hyperlinks.aset(coordinate, target)?;
+            }
+            None => {
+                let coordinates: Value =
+                    utils.funcall("coordinates_in_range", (reference.unwrap_or_default(),))?;
+                let coordinates: RArray = coordinates.funcall("to_a", ())?;
+                for coordinate in coordinates.into_iter() {
+                    hyperlinks.aset(coordinate, target)?;
+                }
+            }
+        }
+    }
+    Ok((hyperlinks, parts.merge_cells))
 }
 
 pub fn define(native: magnus::RModule) -> std::result::Result<(), Error> {
-    native.define_singleton_method("sheet_parts", magnus::function!(sheet_parts, 1))?;
+    native.define_singleton_method("sheet_parts", magnus::function!(sheet_parts, 2))?;
     native.define_singleton_method("metadata_bytes", magnus::function!(metadata_bytes, 1))?;
+    native.define_singleton_method("hyperlink_targets", magnus::function!(hyperlink_targets, 1))?;
     Ok(())
+}
+
+fn hyperlink_targets(ruby: &Ruby, source: Source) -> std::result::Result<Option<RHash>, Error> {
+    let parts = read(ruby, &source)?;
+    if !parts.relationships.values().any(|(kind, _)| {
+        kind.as_deref()
+            .is_some_and(|kind| kind.contains("hyperlink"))
+    }) {
+        return Ok(None);
+    }
+    let targets = ruby.hash_new();
+    for (id, (_, target)) in parts.relationships {
+        targets.aset(id, target)?;
+    }
+    Ok(Some(targets))
 }
 
 /// Inflates a workbook metadata entry without an intermediate file, using
