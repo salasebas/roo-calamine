@@ -677,7 +677,7 @@ class EdgeCasesTest < Minitest::Test
     reads = [workbook.last_row, workbook.last_column, workbook.cell(2, 2), workbook.celltype(2, 2), workbook.empty?(3, 1)]
 
     assert_equal [3, 3, 4, :float, false], reads
-    assert_equal 2, built.call
+    assert_equal 1, built.call
     assert_equal 9, workbook.sheet_for(nil).cells.size
     assert_equal 9, built.call
   ensure

@@ -33,7 +33,11 @@ module Roo
 
       def cell(row, col, sheet = nil)
         row, col = normalize(row, col) if row.is_a?(String) || col.is_a?(String)
-        cell = sheet_for(sheet).cell_at(row, col)
+        sheet = sheet_for(sheet)
+        lazy = sheet.lazy_cells
+        return lazy.value_at(row, col) if lazy
+
+        cell = sheet.cell_at(row, col)
         cell.value if cell.respond_to?(:value)
       end
 
@@ -52,7 +56,11 @@ module Roo
 
       def celltype(row, col, sheet = nil)
         row, col = normalize(row, col) if row.is_a?(String) || col.is_a?(String)
-        cell = sheet_for(sheet).cell_at(row, col)
+        sheet = sheet_for(sheet)
+        lazy = sheet.lazy_cells
+        return lazy.type_at(row, col) if lazy
+
+        cell = sheet.cell_at(row, col)
         cell.type if cell.respond_to?(:type)
       end
 

@@ -1,5 +1,33 @@
 # Benchmark results
 
+## Single-cell reads after #68 investigation
+
+Apple M5 Pro, Ruby 3.4.12, roo 4.0.0. Each number is the median of nine
+fresh processes, including opening `small.xlsx` and 10,000 seeded random
+reads. The benchmark verified identical roo and roo-calamine result hashes
+before timing. The baseline is 3df99e4.
+
+| Read | roo-calamine before | roo-calamine after | Time reduction | roo after | Faster than roo |
+|---|---:|---:|---:|---:|---:|
+| `cell` | 7.8 ms | 6.5 ms | 17% | 19.3 ms | 3.0× |
+| `celltype` | 9.0 ms | 7.2 ms | 20% | 22.5 ms | 3.1× |
+
+Peak RSS stayed at 41 MB. Scalar reads reuse the store's existing value
+conversion and type classification instead of constructing a roo cell.
+Reads that need a cell still build one, and reads after materialization use
+the public cells hash. Existing parity tests cover every single-cell API.
+
+This does not meet #68's 4× target. The change keeps the measured improvement
+small in scope; that target remains open. Native public entry points,
+native sheet validation, and direct indexing of rectangular sheets did not
+provide enough benefit to retain.
+
+```sh
+BUNDLE_GEMFILE=bench/Gemfile bundle exec ruby bench/run.rb 9 \
+  --scenario cell,celltype,formula,excelx_type,excelx_value,formatted_value,excelx_format,font \
+  --fixture small roo roo-calamine
+```
+
 ## Cleaning strings, issue 65
 
 Apple M5 Pro, Ruby 3.4.12, roo 4.0.0, `mixed-100k.xlsx` with 100k rows and

@@ -150,8 +150,8 @@ pub struct Store {
     /// The cells built so far, by [`key`].
     built: Opaque<RHash>,
     /// By record, the values [`Store::value`] handed out before their cell
-    /// was built, which that cell then holds: `nil`, or an object that is
-    /// not a shared string (the converter picks the same one again).
+    /// was built, which that cell then holds: `nil`, or a non-shared value
+    /// (the converter picks the same shared string again).
     handed_out: Opaque<RArray>,
     /// Sanitized values, separate from the original values roo's cells retain.
     cleaned: Opaque<RArray>,
@@ -453,13 +453,65 @@ impl Store {
         row: Value,
         column: Value,
     ) -> Result<Option<Value>, Error> {
+        match rb_self.record_at(row, column) {
+            Some(record) => rb_self.build(ruby, record).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    fn record_at(&self, row: Value, column: Value) -> Option<u32> {
         let part = |value| Integer::from_value(value).and_then(|n| n.to_u32().ok());
         let (Some(row), Some(column)) = (part(row), part(column)) else {
+            return None;
+        };
+        self.position((row, column)).ok().map(|i| self.index[i])
+    }
+
+    fn value_at(
+        ruby: &Ruby,
+        rb_self: &Self,
+        row: Value,
+        column: Value,
+    ) -> Result<Option<Value>, Error> {
+        let Some(record) = rb_self.record_at(row, column) else {
             return Ok(None);
         };
-        match rb_self.position((row, column)) {
-            Ok(i) => rb_self.build(ruby, rb_self.index[i]).map(Some),
-            Err(_) => Ok(None),
+        let handed_out = ruby.get_inner(rb_self.handed_out);
+        if ruby.get_inner(rb_self.built).is_empty() {
+            let value: Value = handed_out.entry(record as isize)?;
+            if !value.is_nil() {
+                return Ok(Some(value));
+            }
+        }
+        let value = rb_self.value(ruby, record)?;
+        if !rb_self.records[record as usize].shared_string() {
+            handed_out.store(record as isize, value)?;
+        }
+        Ok(Some(value))
+    }
+
+    fn type_at(
+        ruby: &Ruby,
+        rb_self: &Self,
+        row: Value,
+        column: Value,
+    ) -> Result<Option<Value>, Error> {
+        let Some(record) = rb_self.record_at(row, column) else {
+            return Ok(None);
+        };
+        let built = ruby.get_inner(rb_self.built);
+        if !built.is_empty() {
+            if let Some(cell) = built.get(rb_self.records[record as usize].built_key()) {
+                return cell.funcall("type", ()).map(Some);
+            }
+        }
+        let raw = rb_self.formulas.raw(&rb_self.records, record);
+        match ruby
+            .get_inner(rb_self.converter)
+            .formatter_type(ruby, &raw)?
+        {
+            Some(kind) => Ok(Some(ruby.sym_new(kind).as_value())),
+            None => rb_self.build(ruby, record)?.funcall("type", ()).map(Some),
         }
     }
 
@@ -814,6 +866,8 @@ pub fn define(ruby: &Ruby, native: magnus::RModule) -> Result<(), Error> {
     store.define_singleton_method("read", magnus::function!(Store::read, 2))?;
     store.define_method("[]", magnus::method!(Store::get, 1))?;
     store.define_method("cell_at", magnus::method!(Store::cell_at, 2))?;
+    store.define_method("value_at", magnus::method!(Store::value_at, 2))?;
+    store.define_method("type_at", magnus::method!(Store::type_at, 2))?;
     store.define_method("bounds", magnus::method!(Store::bounds, 0))?;
     store.define_method("row", magnus::method!(Store::row, 3))?;
     store.define_method("each_row", magnus::method!(Store::each_row, 3))?;
