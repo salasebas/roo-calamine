@@ -3,9 +3,11 @@
 //! value is enough. Formatting that depends on Ruby (numbers, dates, errors)
 //! stays the `Roo::Calamine::CSV` helpers of the workbook.
 
+use std::io::Write;
+
 use magnus::encoding::EncodingCapable;
 use magnus::value::ReprValue;
-use magnus::{Error, RString, Ruby, Value};
+use magnus::{Error, Integer, RString, Ruby, TryConvert, Value};
 
 use super::{Converter, ValueType};
 use crate::reader::{Body, Kind, RawCell, Reference};
@@ -98,7 +100,7 @@ enum Class {
     String,
     Boolean,
     Number,
-    Date,
+    Temporal,
 }
 
 impl Converter {
@@ -136,8 +138,7 @@ impl Converter {
             (Body::Value(_), Kind::ByFormat) => {
                 match self.style_info(ruby, self.style(ruby, raw)?)?.1 {
                     ValueType::Number => Class::Number,
-                    ValueType::Date => Class::Date,
-                    ValueType::DateTime | ValueType::Time => return Ok(false),
+                    ValueType::Date | ValueType::DateTime | ValueType::Time => Class::Temporal,
                 }
             }
         };
@@ -167,7 +168,21 @@ impl Converter {
                 output.field(ruby, book.funcall("csv_formula_value", (value,))?)?
             }
             (Class::Number, _) => output.field(ruby, book.funcall("csv_number", (value,))?)?,
-            (Class::Date, _) => output.field(ruby, value.funcall("to_s", ())?)?,
+            (Class::Temporal, _) if Integer::from_value(value).is_some() => {
+                if let Ok(seconds) = i32::try_convert(value) {
+                    write!(
+                        output.bytes,
+                        "{:02}:{:02}:{:02}",
+                        seconds.div_euclid(3600),
+                        seconds.rem_euclid(3600) / 60,
+                        seconds.rem_euclid(60)
+                    )
+                    .expect("writing to a Vec cannot fail");
+                } else {
+                    output.field(ruby, book.funcall("integer_to_timestring", (value,))?)?;
+                }
+            }
+            (Class::Temporal, _) => output.field(ruby, value.funcall("to_s", ())?)?,
         }
         Ok(true)
     }

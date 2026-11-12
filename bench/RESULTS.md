@@ -36,6 +36,12 @@ checked against roo before timing. Iteration rows use five runs, except
 on be4ab9b. Ratios use the published roo time and memory figures. Other
 operations retain their earlier measurements.
 
+The roo and roo-calamine results for `dates-10k.xlsx`'s `each`, `to_csv`, and
+`formatted_value` include the date and time optimization. They are medians of nine fresh
+processes per version, including workbook opening, on the same Ruby 3.4.12.
+Value hashes match roo. The calx and xsv references keep their earlier results.
+Repeat with `bundle exec ruby run.rb 9 --scenario csv,formatted_value,each --fixture dates-10k roo roo-calamine` from `bench`.
+
 | File | Scenario | roo | roo + roo-calamine | Faster | Less memory | calx (reference) | Time vs calx | xsv (reference) | Flag |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---|
 | mixed-100k.xlsx | `Roo::Excelx.new(path)`, no read | 0.14 s, 118 MB | 3.1 ms, 42 MB | 45.9× | 2.8× | - | - | - |  |
@@ -143,15 +149,15 @@ operations retain their earlier measurements.
 | comments-formulas-10k.xlsx | `labels` | 6.0 ms, 64 MB | 1.9 ms, 41 MB | 3.2× | 1.6× | - | - | - | < 5× roo |
 | comments-formulas-10k.xlsx | `images` | 5.9 ms, 64 MB | 1.8 ms, 40 MB | 3.3× | 1.6× | - | - | - | < 5× roo |
 | dates-10k.xlsx | `Roo::Spreadsheet.open` + `each_row_streaming` | 0.38 s, 76 MB | 59.1 ms, 51 MB | 6.5× | 1.5× | 49.2 ms, 33 MB | 1.2× | 0.42 s, 43 MB | > 1.2× calx |
-| dates-10k.xlsx | `each` (one Array of values per row) | 0.35 s, 189 MB | 53.4 ms, 55 MB | 6.6× | 3.4× | 46.1 ms, 33 MB | 1.2× | 0.42 s, 43 MB |  |
-| dates-10k.xlsx | `to_csv` | 0.46 s, 189 MB | 93.4 ms, 63 MB | 5.0× | 3.0× | 73.5 ms, 33 MB | 1.3× | 0.44 s, 43 MB | < 5× roo, > 1.2× calx |
+| dates-10k.xlsx | `each` (one Array of values per row) | 0.37 s, 188 MB | 46.3 ms, 55 MB | 7.9× | 3.4× | 46.1 ms, 33 MB | 1.0× | 0.42 s, 43 MB |  |
+| dates-10k.xlsx | `to_csv` | 0.51 s, 193 MB | 51.8 ms, 51 MB | 9.8× | 3.8× | 73.5 ms, 33 MB | 0.7× | 0.44 s, 43 MB |  |
 | dates-10k.xlsx | `to_yaml` | 0.54 s, 197 MB | 0.11 s, 70 MB | 4.9× | 2.8× | - | - | - | < 5× roo |
 | dates-10k.xlsx | `to_xml` | 0.76 s, 228 MB | 97.9 ms, 80 MB | 7.7× | 2.8× | - | - | - |  |
 | dates-10k.xlsx | `to_matrix` | 0.38 s, 190 MB | 54.9 ms, 56 MB | 6.9× | 3.3× | - | - | - |  |
 | dates-10k.xlsx | 10,000 random `celltype` | 0.34 s, 183 MB | 34.5 ms, 50 MB | 9.8× | 3.6× | - | - | - |  |
 | dates-10k.xlsx | 10,000 random `excelx_type` | 0.34 s, 183 MB | 33.2 ms, 50 MB | 10.1× | 3.6× | - | - | - |  |
 | dates-10k.xlsx | 10,000 random `excelx_value` | 0.34 s, 183 MB | 33.0 ms, 50 MB | 10.2× | 3.6× | - | - | - |  |
-| dates-10k.xlsx | 10,000 random `formatted_value` | 0.42 s, 198 MB | 0.11 s, 53 MB | 3.7× | 3.7× | - | - | - | < 5× roo |
+| dates-10k.xlsx | 10,000 random `formatted_value` | 0.43 s, 200 MB | 39.7 ms, 51 MB | 10.8× | 3.9× | - | - | - |  |
 | dates-10k.xlsx | 10,000 random `excelx_format` | 0.34 s, 184 MB | 36.3 ms, 50 MB | 9.3× | 3.6× | - | - | - |  |
 | rich-text-10k.xlsx | `Roo::Spreadsheet.open` + `each_row_streaming` | 1.55 s, 288 MB | 55.1 ms, 61 MB | 28.2× | 4.7× | 37.9 ms, 34 MB | 1.5× | 0.85 s, 86 MB | > 1.2× calx |
 | rich-text-10k.xlsx | `each` (one Array of values per row) | 0.92 s, 345 MB | 52.7 ms, 56 MB | 17.6× | 6.1× | 36.1 ms, 34 MB | 1.5× | 0.85 s, 86 MB | > 1.2× calx |
@@ -175,7 +181,7 @@ operations retain their earlier measurements.
 ## Flagged
 
 A row is flagged when roo-calamine is less than 5× faster than roo, or more
-than 1.2× slower than calx. 55 of 133 rows are; the reasons:
+than 1.2× slower than calx. 53 of 133 rows are; the reasons:
 
 - **roo's own code.** These reads still run roo's code, so roo-calamine only
   saves the time it takes to open the workbook:
@@ -195,8 +201,7 @@ than 1.2× slower than calx. 55 of 133 rows are; the reasons:
   sheet whole:
   - `links-merges-10k.xlsx` is about 8× faster than roo for `each`, but
     3.8× slower than calx, which returns plain values without link targets;
-  - on `dates-10k.xlsx`, `to_csv` is 5.0×, `to_yaml` 4.9×, and
-    `formatted_value` 3.7×;
+  - on `dates-10k.xlsx`, `to_yaml` is 4.9×;
   - `sheet_for(...).hyperlinks` is 2.8× faster than roo. Its 23.8 ms still
     includes validating the sheet XML and building the coordinate Hash.
 

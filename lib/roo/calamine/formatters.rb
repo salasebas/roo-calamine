@@ -47,6 +47,30 @@ module Roo
 
       private
 
+      def formatter_temporal_value(cell)
+        if cell.is_a?(Roo::Excelx::Cell::Time)
+          @calamine_time_formats ||= Hash.new { |formats, encoding| formats[encoding] = {} }
+          formatter = @calamine_time_formats[cell.format.encoding][cell.format] ||=
+            cell.format.gsub(/#{Roo::Excelx::Cell::DateTime::TIME_FORMATS.keys.join("|")}/,
+                             Roo::Excelx::Cell::DateTime::TIME_FORMATS)
+          return cell.instance_variable_get(:@datetime).strftime(formatter)
+        end
+
+        @calamine_datetime_formats ||= Hash.new { |formats, encoding| formats[encoding] = {} }
+        formatter = @calamine_datetime_formats[cell.format.encoding][cell.format] ||= formatter_datetime(cell)
+        formatter ? cell.value.strftime(formatter) : cell.formatted_value
+      end
+
+      def formatter_datetime(cell)
+        parts = cell.format.downcase.split(" ", 0).map do |part|
+          parsed = cell.send(:parse_date_or_time_format, part)
+          return nil unless parsed
+
+          parsed
+        end
+        parts.join(" ")
+      end
+
       def native_formatters?
         Calamine.enabled? && Roo::VERSION == "4.0.0"
       end
