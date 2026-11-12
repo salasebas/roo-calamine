@@ -160,6 +160,15 @@ fn stream_mode_needs_an_unprefixed_row_and_takes_every_child_element() {
 
 #[test]
 fn rejects_inputs_it_cannot_reproduce() {
+    for mark in [b"\xFF\xFE", b"\xFE\xFF"] {
+        let xml = [mark.as_slice(), br#"<?xml version="1.0" encoding="UTF-8"?><worksheet><sheetData><row><c><v>7</v></c></row></sheetData></worksheet>"#].concat();
+        for mode in [Mode::Document, Mode::Stream] {
+            for capacity in 1..=4 {
+                let input = BufReader::with_capacity(capacity, xml.as_slice());
+                assert!(SheetReader::new(input, mode).next_row().is_err());
+            }
+        }
+    }
     let latin1 = r#"<?xml version="1.0" encoding="ISO-8859-1"?><worksheet/>"#;
     assert!(SheetReader::new(latin1.as_bytes(), Mode::Document)
         .next_row()

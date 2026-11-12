@@ -454,6 +454,18 @@ impl<R: BufRead> SheetReader<R> {
     /// The next event, rejecting characters XML does not allow, which
     /// Nokogiri does not accept and quick-xml does not check.
     fn read_event<'b>(&mut self, buf: &'b mut Vec<u8>) -> Result<Event<'b>> {
+        if !self.started {
+            loop {
+                match self.xml.get_mut().fill_buf() {
+                    Ok(bytes) if matches!(bytes.first(), Some(0xFF | 0xFE)) => {
+                        return Err(Unsupported("a UTF-16 byte-order mark".into()));
+                    }
+                    Ok(_) => break,
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(error) => return Err(Unsupported(error.to_string())),
+                }
+            }
+        }
         let event = self.xml.read_event_into(buf)?;
         let first = !std::mem::replace(&mut self.started, true);
         match &event {

@@ -1,18 +1,22 @@
 # Calamine backend evaluation
 
 Reject this candidate for adoption. It runs the complete plugin through a
-Calamine fork, but saves only 32 owned implementation lines out of 6,645
-(0.48%). A tested control without Calamine saves 50 lines. Keep this PR as
+Calamine fork, but saves only 20 owned implementation lines out of 6,690
+(0.30%). A tested control without Calamine saves 50 lines. Keep this PR as
 the working experimental candidate; do not merge it as a backend upgrade.
 This decision applies to the implementation measured here, not every possible
 Calamine integration.
 
 ## Candidate and baseline
 
-The actual baseline is roo-calamine
-`43914e90cc018ba07fcc29f92d3e2a866ab3eccb`, rather than the later research
-revision cited in issue #75. The machine runs Ruby 3.4.12 and Cargo 1.99.1
-on arm64 macOS, Apple M5 Pro. Both native extensions use the same release profile, thin
+Work began at roo-calamine
+`43914e90cc018ba07fcc29f92d3e2a866ab3eccb`. Before review, #71 landed on
+main. The final comparison uses that updated baseline,
+`21f9da66f1260eb41469f1b6ef57a98b8d57f871`, and the rebased candidate.
+The initial 6,645-line baseline grew by 45 unrelated production lines; the
+fork saving was 32 lines before review and is 20 after restoring UTF-16
+fallback. The machine runs Ruby 3.4.12 and Cargo 1.99.1 on arm64 macOS,
+Apple M5 Pro. Both native extensions use the same release profile, thin
 LTO, one codegen unit, Ruby, fixtures, and Ruby adapters.
 
 The fork starts at Calamine 0.38.0,
@@ -23,9 +27,27 @@ version and a local path. The source gem carries the fork, so installation
 fetches registry dependencies rather than a mutable Git branch. The source
 policy still denies unknown Git and registry sources. The new `zip` dependency
 activates `zlib-rs`; only that crate receives the additional Zlib license allowance.
+Cargo feature unification also switches the existing archive's flate2 decoder
+from miniz_oxide to zlib-rs. `cargo tree -e features -i flate2` and flate2's
+`src/ffi/mod.rs` confirm that choice. These are complete-candidate timings,
+including this dependency effect, not an isolated parser comparison.
+Cargo also enables quick-xml's encoding feature for all readers. That feature
+strips UTF-16 byte-order marks before tokenization. A UTF-16 mark followed
+by UTF-8 worksheet XML made the initial candidate return 7 where roo returns
+an empty sheet. The fork now rejects leading FF/FE bytes before quick-xml
+can consume the mark, restoring the baseline fallback. The gate retries
+interrupted reads and handles one-byte input buffers. Both the Rust reader
+regression and the public roo oracle failed before this fix and pass after it.
 The normal dependency tree grows from 17 to 46 packages, including the
 extension itself in both counts (`cargo tree -p roo_calamine --edges normal
 --prefix none --no-dedupe`, unique package lines).
+The lockfile grows from 40 to 145 packages. The vendored crate automatically
+joins the workspace as a path dependency. Its dev-dependencies and optional
+features are therefore also locked, including criterion, plotters, rayon,
+wasm-bindgen, jiff, and chrono. The deny graph uses all features and rejects
+yanked packages, so CI also gates on dependencies the installed gem never
+builds. This wider advisory, yank, and license burden is an additional
+maintenance cost, separate from the 17-to-46 normal dependency count.
 The minimum Rust version rises from 1.86 to 1.88, as required by upstream.
 
 The official implementation used as the starting point is
@@ -59,14 +81,14 @@ only added or edited upstream lines, not unchanged Calamine source.
 
 | Term | Lines |
 |---|---:|
-| Baseline implementation | 6,645 |
+| Baseline implementation | 6,690 |
 | Old implementation removed | 1,161 |
 | Replacement imports, calls, module export, and separator added | 5 |
-| Remaining roo-calamine implementation | 5,489 |
-| New fork implementation, including relocated rules | 1,122 |
+| Remaining roo-calamine implementation | 5,534 |
+| New fork implementation, including relocated rules | 1,134 |
 | Edited upstream lines | 2 |
-| Total owned candidate implementation | 6,613 |
-| Net owned saving | 32 |
+| Total owned candidate implementation | 6,670 |
+| Net owned saving | 20 |
 
 The 1,156-line net reduction in this repository is mostly relocation, not removal.
 The five replacement lines are the module re-export, two imports, the
@@ -80,10 +102,17 @@ reader state. Upstream's entity helper replaces two owned decoders.
 
 The fork changes two existing upstream lines: a public module declaration
 and the visibility of the existing entity helper. It adds three files:
-the raw reader, attribute checker, and the relocated 475-line reader test
-file. The fork owns 43 functions, mostly transferred from the old reader.
-All 3,271 lines of Ruby tests and support remain unchanged. Upstream cell interpretation and its tests keep their original
-semantics. No oracle expectations or compatibility promises change.
+the raw reader, attribute checker, and the relocated reader tests, now
+484 lines after extending the encoding regression. The fork owns 43 functions, mostly transferred from the old reader.
+All 3,307 original Ruby test/support lines remain; the BOM regressions add
+12 lines. Owned Rust tests grow from 717 to 734 physical lines, including
+the 8-line extension harness. The BOM fix adds a first-read loop and four
+match arms, using the existing started flag without another cache or state
+field. Prose reports, update instructions, and generated measurement artifacts
+are kept under docs and excluded from implementation counts.
+Upstream cell interpretation and its tests keep their original
+semantics. No oracle expectations or compatibility promises change. The review fix
+extends the XML rejection test and adds a public BOM regression.
 The new test harness makes the relocated reader tests run in the ordinary
 extension test command. Test code is not counted as a production saving.
 
@@ -102,7 +131,7 @@ worksheet and shared-string readers using quick-xml's existing
 `resolve_xml_entity`, and sends shared-string events through the existing
 validated event reader. That removes the second validation pass and its
 scoped worker. It changes no Ruby interface and saves 50 implementation
-lines, leaving 6,595. Its shared-string suite passes 21 tests and 165
+lines, leaving 6,640. Its shared-string suite passes 21 tests and 165
 assertions; its Rust suite passes all 25 tests.
 
 The control patch is retained with the evidence. It is an experimental
@@ -122,7 +151,8 @@ probe is an incompatibility example, not a complete archive compatibility audit.
 `bench/fork_comparison.rb` uses fresh processes, rotates baseline/candidate
 order, checks digests against plain roo before timing, and records every
 sample. With an optional fourth argument it also measures the no-fork
-control. Fixtures are shared byte for byte. The timer includes open/load
+control. Fixtures are shared byte for byte; [SHA-256 hashes](calamine-fork-evidence/fixtures.json)
+identify them. The timer includes open/load
 and public Ruby dispatch; these numbers are not parser microbenchmarks.
 
 The measured cases cover open, random `cell` and `celltype`, full and limited
@@ -139,8 +169,8 @@ runs do not establish a speed benefit from the fork. The parsing and Ruby
 conversion algorithms are substantially the same. Other tasks also ran on
 the host during the experiment; variation must be read with that limitation.
 
-The built extension grows from 1,030,576 to 1,087,520 bytes (5.5%).
-A single release build in a fresh target directory takes 12.07 seconds for
+After the rebase, the built extension grows from 1,032,080 to 1,088,848 bytes (5.5%).
+In the initial 43914e9 comparison, a single release build in a fresh target directory takes 12.07 seconds for
 the baseline and 14.01 seconds for the candidate. Both use the same compiler
 and shared compiler cache. These single builds are distribution evidence,
 not a stable build-time benchmark. [Commands and elapsed times](calamine-fork-evidence/builds.json)
@@ -148,9 +178,13 @@ record the exact flags.
 
 ## Compatibility and distribution
 
-Both baseline and candidate pass `bundle exec rake test`:
-717 runs, 18,496 assertions, zero failures, errors, or skips.
-Both pass `bundle exec rake parity`: the six upstream suites have identical
+The starting baseline and initial candidate pass `bundle exec rake test`
+with 717 runs and 18,496 assertions. After rebasing on #71, the candidate
+passes 718 runs and 18,503 assertions. After the BOM fix, the full suite
+passes 719 runs and 18,529 assertions, with zero failures, errors, or skips.
+The shared-string test was then extended with both byte-order marks; its
+21 tests and 173 assertions pass separately.
+The rebased candidate also passes `bundle exec rake parity`: the six upstream suites have identical
 results with and without the plugin, including the two existing skips.
 Native-reader counters confirm the candidate uses the native path.
 
@@ -228,7 +262,7 @@ especially the two edits to existing upstream code.
 
 The complete additive reader works and preserves the current plugin contract.
 It adds upstream releases, dependencies, a higher compiler minimum, vendored
-source, and an update procedure to save 32 implementation lines. The no-fork
+source, and an update procedure to save 20 implementation lines. The no-fork
 control removes more owned code with fewer dependencies. There is no measured
 benefit here that justifies adopting this fork. Keep the existing backend and
 consider the control separately. Broader changes to Calamine remain a separate

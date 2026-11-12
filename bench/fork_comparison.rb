@@ -5,7 +5,7 @@ require "open3"
 require "rbconfig"
 
 baseline, output, runs, control = ARGV
-abort "usage: ruby bench/fork_comparison.rb BASELINE_LIB OUTPUT [RUNS]" unless baseline && output
+abort "usage: ruby bench/fork_comparison.rb BASELINE_LIB OUTPUT [RUNS] [CONTROL_LIB]" unless baseline && output
 runs = Integer(runs || 5)
 paths = { "baseline" => File.expand_path(baseline), "candidate" => File.expand_path("../lib", __dir__) }
 cases = {

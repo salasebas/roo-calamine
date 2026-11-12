@@ -1,7 +1,10 @@
-Baseline and candidate: bundle exec rake test
+Starting baseline and initial candidate: bundle exec rake test
 717 runs, 18496 assertions, 0 failures, 0 errors, 0 skips
 
-Baseline and candidate: bundle exec rake parity
+Final rebased candidate: bundle exec rake test
+718 runs, 18503 assertions, 0 failures, 0 errors, 0 skips
+
+Starting baseline, initial candidate, and rebased candidate: bundle exec rake parity
 All six upstream roo suites match. 252 tests/examples, two existing skips.
 Native readers: 20, 66, 0, 35, 12, 1; roo cell parses: 14, 0, 0, 0, 0, 0.
 
