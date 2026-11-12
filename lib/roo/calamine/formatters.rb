@@ -2,9 +2,17 @@
 
 module Roo
   module Calamine
-    # Roo 4.0.0's whole-sheet output, using the native records while the
+    # Roo 4.0.0's output formatting, using the native records while the
     # sheet's public cells hash has not been materialized.
     module Formatters
+      def formatted_value(row, col, sheet = nil)
+        row, col = normalize(row, col) if row.is_a?(String) || col.is_a?(String)
+        cell = sheet_for(sheet).cell_at(row, col)
+        return formatter_temporal_value(cell) if native_formatters? && cell.is_a?(Roo::Excelx::Cell::DateTime)
+
+        cell.formatted_value if cell.respond_to?(:formatted_value)
+      end
+
       def to_yaml(prefix = {}, from_row = nil, from_column = nil, to_row = nil, to_column = nil, sheet = default_sheet) # rubocop:disable Metrics/ParameterLists
         return super unless native_formatters?
         return "" unless first_row

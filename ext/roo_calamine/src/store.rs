@@ -485,6 +485,10 @@ impl Store {
                 return cell.funcall(*VALUE, ()).map(Some);
             }
         }
+        let cleaned: Value = ruby.get_inner(rb_self.cleaned).entry(record as isize)?;
+        if !cleaned.is_nil() {
+            return Ok(Some(cleaned));
+        }
         let cell = rb_self.formulas.raw(&rb_self.records, record);
         if let Some(value) =
             ruby.get_inner(rb_self.converter)
