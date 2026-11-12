@@ -1,0 +1,9 @@
+use std::{fs::File, io::Read};
+fn main() {
+    let path = std::env::args().nth(1).unwrap();
+    let mut zip = zip::ZipArchive::new(File::open(path).unwrap()).unwrap();
+    let mut entry = zip.by_name("entry").unwrap();
+    let mut data = String::new();
+    println!("{:?}", entry.read_to_string(&mut data));
+    println!("{data:?}");
+}

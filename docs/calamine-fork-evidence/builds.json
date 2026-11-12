@@ -1,0 +1,48 @@
+[
+  {
+    "backend": "candidate",
+    "seconds": 14.00752199999988,
+    "command": [
+      "cargo",
+      "rustc",
+      "--manifest-path",
+      "/Users/sebastiansala/.t3/worktrees/roo-calamine/t3-82fe4976-57bd22a947994165/ext/roo_calamine/Cargo.toml",
+      "--target-dir",
+      "/Users/sebastiansala/.t3/worktrees/roo-calamine/t3-82fe4976-57bd22a947994165/tmp/issue-75/cold-candidate-final",
+      "--lib",
+      "--release",
+      "--",
+      "-C",
+      "linker=clang",
+      "-L",
+      "native=/Users/sebastiansala/.local/share/rv/rubies/ruby-3.4.12/lib",
+      "-C",
+      "link-arg=-Wl,-undefined,dynamic_lookup",
+      "-l",
+      "pthread"
+    ]
+  },
+  {
+    "backend": "baseline",
+    "seconds": 12.074924999999894,
+    "command": [
+      "cargo",
+      "rustc",
+      "--manifest-path",
+      "/Users/sebastiansala/.t3/worktrees/roo-calamine/t3-82fe4976-57bd22a947994165/tmp/issue-75/pristine-baseline/ext/roo_calamine/Cargo.toml",
+      "--target-dir",
+      "/Users/sebastiansala/.t3/worktrees/roo-calamine/t3-82fe4976-57bd22a947994165/tmp/issue-75/cold-baseline-final",
+      "--lib",
+      "--release",
+      "--",
+      "-C",
+      "linker=clang",
+      "-L",
+      "native=/Users/sebastiansala/.local/share/rv/rubies/ruby-3.4.12/lib",
+      "-C",
+      "link-arg=-Wl,-undefined,dynamic_lookup",
+      "-l",
+      "pthread"
+    ]
+  }
+]

@@ -17,10 +17,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use magnus::gc::Marker;
 use magnus::value::{Opaque, ReprValue};
 use magnus::{prelude::*, DataTypeFunctions, Error, RArray, RString, Ruby, TypedData, Value};
-use quick_xml::events::{BytesRef, BytesStart, Event};
+use quick_xml::events::{BytesStart, Event};
 use quick_xml::XmlVersion;
 
-use crate::reader::{Mode, SheetReader, Unsupported};
+use crate::reader::{push_reference, Mode, SheetReader, Unsupported};
 use crate::{unsupported, without_gvl};
 
 type Result<T> = std::result::Result<T, Unsupported>;
@@ -460,7 +460,7 @@ impl<R: BufRead> SharedStringsReader<R> {
                         self.node_starts.push(self.content.len());
                         in_cdata = false;
                     }
-                    push_reference(&mut self.content, &r)?;
+                    push_reference(&r, &mut self.content)?;
                 }
                 Event::CData(t) => {
                     // libxml2 merges adjacent CDATA sections into one node.
@@ -548,22 +548,6 @@ fn vert_align(e: &BytesStart<'_>) -> Result<String> {
         );
     }
     value.ok_or_else(|| Unsupported("a `vertAlign` without a `val`".into()))
-}
-
-fn push_reference(text: &mut String, reference: &BytesRef<'_>) -> Result<()> {
-    if let Some(c) = reference.resolve_char_ref()? {
-        text.push(c);
-        return Ok(());
-    }
-    text.push(match reference.xml10_content().as_ref() {
-        "lt" => '<',
-        "gt" => '>',
-        "amp" => '&',
-        "apos" => '\'',
-        "quot" => '"',
-        other => return Err(Unsupported(format!("entity reference &{other};"))),
-    });
-    Ok(())
 }
 
 /// Calls `step` until it returns `false` (`Ok(true)`) or `interrupted`

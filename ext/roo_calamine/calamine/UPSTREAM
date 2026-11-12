@@ -1,0 +1,16 @@
+Repository: https://github.com/tafia/calamine
+Release: 0.38.0
+Revision: a4dba3b5309d81b2774018a13be39e68d938c3c7
+License: LICENSE-MIT.md
+
+Unchanged upstream: Cargo.toml, README.md, Changelog.md, LICENSE-MIT.md,
+examples, benches, and all src files except the delta below.
+
+Owned delta: src/roo (raw roo-compatible records and XML checks),
+src/lib.rs (public module), src/utils.rs (public entity helper).
+
+Generate the patch against the exact upstream checkout with:
+  ruby script/calamine_patch.rb /path/to/calamine > /tmp/roo.patch
+
+The source gem carries the fork; builds do not fetch a mutable Git branch.
+See docs/calamine-fork.md for validation and the adoption decision.

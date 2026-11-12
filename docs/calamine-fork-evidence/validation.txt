@@ -1,0 +1,51 @@
+Baseline and candidate: bundle exec rake test
+717 runs, 18496 assertions, 0 failures, 0 errors, 0 skips
+
+Baseline and candidate: bundle exec rake parity
+All six upstream roo suites match. 252 tests/examples, two existing skips.
+Native readers: 20, 66, 0, 35, 12, 1; roo cell parses: 14, 0, 0, 0, 0, 0.
+
+Candidate: cargo nextest run
+25 tests run: 25 passed, 0 skipped
+
+Full upstream checkout with the fork, 0.37.0:
+cargo nextest run: 232 passed, 1 skipped
+cargo test --doc: 66 passed
+
+Full upstream checkout with the fork, upgraded to 0.38.0:
+cargo nextest run: 317 passed, 1 skipped
+cargo test --doc: 67 passed
+
+No-fork control: ruby -Ilib:test test/shared_strings_test.rb
+21 runs, 165 assertions, 0 failures, 0 errors, 0 skips
+No-fork control: cargo nextest run
+25 tests run: 25 passed, 0 skipped
+
+Candidate: cargo test --doc
+0 tests, no failures (upstream doctests run in the full checkout above)
+Candidate: cargo clippy --all-targets -- -D warnings
+Finished successfully
+Candidate: cargo fmt --all --check
+Finished successfully
+Candidate: bundle exec rubocop
+45 files inspected, no offenses detected
+Candidate: cargo deny check advisories bans licenses sources
+advisories ok, bans ok, licenses ok, sources ok
+
+bundle exec rake build
+ruby script/check_gem.rb pkg/roo-calamine-0.0.1.gem ruby
+roo-calamine-0.0.1.gem: ruby, 74 files, required Ruby >= 3.3
+
+gem install pkg/roo-calamine-0.0.1.gem --install-dir tmp/issue-75/installed --ignore-dependencies --no-document
+Successfully installed roo-calamine-0.0.1
+
+GEM_PATH="$PWD/tmp/issue-75/installed:$(gem env path)" ruby script/smoke.rb
+ok: roo-calamine 0.0.1 is enabled on arm64-darwin23, Ruby 3.4.12
+ok: Roo::Spreadsheet.open reads "name", 1.0, 2, Date(2023-03-15)
+ok: each_row_streaming yields the row
+ok: both reads went through the native reader
+
+ruby script/calamine_patch.rb /tmp/roo-75-pristine > /tmp/roo-75-final.patch
+git -C /tmp/roo-75-pristine apply --check /tmp/roo-75-final.patch
+Passed. A dirty upstream checkout is rejected with "use a clean upstream checkout".
+Vendored src also matches the fork after its real upstream update byte for byte.

@@ -1,0 +1,128 @@
+[
+  {
+    "backend": "baseline",
+    "run": 0,
+    "open_and_records": 0.00143599999955768,
+    "first_native_cells": 0.0015790000006745686,
+    "cell_values": 0.00023299999975279206,
+    "warm_native_values": 0.0011660000000119908,
+    "warm_public_values": 0.003267000000050757
+  },
+  {
+    "backend": "candidate",
+    "run": 0,
+    "open_and_records": 0.0013259999996080296,
+    "first_native_cells": 0.0015890000004219473,
+    "cell_values": 0.000240999999732594,
+    "warm_native_values": 0.0011660000000119908,
+    "warm_public_values": 0.003341000000546046
+  },
+  {
+    "backend": "candidate",
+    "run": 1,
+    "open_and_records": 0.0014750000000276486,
+    "first_native_cells": 0.0016660000001138542,
+    "cell_values": 0.0002589999994597747,
+    "warm_native_values": 0.0012370000004011672,
+    "warm_public_values": 0.003578999999263033
+  },
+  {
+    "backend": "baseline",
+    "run": 1,
+    "open_and_records": 0.00148799999988114,
+    "first_native_cells": 0.0015970000004017493,
+    "cell_values": 0.00022900000021763844,
+    "warm_native_values": 0.001247999999577587,
+    "warm_public_values": 0.0034429999996064
+  },
+  {
+    "backend": "baseline",
+    "run": 2,
+    "open_and_records": 0.0018270000000484288,
+    "first_native_cells": 0.0017880000004879548,
+    "cell_values": 0.00023799999962648144,
+    "warm_native_values": 0.001178999999865482,
+    "warm_public_values": 0.003365999999914493
+  },
+  {
+    "backend": "candidate",
+    "run": 2,
+    "open_and_records": 0.0013799999996990664,
+    "first_native_cells": 0.0016390000000683358,
+    "cell_values": 0.00026700000034907134,
+    "warm_native_values": 0.001300999999330088,
+    "warm_public_values": 0.003619000000071537
+  },
+  {
+    "backend": "candidate",
+    "run": 3,
+    "open_and_records": 0.0015679999996791594,
+    "first_native_cells": 0.001712000000225089,
+    "cell_values": 0.0002589999994597747,
+    "warm_native_values": 0.0012649999998757266,
+    "warm_public_values": 0.0036399999999048305
+  },
+  {
+    "backend": "baseline",
+    "run": 3,
+    "open_and_records": 0.0016540000005988986,
+    "first_native_cells": 0.0016839999998410349,
+    "cell_values": 0.00023400000009132782,
+    "warm_native_values": 0.0011899999999513966,
+    "warm_public_values": 0.003762999999707972
+  },
+  {
+    "backend": "baseline",
+    "run": 4,
+    "open_and_records": 0.04389100000025792,
+    "first_native_cells": 0.001750000000356522,
+    "cell_values": 0.0002459999996062834,
+    "warm_native_values": 0.0012759999999616412,
+    "warm_public_values": 0.003832999999758613
+  },
+  {
+    "backend": "candidate",
+    "run": 4,
+    "open_and_records": 0.0014980000005380134,
+    "first_native_cells": 0.0016500000001542503,
+    "cell_values": 0.00022899999930814374,
+    "warm_native_values": 0.0011610000001383014,
+    "warm_public_values": 0.0035060000000157743
+  },
+  {
+    "backend": "candidate",
+    "run": 5,
+    "open_and_records": 0.0015199999998003477,
+    "first_native_cells": 0.0016439999999420252,
+    "cell_values": 0.00023800000053597614,
+    "warm_native_values": 0.0011919999997189734,
+    "warm_public_values": 0.0033899999998538988
+  },
+  {
+    "backend": "baseline",
+    "run": 5,
+    "open_and_records": 0.0018040000004475587,
+    "first_native_cells": 0.0018239999999423162,
+    "cell_values": 0.0002990000002682791,
+    "warm_native_values": 0.0013739999994868413,
+    "warm_public_values": 0.003862999999910244
+  },
+  {
+    "backend": "baseline",
+    "run": 6,
+    "open_and_records": 0.12143100000048435,
+    "first_native_cells": 0.0017250000000785803,
+    "cell_values": 0.00023999999939405825,
+    "warm_native_values": 0.0012569999998959247,
+    "warm_public_values": 0.0036750000008396455
+  },
+  {
+    "backend": "candidate",
+    "run": 6,
+    "open_and_records": 0.0015039999998407438,
+    "first_native_cells": 0.0016530000002603629,
+    "cell_values": 0.00024299999950017082,
+    "warm_native_values": 0.0013189999999667634,
+    "warm_public_values": 0.0037200000006123446
+  }
+]
