@@ -109,7 +109,9 @@ impl TagAttributes {
         self.check_unique(bytes)
     }
 
-    fn read_common(&mut self, raw: &str) -> bool {
+    /// Reads `raw` when it holds only ` r="…"`, ` s="…"`, and ` t="…"`, each at most once,
+    /// with printable ASCII values without references.
+    pub(super) fn read_common(&mut self, raw: &str) -> bool {
         self.spans.clear();
         let bytes = raw.as_bytes();
         let mut seen = 0u8;

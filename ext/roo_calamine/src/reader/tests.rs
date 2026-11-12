@@ -451,3 +451,25 @@ fn parses_only_plain_indexes() {
     assert_eq!(parse_index("+1"), None);
     assert_eq!(parse_index(" 1"), None);
 }
+
+#[test]
+fn reads_cells_across_buffer_and_parser_boundaries() {
+    let xml = "<worksheet><sheetData><row><c r=\"A1\" t=\"inlineStr\"><is><t>part<![CDATA[extra]]></t></is></c><c r=\"B1\" ><f>A1&lt;2</f><v>2</v></c>\n <c r=\"C1\"><v>3</v></c>\n </row></sheetData></worksheet>";
+    for mode in [Mode::Document, Mode::Stream] {
+        for capacity in 1..=xml.len() {
+            let mut reader =
+                SheetReader::new(BufReader::with_capacity(capacity, xml.as_bytes()), mode);
+            let row = reader.next_row().unwrap().unwrap();
+            assert_eq!(
+                texts(&row),
+                [
+                    (at(1, 1), None, Some("partextra")),
+                    (at(1, 2), Some("A1<2"), Some("2")),
+                    (at(1, 3), None, Some("3")),
+                ],
+                "{mode:?}, buffer capacity {capacity}"
+            );
+            assert_eq!(reader.next_row(), Ok(None));
+        }
+    }
+}

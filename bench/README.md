@@ -47,8 +47,9 @@ call with `samply record`.
 ## Results
 
 Apple M5 Pro, Ruby 3.4.12, roo 4.0.0, calx 0.1.0, xsv 1.4.1.
-Iteration timings use five fresh processes per scenario. Other rows keep
-their earlier measurements.
+Iteration timings use five fresh processes per scenario. `each` on
+`mixed-100k.xlsx` uses 10 runs on be4ab9b for roo-calamine and calx. Other
+rows keep their earlier measurements.
 
 [RESULTS.md](RESULTS.md) has every other scenario and file.
 
@@ -58,7 +59,7 @@ their earlier measurements.
 |---|---:|---:|---:|---:|---:|
 | `each_row_streaming` | 13.49 s · 119 MB | **0.55 s · 51 MB** | 24.6× | 0.52 s · 179 MB | 9.66 s · 51 MB |
 | `parse(headers: true)` | 19.61 s · 3300 MB | **0.75 s · 282 MB** | 26× | 0.71 s · 290 MB | 11.18 s · 203 MB |
-| `each` | 18.81 s · 3282 MB | **0.57 s · 176 MB** | 33.1× | 0.45 s · 179 MB | 9.77 s · 51 MB |
+| `each` | 18.81 s · 3282 MB | **0.32 s · 174 MB** | 59× | 0.47 s · 178 MB | 9.77 s · 51 MB |
 | 10,000 random `cell(row, col)` | 17.25 s · 3272 MB | **0.48 s · 104 MB** | 36× | 0.51 s · 250 MB | 10.89 s · 172 MB |
 | `to_csv` | 21.72 s · 3369 MB | **0.77 s · 118 MB** | 28× | 0.66 s · 178 MB | 9.85 s · 50 MB |
 | values only: `each_row_values` | 13.43 s · 118 MB | **0.43 s · 48 MB** | 31.3× | 0.51 s · 179 MB | 9.65 s · 51 MB |

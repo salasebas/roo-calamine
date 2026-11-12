@@ -3,7 +3,10 @@
 Detailed results beyond the default tables in [README.md](README.md#results).
 Apple M5 Pro, Ruby 3.4.12, roo 4.0.0, calx 0.1.0, and xsv 1.4.1. Each timed
 run starts a fresh process and includes opening the workbook. Values are
-checked against roo before timing. Iteration rows use five runs; unchanged
+checked against roo before timing. Iteration rows use five runs, except
+`each` on `mixed-10k.xlsx` and `each_row_streaming`, `each`, and `to_csv` on
+`comments-formulas-10k.xlsx`: their roo-calamine and calx entries use 24 runs
+on be4ab9b. Ratios use the published roo time and memory figures. Other
 operations retain their earlier measurements.
 
 | File | Scenario | roo | roo + roo-calamine | Faster | Less memory | calx (reference) | Time vs calx | xsv (reference) | Flag |
@@ -63,7 +66,7 @@ operations retain their earlier measurements.
 | small.xlsx | `sheet(n)` + one `cell` per sheet | 11.4 ms, 45 MB | 1.7 ms, 41 MB | 6.5× | 1.1× | - | - | - |  |
 | small.xlsx | `dimensions` of every sheet | 1.7 ms, 40 MB | 1.0 ms, 40 MB | 1.7× | 1.0× | - | - | - | < 5× roo |
 | mixed-10k.xlsx | `Roo::Spreadsheet.open` + `each_row_streaming` | 1.30 s, 110 MB | 65.0 ms, 51 MB | 20.0× | 2.2× | 52.5 ms, 45 MB | 1.2× | 0.95 s, 50 MB | > 1.2× calx |
-| mixed-10k.xlsx | `each` (one Array of values per row) | 1.33 s, 449 MB | 60.3 ms, 56 MB | 22.0× | 7.9× | 45.5 ms, 45 MB | 1.3× | 0.95 s, 50 MB | > 1.2× calx |
+| mixed-10k.xlsx | `each` (one Array of values per row) | 1.33 s, 449 MB | 32.0 ms, 56 MB | 41.5× | 8.0× | 48.3 ms, 45 MB | 0.7× | 0.95 s, 50 MB |  |
 | mixed-10k.xlsx | `to_csv` | 1.70 s, 448 MB | 77.6 ms, 51 MB | 21.9× | 8.7× | 66.4 ms, 45 MB | 1.2× | 0.97 s, 50 MB |  |
 | mixed-10k.xlsx | 10,000 random `celltype` | 1.27 s, 448 MB | 58.9 ms, 50 MB | 21.7× | 9.0× | - | - | - |  |
 | mixed-10k.xlsx | 10,000 random `formula` | 1.27 s, 448 MB | 57.6 ms, 50 MB | 22.0× | 8.9× | - | - | - |  |
@@ -101,9 +104,9 @@ operations retain their earlier measurements.
 | links-merges-10k.xlsx | `sheet_for(...).hyperlinks` | 66.0 ms, 160 MB | 23.8 ms, 48 MB | 2.8× | 3.3× | - | - | - | < 5× roo |
 | links-merges-10k.xlsx | `expand_merged_ranges: true` + `each` | 0.39 s, 188 MB | 69.4 ms, 66 MB | 5.6× | 2.8× | - | - | - |  |
 | links-merges-10k.xlsx | `no_hyperlinks: true` + `each` | 0.32 s, 172 MB | 19.2 ms, 45 MB | 16.7× | 3.8× | - | - | - |  |
-| comments-formulas-10k.xlsx | `Roo::Spreadsheet.open` + `each_row_streaming` | 0.36 s, 73 MB | 25.6 ms, 49 MB | 14.1× | 1.5× | 15.0 ms, 32 MB | 1.7× | 0.27 s, 51 MB | > 1.2× calx |
-| comments-formulas-10k.xlsx | `each` (one Array of values per row) | 0.29 s, 165 MB | 21.6 ms, 46 MB | 13.6× | 3.5× | 13.4 ms, 32 MB | 1.6× | 0.27 s, 51 MB | > 1.2× calx |
-| comments-formulas-10k.xlsx | `to_csv` | 0.37 s, 164 MB | 21.7 ms, 45 MB | 17.1× | 3.6× | 17.1 ms, 32 MB | 1.3× | 0.28 s, 51 MB | > 1.2× calx |
+| comments-formulas-10k.xlsx | `Roo::Spreadsheet.open` + `each_row_streaming` | 0.36 s, 73 MB | 22.3 ms, 51 MB | 16.1× | 1.4× | 14.9 ms, 32 MB | 1.5× | 0.27 s, 51 MB | > 1.2× calx |
+| comments-formulas-10k.xlsx | `each` (one Array of values per row) | 0.29 s, 165 MB | 13.3 ms, 46 MB | 21.9× | 3.5× | 14.7 ms, 32 MB | 0.9× | 0.27 s, 51 MB |  |
+| comments-formulas-10k.xlsx | `to_csv` | 0.37 s, 164 MB | 12.9 ms, 45 MB | 28.7× | 3.6× | 17.1 ms, 32 MB | 0.8× | 0.28 s, 51 MB |  |
 | comments-formulas-10k.xlsx | 10,000 random `formula` | 0.29 s, 163 MB | 27.8 ms, 46 MB | 10.5× | 3.5× | - | - | - |  |
 | comments-formulas-10k.xlsx | 10,000 random `formula?` | 0.32 s, 163 MB | 29.4 ms, 46 MB | 11.0× | 3.5× | - | - | - |  |
 | comments-formulas-10k.xlsx | `formulas` | 0.28 s, 163 MB | 29.1 ms, 61 MB | 9.8× | 2.7× | - | - | - |  |
@@ -145,7 +148,7 @@ operations retain their earlier measurements.
 ## Flagged
 
 A row is flagged when roo-calamine is less than 5× faster than roo, or more
-than 1.2× slower than calx. 58 of 133 rows are; the reasons:
+than 1.2× slower than calx. 55 of 133 rows are; the reasons:
 
 - **roo's own code.** These reads still run roo's code, so roo-calamine only
   saves the time it takes to open the workbook:
@@ -170,13 +173,10 @@ than 1.2× slower than calx. 58 of 133 rows are; the reasons:
   - `sheet_for(...).hyperlinks` is 2.8× faster than roo. Its 23.8 ms still
     includes validating the sheet XML and building the coordinate Hash.
 
-- **roo's objects.** On the other 10k files, roo-calamine is 1.2–1.7× slower
-  than calx because it returns what roo returns: `Roo::Excelx::Cell`s, HTML
-  for rich text, and roo's value rules. `comments-formulas-10k.xlsx` has the
-  widest gap, up to 1.7×. Its profile shows no cost for formulas or comments
-  in Ruby: 28% of `each` is the check before each row that the block kept the
-  sheet (`sheet_for`, roo's `validate_sheet!`), against 19% on the 20-column
-  `mixed-10k.xlsx`. The check weighs more on narrow sheets.
+- **roo's objects.** Other flagged reads retain roo's cells, rich-text HTML,
+  and value rules. `each_row_streaming` on `comments-formulas-10k.xlsx` is
+  1.5× slower than calx: it constructs cells with coordinates and formula
+  text, while calx yields plain values.
 
 The default table's flags have the same causes: the 100-row file, and calx's
 plain values against roo's cells.
