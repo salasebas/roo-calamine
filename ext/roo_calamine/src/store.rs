@@ -8,7 +8,7 @@ mod formatters;
 use magnus::gc::Marker;
 use magnus::rb_sys::AsRawValue;
 use magnus::typed_data::Obj;
-use magnus::value::{Opaque, ReprValue};
+use magnus::value::{LazyId, Opaque, ReprValue};
 use magnus::{
     prelude::*, DataTypeFunctions, Error, Integer, RArray, RHash, RString, Ruby, TypedData, Value,
 };
@@ -19,6 +19,8 @@ use crate::reader::{Body, Kind, RawCell, RawRow, Reference, Style};
 use crate::Reader;
 
 type Span = (u32, u32);
+static VALUE: LazyId = LazyId::new("value");
+static TYPE: LazyId = LazyId::new("type");
 
 fn range((start, end): Span) -> Range<usize> {
     start as usize..end as usize
@@ -329,7 +331,7 @@ impl Store {
         let built = ruby.get_inner(self.built);
         if !built.is_empty() {
             if let Some(cell) = built.get(raw.built_key()) {
-                return cell.funcall("value", ());
+                return cell.funcall(*VALUE, ());
             }
         }
         let cleaned: Value = ruby.get_inner(self.cleaned).entry(record as isize)?;
@@ -344,7 +346,7 @@ impl Store {
         let converter = ruby.get_inner(self.converter);
         let cell = self.formulas.raw(&self.records, record);
         let Some(value) = converter.known_value(ruby, &self.text, &cell)? else {
-            return self.build(ruby, record)?.funcall("value", ());
+            return self.build(ruby, record)?.funcall(*VALUE, ());
         };
         if !rb_sys::SPECIAL_CONST_P(value.as_raw()) && !raw.shared_string() {
             handed_out.store(record as isize, value)?;
@@ -480,7 +482,7 @@ impl Store {
         let built = ruby.get_inner(rb_self.built);
         if !built.is_empty() {
             if let Some(cell) = built.get(raw.built_key()) {
-                return cell.funcall("value", ()).map(Some);
+                return cell.funcall(*VALUE, ()).map(Some);
             }
         }
         let cell = rb_self.formulas.raw(&rb_self.records, record);
@@ -492,7 +494,7 @@ impl Store {
                 return Ok(Some(value));
             }
         }
-        rb_self.build(ruby, record)?.funcall("value", ()).map(Some)
+        rb_self.build(ruby, record)?.funcall(*VALUE, ()).map(Some)
     }
 
     fn type_at(
@@ -507,7 +509,7 @@ impl Store {
         let built = ruby.get_inner(rb_self.built);
         if !built.is_empty() {
             if let Some(cell) = built.get(rb_self.records[record as usize].built_key()) {
-                return cell.funcall("type", ()).map(Some);
+                return cell.funcall(*TYPE, ()).map(Some);
             }
         }
         let raw = rb_self.formulas.raw(&rb_self.records, record);
@@ -515,8 +517,8 @@ impl Store {
             .get_inner(rb_self.converter)
             .formatter_type(ruby, &raw)?
         {
-            Some(kind) => Ok(Some(ruby.sym_new(kind).as_value())),
-            None => rb_self.build(ruby, record)?.funcall("type", ()).map(Some),
+            Some(kind) => Ok(Some(ruby.sym_new(**kind).as_value())),
+            None => rb_self.build(ruby, record)?.funcall(*TYPE, ()).map(Some),
         }
     }
 
