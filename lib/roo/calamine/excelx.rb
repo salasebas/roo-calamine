@@ -2,6 +2,19 @@
 
 module Roo
   module Calamine
+    # Roo exposes a mutable sheet list, so names must be checked on each lookup.
+    module SheetSelection
+      private
+
+      def validate_sheet!(sheet)
+        case sheet
+        when String then super unless sheets.include?(sheet)
+        else
+          super
+        end
+      end
+    end
+
     # Prepended to Roo::Excelx. With options, Roo::Base#each reads every value
     # through #cell, which resolves the sheet and looks up an Array key in its
     # cells hash, one cell at a time. These keep roo's header handling (its own
@@ -34,8 +47,12 @@ module Roo
 
       def cell(row, col, sheet = nil)
         row, col = normalize(row, col) if row.is_a?(String) || col.is_a?(String)
-        lazy = sheet_for(sheet).lazy_cells
-        lazy ? lazy.value_at(row, col) : super
+        sheet = sheet_for(sheet)
+        lazy = sheet.lazy_cells
+        return lazy.value_at(row, col) if lazy
+
+        cell = sheet.cell_at(row, col)
+        cell.value if cell.respond_to?(:value)
       end
 
       def formula(row, col, sheet = nil)
@@ -53,8 +70,12 @@ module Roo
 
       def celltype(row, col, sheet = nil)
         row, col = normalize(row, col) if row.is_a?(String) || col.is_a?(String)
-        lazy = sheet_for(sheet).lazy_cells
-        lazy ? lazy.type_at(row, col) : super
+        sheet = sheet_for(sheet)
+        lazy = sheet.lazy_cells
+        return lazy.type_at(row, col) if lazy
+
+        cell = sheet.cell_at(row, col)
+        cell.type if cell.respond_to?(:type)
       end
 
       def excelx_type(row, col, sheet = nil)
@@ -98,14 +119,6 @@ module Roo
 
         store.clean(self)
         @cleaned[name] = true
-      end
-
-      def validate_sheet!(sheet)
-        case sheet
-        when String then super unless sheets.include?(sheet)
-        else
-          super
-        end
       end
 
       def each_with_headers(headers)
