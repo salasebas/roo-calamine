@@ -157,7 +157,7 @@ than 1.2× slower than calx. 59 of 133 rows are; the reasons:
 - **The 100-row file.** Each run takes under 30 ms, mostly opening the file and
   roo's Ruby code around each call. The same 10,000 single-cell reads are
   19–25× faster on `mixed-10k.xlsx`.
-- **`to_s`** is `cells.inspect`: most of its time is Ruby inspecting every
+- **`to_s`** is `cells.inspect`: 97% of its time is Ruby inspecting every
   cell, which roo's output requires.
 - **Cells built by roo's constructors** (from #49). Hyperlink cells and
   date-with-time cells are still built by roo's code, and
@@ -167,14 +167,18 @@ than 1.2× slower than calx. 59 of 133 rows are; the reasons:
   - on `dates-10k.xlsx`, `to_csv` is 5.0×, `to_yaml` 4.9×, and
     `formatted_value` 3.7×;
   - `sheet_for(...).hyperlinks` reads the links natively, yet is only 1.8×
-    faster; it is not profiled yet.
+    faster. Half its time is roo's `Roo::Utils.coordinates_in_range` on each
+    link's cell reference, a quarter is roo parsing the sheet's relationships
+    with Nokogiri, and 15% is reading each link's target from those nodes.
 
   These are the leads to work on next.
 - **roo's objects.** On the other 10k files, roo-calamine is 1.2–1.7× slower
   than calx because it returns what roo returns: `Roo::Excelx::Cell`s, HTML
   for rich text, and roo's value rules. `comments-formulas-10k.xlsx` has the
-  widest gap, up to 1.7×, and is not profiled yet:
-  `run.rb --profile each comments-formulas-10k`.
+  widest gap, up to 1.7×. Its profile shows no cost for formulas or comments
+  in Ruby: 28% of `each` is the check before each row that the block kept the
+  sheet (`sheet_for`, roo's `validate_sheet!`), against 19% on the 20-column
+  `mixed-10k.xlsx`. The check weighs more on narrow sheets.
 
 The default table's flags have the same causes: the 100-row file, and calx's
 plain values against roo's cells.
