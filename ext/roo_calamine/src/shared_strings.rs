@@ -118,6 +118,15 @@ impl DataTypeFunctions for HtmlStrings {
 }
 
 impl HtmlStrings {
+    pub(crate) fn is_plain(&self, len: usize) -> bool {
+        self.strings.borrow().as_ref().is_some_and(|strings| {
+            strings.len() >= len
+                && strings
+                    .iter()
+                    .all(|string| !has_html_tag(string.as_bytes()))
+        })
+    }
+
     pub(crate) fn select(
         &self,
         ruby: &Ruby,

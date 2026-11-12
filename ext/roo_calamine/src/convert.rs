@@ -144,6 +144,7 @@ pub struct Converter {
     /// code in between, so one pick per index gives the cells it gives, even
     /// when a caller later changes a picked string in place.
     picked: Option<Opaque<RHash>>,
+    picked_indices: StdCell<Option<Opaque<RArray>>>,
 }
 
 impl DataTypeFunctions for Converter {
@@ -162,6 +163,9 @@ impl DataTypeFunctions for Converter {
             marker.mark(html);
         }
         if let Some(picked) = self.picked {
+            marker.mark(picked);
+        }
+        if let Some(picked) = self.picked_indices.get() {
             marker.mark(picked);
         }
     }
@@ -222,6 +226,7 @@ impl Converter {
             shared_html: StdCell::new(None),
             error_values: ruby.eval("Roo::Excelx::ERROR_VALUES.to_a")?,
             picked: (!stream).then(|| ruby.hash_new().into()),
+            picked_indices: StdCell::new(None),
         })
     }
 
@@ -527,6 +532,15 @@ impl Converter {
     /// a caller may change a shared string in place between rows.
     fn shared_string(&self, ruby: &Ruby, text: &str) -> Result<Value, Error> {
         let index = parse_index(text);
+        if self.picked.is_some() && index.is_some() {
+            self.load_shared_strings(ruby)?;
+        }
+        if let (Some(index), Some(indices)) = (index, self.picked_indices.get()) {
+            let indices = ruby.get_inner(indices);
+            if index < indices.len() {
+                return indices.entry(index as isize);
+            }
+        }
         let Some(picked) = self.picked.map(|picked| ruby.get_inner(picked)) else {
             return self.pick_shared_string(ruby, index, text);
         };
@@ -542,6 +556,24 @@ impl Converter {
         Ok(string)
     }
 
+    fn load_shared_strings(&self, ruby: &Ruby) -> Result<(), Error> {
+        if self.shared_plain.get().is_none() {
+            let tables: RArray = self.context(ruby).funcall("shared_strings", ())?;
+            let plain: RArray = tables.entry(0)?;
+            let html: Value = tables.entry(1)?;
+            self.shared_plain.set(Some(plain.into()));
+            self.shared_html.set(Some(html.into()));
+            if self.picked.is_some()
+                && (html.is_nil()
+                    || <&HtmlStrings>::try_convert(html)
+                        .is_ok_and(|html| html.is_plain(plain.len())))
+            {
+                self.picked_indices.set(Some(plain.dup().into()));
+            }
+        }
+        Ok(())
+    }
+
     fn pick_shared_string(
         &self,
         ruby: &Ruby,
@@ -553,13 +585,7 @@ impl Converter {
                 .context(ruby)
                 .funcall("shared_string", (ruby.str_new(text),));
         };
-        if self.shared_plain.get().is_none() {
-            let tables: RArray = self.context(ruby).funcall("shared_strings", ())?;
-            let plain: RArray = tables.entry(0)?;
-            let html: Value = tables.entry(1)?;
-            self.shared_plain.set(Some(plain.into()));
-            self.shared_html.set(Some(html.into()));
-        }
+        self.load_shared_strings(ruby)?;
         let plain = ruby.get_inner(self.shared_plain.get().expect("fetched above"));
         let html = ruby.get_inner(self.shared_html.get().expect("fetched above"));
         let chosen = match RArray::from_value(html) {
