@@ -164,7 +164,7 @@ These are by design.
 <summary>Behavior and performance</summary>
 
 - **Building `Sheet#cells` late costs more.** Building the whole hash (`#set`,
-  `clean: true`, …) after a read that does not need it (a single-cell read,
+  for example) after a read that does not need it (a single-cell read,
   `#last_row`, `#row`, `#each`, `#parse`) costs more than building it from the
   start, because the sheet is parsed before any cell is built rather than
   alongside.

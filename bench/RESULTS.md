@@ -1,5 +1,32 @@
 # Benchmark results
 
+## Cleaning strings, issue 65
+
+Apple M5 Pro, Ruby 3.4.12, roo 4.0.0, `mixed-100k.xlsx` with 100k rows and
+20 mixed columns. Median of five fresh processes per scenario and version,
+alternating the original code at 3df99e4 and the issue 65 change at 3655290,
+before rebasing onto #69 and #72.
+The timer includes opening the workbook. Memory is peak RSS in MiB.
+
+| Scenario | Before | After | Time saved | Peak RSS before → after |
+|---|---:|---:|---:|---:|
+| `each(headers: true)` | 0.781 s | 0.798 s | -2% | 195 → 183 MiB |
+| `each(clean: true, headers: true)` | 3.244 s | 1.227 s | 62% | 725 → 295 MiB |
+| One `cell`, then `each(clean: true, headers: true)` | 3.758 s | 1.246 s | 67% | 706 → 295 MiB |
+
+The cleaned read takes 1.54× the uncleaned read, down from 4.15×.
+It allocates 3.20 million objects instead of 13.70 million. The digest of
+every cleaned row matches plain roo.
+
+Reproduce each version with:
+
+```sh
+cd bench
+bundle exec ruby run.rb 5 roo-calamine --scenario each-headers,each-clean,cell-then-clean --fixture mixed-100k
+```
+
+## Other benchmarks
+
 Detailed results beyond the default tables in [README.md](README.md#results).
 Apple M5 Pro, Ruby 3.4.12, roo 4.0.0, calx 0.1.0, and xsv 1.4.1. Each timed
 run starts a fresh process and includes opening the workbook. Values are

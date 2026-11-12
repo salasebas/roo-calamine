@@ -153,6 +153,8 @@ pub struct Store {
     /// was built, which that cell then holds: `nil`, or an object that is
     /// not a shared string (the converter picks the same one again).
     handed_out: Opaque<RArray>,
+    /// Sanitized values, separate from the original values roo's cells retain.
+    cleaned: Opaque<RArray>,
     /// The keys more than one record has, sorted.
     repeated: Vec<u64>,
 }
@@ -162,6 +164,7 @@ impl DataTypeFunctions for Store {
         marker.mark(self.converter);
         marker.mark(self.built);
         marker.mark(self.handed_out);
+        marker.mark(self.cleaned);
     }
 
     fn size(&self) -> usize {
@@ -285,6 +288,7 @@ impl Store {
             index,
             built: ruby.hash_new().into(),
             handed_out: ruby.ary_new().into(),
+            cleaned: ruby.ary_new().into(),
             repeated,
         };
         // `Roo::Link.new` copies a linked cell's shared string, which roo does
@@ -313,6 +317,7 @@ impl Store {
             .get_inner(self.converter)
             .cell(ruby, &self.text, &raw, 0, 0, known)?
             .expect("the store holds only records roo keeps");
+        self.apply_cleaned_value(ruby, record, cell)?;
         built.aset(key, cell)?;
         Ok(cell)
     }
@@ -326,6 +331,10 @@ impl Store {
             if let Some(cell) = built.get(raw.built_key()) {
                 return cell.funcall("value", ());
             }
+        }
+        let cleaned: Value = ruby.get_inner(self.cleaned).entry(record as isize)?;
+        if !cleaned.is_nil() {
+            return Ok(cleaned);
         }
         let handed_out = ruby.get_inner(self.handed_out);
         let kept: Value = handed_out.entry(record as isize)?;
@@ -341,6 +350,36 @@ impl Store {
             handed_out.store(record as isize, value)?;
         }
         Ok(value)
+    }
+
+    fn apply_cleaned_value(&self, ruby: &Ruby, record: u32, cell: Value) -> Result<(), Error> {
+        let value: Value = ruby.get_inner(self.cleaned).entry(record as isize)?;
+        if !value.is_nil() {
+            cell.funcall::<_, _, Value>("value=", (value,))?;
+        }
+        Ok(())
+    }
+
+    fn clean(ruby: &Ruby, rb_self: &Self, book: Value) -> Result<(), Error> {
+        for (record, raw) in (0..).zip(&rb_self.records) {
+            if rb_self.repeated.binary_search(&raw.built_key()).is_ok()
+                && rb_self.position(raw.key()).map(|i| rb_self.index[i]) != Ok(record)
+            {
+                continue;
+            }
+            let value = rb_self.value(ruby, record)?;
+            if RString::from_value(value).is_none() {
+                continue;
+            }
+            let value: Value = book.funcall("sanitize_value", (value,))?;
+            if let Some(cell) = ruby.get_inner(rb_self.built).get(raw.built_key()) {
+                cell.funcall::<_, _, Value>("value=", (value,))?;
+            } else {
+                ruby.get_inner(rb_self.cleaned)
+                    .store(record as isize, value)?;
+            }
+        }
+        Ok(())
     }
 
     /// The position in [`Store::index`] of the record for `key`.
@@ -391,6 +430,9 @@ impl Store {
                     known,
                 )?
                 .expect("the store holds only records roo keeps");
+            if kept {
+                rb_self.apply_cleaned_value(ruby, record, cell)?;
+            }
             cells.aset(coordinate, cell)?;
         }
         Ok(cells)
@@ -591,8 +633,10 @@ impl Store {
             } else {
                 None
             };
+            let cleaned: Value = ruby.get_inner(rb_self.cleaned).entry(i as isize)?;
             let present = match cell {
                 Some(cell) => presence(cell)?,
+                None if !cleaned.is_nil() => !RString::try_convert(cleaned)?.is_empty(),
                 None => match (record.content, record.kind) {
                     (Content::Empty, _) => false,
                     (Content::Value, Kind::Shared) => match converter.presence(
@@ -743,7 +787,12 @@ impl Store {
             Some(cell) => cell,
             None if !in_bounds => return Ok(()),
             None => {
-                let kept: Value = ruby.get_inner(self.handed_out).entry(record as isize)?;
+                let cleaned: Value = ruby.get_inner(self.cleaned).entry(record as isize)?;
+                let kept: Value = if cleaned.is_nil() {
+                    ruby.get_inner(self.handed_out).entry(record as isize)?
+                } else {
+                    cleaned
+                };
                 let kept = (!kept.is_nil()).then_some(kept);
                 let raw = self.formulas.raw(&self.records, record);
                 let converter = ruby.get_inner(self.converter);
@@ -771,6 +820,7 @@ pub fn define(ruby: &Ruby, native: magnus::RModule) -> Result<(), Error> {
     store.define_method("column", magnus::method!(Store::column, 3))?;
     store.define_method("hash_row", magnus::method!(Store::hash_row, 4))?;
     store.define_method("cells", magnus::method!(Store::cells, 0))?;
+    store.define_method("clean", magnus::method!(Store::clean, 1))?;
     store.define_method("write_csv", magnus::method!(Store::write_csv, 4))?;
     store.define_method("to_yaml", magnus::method!(Store::to_yaml, 3))?;
     store.define_method("xml_cells", magnus::method!(Store::xml_cells, 2))?;
