@@ -2,12 +2,26 @@
 
 module Roo
   module Calamine
+    # Roo exposes a mutable sheet list, so names must be checked on each lookup.
+    module SheetSelection
+      private
+
+      def validate_sheet!(sheet)
+        case sheet
+        when String then super unless sheets.include?(sheet)
+        else
+          super
+        end
+      end
+    end
+
     # Prepended to Roo::Excelx. With options, Roo::Base#each reads every value
     # through #cell, which resolves the sheet and looks up an Array key in its
     # cells hash, one cell at a time. These keep roo's header handling (its own
     # private methods) and read the cells with less work per cell.
     #
-    # roo's single-cell lookups read Sheet#cell_at instead of Sheet#cells, and
+    # Value and type lookups read the store; other single-cell lookups read
+    # Sheet#cell_at instead of Sheet#cells, and
     # rows read Sheet#row, so they build only the cells their values need.
     # #each without options reads the native store sequentially, or uses a
     # RowIndex once every cell is built.
@@ -33,7 +47,11 @@ module Roo
 
       def cell(row, col, sheet = nil)
         row, col = normalize(row, col) if row.is_a?(String) || col.is_a?(String)
-        cell = sheet_for(sheet).cell_at(row, col)
+        sheet = sheet_for(sheet)
+        lazy = sheet.lazy_cells
+        return lazy.value_at(row, col) if lazy
+
+        cell = sheet.cell_at(row, col)
         cell.value if cell.respond_to?(:value)
       end
 
@@ -52,7 +70,11 @@ module Roo
 
       def celltype(row, col, sheet = nil)
         row, col = normalize(row, col) if row.is_a?(String) || col.is_a?(String)
-        cell = sheet_for(sheet).cell_at(row, col)
+        sheet = sheet_for(sheet)
+        lazy = sheet.lazy_cells
+        return lazy.type_at(row, col) if lazy
+
+        cell = sheet.cell_at(row, col)
         cell.type if cell.respond_to?(:type)
       end
 
@@ -66,14 +88,6 @@ module Roo
         row, col = normalize(row, col) if row.is_a?(String) || col.is_a?(String)
         cell = sheet_for(sheet).cell_at(row, col)
         cell.cell_value if cell.respond_to?(:cell_value)
-      end
-
-      def formatted_value(row, col, sheet = nil)
-        row, col = normalize(row, col) if row.is_a?(String) || col.is_a?(String)
-        cell = sheet_for(sheet).cell_at(row, col)
-        return formatter_temporal_value(cell) if native_formatters? && cell.is_a?(Roo::Excelx::Cell::DateTime)
-
-        cell.formatted_value if cell.respond_to?(:formatted_value)
       end
 
       def empty?(row, col, sheet = nil)

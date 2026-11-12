@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "test_helper"
+require "objspace"
 
 class CellConstructionTest < Minitest::Test
   include OracleAssertions
@@ -18,6 +19,24 @@ class CellConstructionTest < Minitest::Test
       %(<c r="#{Roo::Utils.number_to_letter(index + 1)}1" s="2"><v>#{text}</v></c>)
     end
     Workbook.write(@dir, "serials", sheets: { "Sheet1" => Workbook.sheet(%(<row r="1">#{cells.join}</row>)) })
+  end
+
+  def test_late_single_cell_reads_do_not_allocate_for_every_preceding_record
+    rows = (1..10_000).map do |row|
+      %(<row r="#{row}"><c r="A#{row}"><v>#{row}</v></c><c r="B#{row}" t="inlineStr"><is><t>tail</t></is></c></row>)
+    end.join
+    path = Workbook.write(@dir, "late", sheets: { "Sheet1" => Workbook.sheet(rows) })
+    workbook = Roo::Excelx.new(path)
+    workbook.last_row
+    GC.disable
+    before = ObjectSpace.memsize_of_all(Array)
+    values = [workbook.cell(10_000, 1), workbook.cell(10_000, 2)]
+    allocated = ObjectSpace.memsize_of_all(Array) - before
+
+    assert_equal [10_000, "tail"], values
+    assert_operator allocated, :<, 64 * 1024
+  ensure
+    GC.enable
   end
 
   def test_temporal_values_are_read_without_building_full_cells

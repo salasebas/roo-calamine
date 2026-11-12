@@ -14,7 +14,7 @@ use std::os::raw::c_int;
 use magnus::encoding::{self, EncodingCapable};
 use magnus::gc::Marker;
 use magnus::rb_sys::{protect, AsRawValue, FromRawValue};
-use magnus::value::{Lazy, Opaque, ReprValue};
+use magnus::value::{Lazy, LazyId, Opaque, ReprValue};
 use magnus::{
     prelude::*, DataTypeFunctions, Error, IntoValue, RArray, RClass, RHash, RString, Ruby,
     StaticSymbol, Symbol, TypedData, Value,
@@ -37,6 +37,11 @@ static CELL_DATETIME: Lazy<RClass> = Lazy::new(|r| constant(r, "Roo::Excelx::Cel
 static CELL_TIME: Lazy<RClass> = Lazy::new(|r| constant(r, "Roo::Excelx::Cell::Time"));
 static CELL_EMPTY: Lazy<RClass> = Lazy::new(|r| constant(r, "Roo::Excelx::Cell::Empty"));
 static NUMERIC_OR_FORMULA: Lazy<StaticSymbol> = Lazy::new(|r| r.sym_new("numeric_or_formula"));
+static TYPE_STRING: LazyId = LazyId::new("string");
+static TYPE_BOOLEAN: LazyId = LazyId::new("boolean");
+static TYPE_FLOAT: LazyId = LazyId::new("float");
+static TYPE_DATE: LazyId = LazyId::new("date");
+static TYPE_FORMULA: LazyId = LazyId::new("formula");
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ValueType {
@@ -184,7 +189,7 @@ impl Converter {
         &self,
         ruby: &Ruby,
         raw: &RawCell,
-    ) -> Result<Option<&'static str>, Error> {
+    ) -> Result<Option<&'static LazyId>, Error> {
         let Reference::At { row, column } = raw.reference else {
             return Ok(None);
         };
@@ -193,19 +198,19 @@ impl Converter {
         }
         let kind = match (&raw.body, raw.kind) {
             (Body::Empty, _) => return Ok(None),
-            (Body::Inline(_), _) | (Body::Value(_), Kind::Shared | Kind::Str) => "string",
-            (Body::Value(_), Kind::Boolean) => "boolean",
-            (Body::Value(_), Kind::InlineStr) => "float",
+            (Body::Inline(_), _) | (Body::Value(_), Kind::Shared | Kind::Str) => &TYPE_STRING,
+            (Body::Value(_), Kind::Boolean) => &TYPE_BOOLEAN,
+            (Body::Value(_), Kind::InlineStr) => &TYPE_FLOAT,
             (Body::Value(_), Kind::ByFormat) => {
                 match self.style_info(ruby, self.style(ruby, raw)?)?.1 {
-                    ValueType::Number => "float",
-                    ValueType::Date => "date",
+                    ValueType::Number => &TYPE_FLOAT,
+                    ValueType::Date => &TYPE_DATE,
                     ValueType::DateTime | ValueType::Time => return Ok(None),
                 }
             }
         };
         Ok(Some(if raw.formula.is_some() {
-            "formula"
+            &TYPE_FORMULA
         } else {
             kind
         }))

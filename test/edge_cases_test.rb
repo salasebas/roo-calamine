@@ -677,7 +677,7 @@ class EdgeCasesTest < Minitest::Test
     reads = [workbook.last_row, workbook.last_column, workbook.cell(2, 2), workbook.celltype(2, 2), workbook.empty?(3, 1)]
 
     assert_equal [3, 3, 4, :float, false], reads
-    assert_equal 2, built.call
+    assert_equal 1, built.call
     assert_equal 9, workbook.sheet_for(nil).cells.size
     assert_equal 9, built.call
   ensure
@@ -700,6 +700,23 @@ class EdgeCasesTest < Minitest::Test
       workbook.sheet_for(nil).cells
 
       assert_equal(roo, Oracle.outcome { describe.call(workbook.public_send(method, row, column, sheet)) })
+    end
+  end
+
+  def test_single_cell_reads_keep_custom_normalization
+    path = write(%(<row r="1"><c r="A1"><v>1</v></c></row>))
+    subclass = Class.new(Roo::Excelx) do
+      def normalize(row, column)
+        line, field = super
+        [line + 1, field]
+      end
+    end
+    [false, true].product(%i[cell celltype]).each do |materialized, method|
+      original = subclass.new(path).method(method).super_method
+      workbook = subclass.new(path)
+      workbook.sheet_for(nil).cells if materialized
+
+      assert_equal original.call(0, "A"), workbook.public_send(method, 0, "A")
     end
   end
 

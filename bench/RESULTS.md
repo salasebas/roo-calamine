@@ -1,11 +1,23 @@
 # Benchmark results
 
-## Cleaning strings, issue 65
+## Single-cell reads
+
+Apple M5 Pro, Ruby 3.4.12, roo 4.0.0. Median of 21 fresh processes per
+version on `small.xlsx` and seven on `mixed-100k.xlsx`, comparing 21f9da6
+and 4252cf7. Each run includes opening the workbook and 10,000 seeded random
+reads. Result hashes match. Memory is peak RSS in MiB.
+
+| File | Scenario | Before | After | Time saved | Peak RSS before → after |
+|---|---|---:|---:|---:|---:|
+| small.xlsx | `cell` | 11.98 ms | 10.63 ms | 11% | 42.4 → 42.4 MiB |
+| small.xlsx | `celltype` | 15.54 ms | 10.29 ms | 34% | 42.5 → 42.1 MiB |
+| mixed-100k.xlsx | `cell` | 211 ms | 204 ms | 4% | 109.7 → 108.0 MiB |
+
+## Cleaning strings
 
 Apple M5 Pro, Ruby 3.4.12, roo 4.0.0, `mixed-100k.xlsx` with 100k rows and
 20 mixed columns. Median of five fresh processes per scenario and version,
-alternating the original code at 3df99e4 and the issue 65 change at 3655290,
-before rebasing onto #69 and #72.
+alternating 3df99e4 and 3655290.
 The timer includes opening the workbook. Memory is peak RSS in MiB.
 
 | Scenario | Before | After | Time saved | Peak RSS before → after |

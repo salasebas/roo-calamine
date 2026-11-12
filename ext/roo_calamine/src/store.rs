@@ -8,7 +8,7 @@ mod formatters;
 use magnus::gc::Marker;
 use magnus::rb_sys::AsRawValue;
 use magnus::typed_data::Obj;
-use magnus::value::{Opaque, ReprValue};
+use magnus::value::{LazyId, Opaque, ReprValue};
 use magnus::{
     prelude::*, DataTypeFunctions, Error, Integer, RArray, RHash, RString, Ruby, TypedData, Value,
 };
@@ -19,6 +19,8 @@ use crate::reader::{Body, Kind, RawCell, RawRow, Reference, Style};
 use crate::Reader;
 
 type Span = (u32, u32);
+static VALUE: LazyId = LazyId::new("value");
+static TYPE: LazyId = LazyId::new("type");
 
 fn range((start, end): Span) -> Range<usize> {
     start as usize..end as usize
@@ -329,7 +331,7 @@ impl Store {
         let built = ruby.get_inner(self.built);
         if !built.is_empty() {
             if let Some(cell) = built.get(raw.built_key()) {
-                return cell.funcall("value", ());
+                return cell.funcall(*VALUE, ());
             }
         }
         let cleaned: Value = ruby.get_inner(self.cleaned).entry(record as isize)?;
@@ -344,7 +346,7 @@ impl Store {
         let converter = ruby.get_inner(self.converter);
         let cell = self.formulas.raw(&self.records, record);
         let Some(value) = converter.known_value(ruby, &self.text, &cell)? else {
-            return self.build(ruby, record)?.funcall("value", ());
+            return self.build(ruby, record)?.funcall(*VALUE, ());
         };
         if !rb_sys::SPECIAL_CONST_P(value.as_raw()) && !raw.shared_string() {
             handed_out.store(record as isize, value)?;
@@ -453,13 +455,74 @@ impl Store {
         row: Value,
         column: Value,
     ) -> Result<Option<Value>, Error> {
+        match rb_self.record_at(row, column) {
+            Some(record) => rb_self.build(ruby, record).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    fn record_at(&self, row: Value, column: Value) -> Option<u32> {
         let part = |value| Integer::from_value(value).and_then(|n| n.to_u32().ok());
         let (Some(row), Some(column)) = (part(row), part(column)) else {
+            return None;
+        };
+        self.position((row, column)).ok().map(|i| self.index[i])
+    }
+
+    fn value_at(
+        ruby: &Ruby,
+        rb_self: &Self,
+        row: Value,
+        column: Value,
+    ) -> Result<Option<Value>, Error> {
+        let Some(record) = rb_self.record_at(row, column) else {
             return Ok(None);
         };
-        match rb_self.position((row, column)) {
-            Ok(i) => rb_self.build(ruby, rb_self.index[i]).map(Some),
-            Err(_) => Ok(None),
+        let raw = &rb_self.records[record as usize];
+        let built = ruby.get_inner(rb_self.built);
+        if !built.is_empty() {
+            if let Some(cell) = built.get(raw.built_key()) {
+                return cell.funcall(*VALUE, ()).map(Some);
+            }
+        }
+        let cleaned: Value = ruby.get_inner(rb_self.cleaned).entry(record as isize)?;
+        if !cleaned.is_nil() {
+            return Ok(Some(cleaned));
+        }
+        let cell = rb_self.formulas.raw(&rb_self.records, record);
+        if let Some(value) =
+            ruby.get_inner(rb_self.converter)
+                .known_value(ruby, &rb_self.text, &cell)?
+        {
+            if rb_sys::SPECIAL_CONST_P(value.as_raw()) || raw.shared_string() {
+                return Ok(Some(value));
+            }
+        }
+        rb_self.build(ruby, record)?.funcall(*VALUE, ()).map(Some)
+    }
+
+    fn type_at(
+        ruby: &Ruby,
+        rb_self: &Self,
+        row: Value,
+        column: Value,
+    ) -> Result<Option<Value>, Error> {
+        let Some(record) = rb_self.record_at(row, column) else {
+            return Ok(None);
+        };
+        let built = ruby.get_inner(rb_self.built);
+        if !built.is_empty() {
+            if let Some(cell) = built.get(rb_self.records[record as usize].built_key()) {
+                return cell.funcall(*TYPE, ()).map(Some);
+            }
+        }
+        let raw = rb_self.formulas.raw(&rb_self.records, record);
+        match ruby
+            .get_inner(rb_self.converter)
+            .formatter_type(ruby, &raw)?
+        {
+            Some(kind) => Ok(Some(ruby.sym_new(**kind).as_value())),
+            None => rb_self.build(ruby, record)?.funcall(*TYPE, ()).map(Some),
         }
     }
 
@@ -814,6 +877,8 @@ pub fn define(ruby: &Ruby, native: magnus::RModule) -> Result<(), Error> {
     store.define_singleton_method("read", magnus::function!(Store::read, 2))?;
     store.define_method("[]", magnus::method!(Store::get, 1))?;
     store.define_method("cell_at", magnus::method!(Store::cell_at, 2))?;
+    store.define_method("value_at", magnus::method!(Store::value_at, 2))?;
+    store.define_method("type_at", magnus::method!(Store::type_at, 2))?;
     store.define_method("bounds", magnus::method!(Store::bounds, 0))?;
     store.define_method("row", magnus::method!(Store::row, 3))?;
     store.define_method("each_row", magnus::method!(Store::each_row, 3))?;

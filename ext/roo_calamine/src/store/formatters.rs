@@ -24,7 +24,7 @@ impl Store {
                 if string && RString::try_convert(value)?.is_empty() {
                     return Ok(None);
                 }
-                return Ok(Some((value, ruby.sym_new(kind).into())));
+                return Ok(Some((value, ruby.sym_new(**kind).into())));
             }
         }
         let cell = match built {
