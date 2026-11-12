@@ -44,15 +44,17 @@ memory include opening the workbook.
 | `each` | 18.81 s · 3282 MB | **0.62 s · 174 MB** | 30× |
 | 10,000 random `cell(row, col)` | 17.25 s · 3272 MB | **0.48 s · 104 MB** | 36× |
 | `to_csv` | 21.72 s · 3369 MB | **0.77 s · 118 MB** | 28× |
-| `to_yaml` | 24.97 s | **1.28 s · 322 MB** | 20× |
-| `to_xml` | 53.29 s | **1.04 s · 711 MB** | 51× |
-| `to_matrix` | 20.70 s | **0.65 s · 216 MB** | 32× |
+| `to_yaml` | 24.26 s · 3430 MB | **1.28 s · 322 MB** | 19× |
+| `to_xml` | 50.81 s · 3991 MB | **1.04 s · 711 MB** | 49× |
+| `to_matrix` | 19.97 s · 3287 MB | **0.65 s · 216 MB** | 31× |
 | [`each_row_values`](#values-only) | 13.43 s · 118 MB | **0.44 s · 47 MB** | 31× |
 
-On the other test files it is 18–29× faster with shared strings, 16–27× with
-unique strings, and 2.6–8.5× on a 100-row sheet. See
+On the other test files it is 18–43× faster with shared strings, 16–33× with
+unique strings, and 2.6–10× on a 100-row sheet. See
 [bench/README.md](bench/README.md) for every file, the method, and how to run
-it.
+it. [bench/RESULTS.md](bench/RESULTS.md) times every public roo read. It
+ties roo only where roo reads the file itself: CSV, and XML roo-calamine
+hands back.
 
 ## Values only
 
