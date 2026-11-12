@@ -31,8 +31,12 @@ SCENARIOS = {
   "each" => "`each` (one Array of values per row)",
   "cell" => "10,000 random `cell(row, col)`",
   "csv" => "`to_csv`",
-  "values" => "values only: `Roo::Calamine.each_row_values`"
+  "values" => "values only: `Roo::Calamine.each_row_values`",
+  "yaml" => "`to_yaml`",
+  "xml" => "`to_xml`",
+  "matrix" => "`to_matrix`"
 }.freeze
+CALX_SCENARIOS = %w[stream parse each cell csv values].freeze
 COMPARED = %w[roo roo-calamine].freeze
 FIXTURES = %w[mixed-100k.xlsx shared-strings-100k.xlsx unique-strings-100k.xlsx small.xlsx].freeze
 MB = 1024 * 1024
@@ -66,6 +70,10 @@ def timed(library, name, path)
   { seconds: median(results.map { |r| r["seconds"] }), peak_rss: median(results.map { |r| r["peak_rss"] }) }
 end
 
+def timed?(library, name)
+  TIMED.include?(library) && (library != "calx" || CALX_SCENARIOS.include?(name))
+end
+
 def cpu
   return `sysctl -n machdep.cpu.brand_string`.strip if RUBY_PLATFORM.include?("darwin")
 
@@ -89,7 +97,7 @@ FIXTURES.each do |fixture|
     digests = COMPARED.map { |library| scenario(library, name, path, "digest")["digest"] }
     raise "roo-calamine read different values than roo: #{fixture} #{name}" unless digests.uniq.size == 1
 
-    roo, calamine, calx = LIBRARIES.map { |library| timed(library, name, path) if TIMED.include?(library) }
+    roo, calamine, calx = LIBRARIES.map { |library| timed(library, name, path) if timed?(library, name) }
     speedup = roo && calamine ? format("%.1f×", roo[:seconds] / calamine[:seconds]) : "-"
     puts "| #{fixture} | #{label} | #{describe(roo)} | #{describe(calamine)} | #{speedup} | #{describe(calx)} |"
   end
