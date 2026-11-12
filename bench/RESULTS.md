@@ -9,23 +9,30 @@ before timing. The baseline is 3df99e4.
 
 | Read | roo-calamine before | roo-calamine after | Time reduction | roo after | Faster than roo |
 |---|---:|---:|---:|---:|---:|
-| `cell` | 7.8 ms | 6.5 ms | 17% | 19.3 ms | 3.0× |
-| `celltype` | 9.0 ms | 7.2 ms | 20% | 22.5 ms | 3.1× |
+| `cell` | 7.9 ms | 6.8 ms | 14% | 19.6 ms | 2.9× |
+| `celltype` | 9.6 ms | 6.4 ms | 33% | 21.2 ms | 3.3× |
 
-Peak RSS stayed at 41 MB. Scalar reads reuse the store's existing value
-conversion and type classification instead of constructing a roo cell.
-Reads that need a cell still build one, and reads after materialization use
-the public cells hash. Existing parity tests cover every single-cell API.
+Peak RSS is 41 MB on the small sheet. On `mixed-100k.xlsx`, five fresh-process
+runs of `cell` measured 0.47 s and 105 MB both before and after. Scalar reads
+reuse the store's existing value conversion and type classification.
+Heap values stay in their cells, so a late lookup does not allocate value
+slots for every preceding record. Reads after materialization use the public
+cells hash. Parity tests cover every single-cell API, with regressions for
+late-read memory growth and custom coordinate normalization.
 
 This does not meet #68's 4× target. The change keeps the measured improvement
-small in scope; that target remains open. Native public entry points,
-native sheet validation, and direct indexing of rectangular sheets did not
-provide enough benefit to retain.
+small in scope. Sheet names are still validated on every call, and native
+lookups reuse method and type IDs. A paged value cache recovered some extra
+speed but added state and memory on random reads. Native public entry points,
+native sheet validation, and rectangular indexing did not provide enough
+benefit to retain.
 
 ```sh
 BUNDLE_GEMFILE=bench/Gemfile bundle exec ruby bench/run.rb 9 \
   --scenario cell,celltype,formula,excelx_type,excelx_value,formatted_value,excelx_format,font \
   --fixture small roo roo-calamine
+BUNDLE_GEMFILE=bench/Gemfile bundle exec ruby bench/run.rb 5 \
+  --scenario cell --fixture mixed-100k roo-calamine
 ```
 
 ## Cleaning strings, issue 65
