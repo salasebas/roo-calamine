@@ -1,29 +1,29 @@
 # Runtime measurements
 
-Five fresh processes per backend and case, all on baseline 21f9da6 and the
+Five fresh processes per backend and case, all on baseline 194b149 and the
 rebased candidate. Time is median [minimum, maximum] in milliseconds;
 memory is median peak RSS in MiB. All 17 oracle hashes match plain roo for
 baseline, candidate, and control. No samples or outliers were removed.
 
 | Fixture and call | Baseline ms / MiB | Fork ms / MiB | No-fork control ms / MiB |
 |---|---:|---:|---:|
-| small.xlsx / open | 0.717 [0.708, 0.94] / 35.7 | 0.783 [0.718, 1.679] / 35.6 | 0.833 [0.72, 0.9] / 35.9 |
-| small.xlsx / cell | 8.087 [7.979, 8.292] / 37.2 | 7.921 [7.9, 8.017] / 37.1 | 8.056 [7.964, 9.619] / 37.1 |
-| small.xlsx / celltype | 9.961 [9.524, 10.123] / 37.2 | 9.698 [9.579, 9.971] / 37.1 | 9.795 [9.626, 9.808] / 37.2 |
-| small.xlsx / stream | 1.916 [1.86, 1.936] / 36.3 | 1.819 [1.754, 1.855] / 36.4 | 1.867 [1.787, 2.161] / 36.2 |
-| small.xlsx / stream-max-rows | 2.213 [2.063, 2.47] / 36.3 | 2.078 [2.036, 2.491] / 36.4 | 2.158 [2.133, 2.257] / 36.3 |
-| small.xlsx / each | 1.668 [1.475, 1.932] / 36.3 | 1.693 [1.433, 1.893] / 36.5 | 1.832 [1.66, 3.691] / 36.5 |
-| small.xlsx / csv | 1.963 [1.812, 3.374] / 36.5 | 1.923 [1.578, 1.961] / 36.3 | 1.812 [1.773, 1.993] / 36.3 |
-| mixed-100k.xlsx / cell | 169.976 [168.513, 171.483] / 103.2 | 176.844 [175.617, 193.194] / 103.3 | 170.52 [169.646, 176.77] / 103.3 |
-| mixed-100k.xlsx / celltype | 170.232 [169.71, 173.689] / 103.4 | 180.542 [178.477, 189.373] / 103.3 | 173.266 [171.237, 183.03] / 103.3 |
-| mixed-100k.xlsx / stream | 555.864 [535.231, 583.92] / 46.1 | 545.736 [542.497, 559.545] / 46.1 | 548.178 [539.471, 566.69] / 46.0 |
-| mixed-100k.xlsx / stream-max-rows | 12.459 [11.727, 13.041] / 45.5 | 11.551 [11.316, 11.808] / 45.5 | 11.531 [11.453, 13.331] / 45.4 |
-| mixed-100k.xlsx / each | 314.431 [307.752, 325.73] / 175.2 | 317.933 [315.885, 343.959] / 175.2 | 314.682 [310.155, 329.705] / 175.1 |
-| mixed-100k.xlsx / csv | 446.912 [445.746, 475.198] / 116.1 | 456.42 [451.867, 469.414] / 116.1 | 449.995 [444.512, 455.03] / 116.1 |
-| shared-strings-100k.xlsx / cell | 94.962 [93.95, 95.332] / 68.6 | 96.838 [95.918, 100.56] / 68.4 | 94.13 [92.647, 94.451] / 68.5 |
-| shared-strings-100k.xlsx / stream | 237.007 [236.751, 238.324] / 46.5 | 236.753 [234.383, 248.237] / 46.5 | 238.867 [237.751, 240.332] / 46.6 |
-| unique-strings-100k.xlsx / cell | 299.146 [297.795, 302.283] / 158.0 | 300.734 [297.696, 307.721] / 158.0 | 320.343 [318.003, 320.376] / 157.7 |
-| unique-strings-100k.xlsx / stream | 463.018 [461.76, 478.502] / 248.4 | 459.571 [449.45, 469.355] / 248.4 | 487.916 [479.071, 498.078] / 249.0 |
+| small.xlsx / open | 0.778 [0.695, 1.01] / 35.8 | 0.778 [0.708, 0.895] / 35.8 | 0.824 [0.729, 0.99] / 35.5 |
+| small.xlsx / cell | 6.491 [6.395, 6.987] / 37.0 | 6.482 [6.305, 6.769] / 36.9 | 6.584 [6.528, 6.843] / 37.0 |
+| small.xlsx / celltype | 6.23 [6.206, 6.381] / 36.8 | 6.3 [6.052, 6.58] / 36.9 | 6.188 [6.004, 6.644] / 37.0 |
+| small.xlsx / stream | 1.802 [1.758, 2.16] / 36.4 | 1.754 [1.689, 2.301] / 36.3 | 1.805 [1.797, 1.899] / 36.4 |
+| small.xlsx / stream-max-rows | 1.795 [1.755, 1.859] / 36.3 | 1.751 [1.747, 2.048] / 36.5 | 1.843 [1.77, 1.98] / 36.3 |
+| small.xlsx / each | 1.634 [1.589, 1.69] / 36.4 | 1.549 [1.392, 3.929] / 36.3 | 1.573 [1.424, 1.619] / 36.2 |
+| small.xlsx / csv | 1.666 [1.625, 1.844] / 36.4 | 1.75 [1.567, 1.817] / 36.3 | 1.771 [1.618, 1.778] / 36.2 |
+| mixed-100k.xlsx / cell | 169.444 [164.938, 194.447] / 102.4 | 176.981 [172.735, 180.287] / 102.4 | 171.858 [168.98, 178.553] / 102.5 |
+| mixed-100k.xlsx / celltype | 166.631 [160.778, 173.513] / 99.3 | 169.089 [166.061, 191.73] / 99.2 | 170.22 [161.726, 179.157] / 99.3 |
+| mixed-100k.xlsx / stream | 547.167 [543.982, 560.765] / 46.2 | 551.046 [545.812, 555.234] / 46.2 | 550.724 [545.204, 562.326] / 46.2 |
+| mixed-100k.xlsx / stream-max-rows | 11.398 [11.26, 12.777] / 45.5 | 11.287 [11.224, 11.797] / 45.5 | 12.692 [11.357, 51.166] / 45.4 |
+| mixed-100k.xlsx / each | 323.309 [309.56, 393.506] / 175.3 | 329.531 [320.535, 408.859] / 175.2 | 320.757 [313.296, 411.4] / 175.2 |
+| mixed-100k.xlsx / csv | 465.672 [463.252, 517.887] / 116.3 | 473.68 [466.657, 499.556] / 116.3 | 462.812 [459.154, 475.032] / 116.1 |
+| shared-strings-100k.xlsx / cell | 93.817 [92.989, 96.363] / 67.9 | 96.69 [94.11, 99.253] / 67.9 | 92.988 [91.74, 97.153] / 67.8 |
+| shared-strings-100k.xlsx / stream | 242.556 [241.083, 263.235] / 46.6 | 244.156 [239.934, 245.003] / 46.4 | 242.765 [239.91, 245.387] / 46.6 |
+| unique-strings-100k.xlsx / cell | 331.532 [315.446, 343.209] / 158.3 | 318.256 [310.91, 331.931] / 157.1 | 348.5 [337.995, 380.026] / 157.6 |
+| unique-strings-100k.xlsx / stream | 489.826 [471.213, 501.895] / 248.4 | 491.55 [454.182, 581.199] / 248.7 | 503.878 [493.306, 562.385] / 249.0 |
 
 [Raw samples and oracle hashes](paired.json). Control timings are experimental;
 its code reduction is not a claim that it is ready for adoption.
@@ -35,10 +35,10 @@ before timing. Values in milliseconds, median [minimum, maximum].
 
 | Path | Open and first read / full array load | First 10k reads | Repeated 10k reads |
 |---|---:|---:|---:|
-| baseline | 1.691 [1.455, 5.925] | 4.004 [3.853, 4.31] | 3.428 [3.349, 3.75] |
-| candidate | 1.454 [1.362, 1.846] | 3.975 [3.874, 4.11] | 3.351 [3.312, 3.91] |
-| control | 1.852 [1.349, 3.977] | 4.046 [3.879, 4.08] | 3.362 [3.319, 3.634] |
-| calx | 0.743 [0.719, 6.024] | 0.329 [0.312, 0.489] | 0.304 [0.3, 0.321] |
+| baseline | 1.348 [1.2, 5.461] | 3.079 [3.005, 3.141] | 2.852 [2.8, 3.272] |
+| candidate | 1.327 [1.261, 1.382] | 3.084 [2.939, 3.267] | 2.821 [2.801, 3.002] |
+| control | 1.27 [1.225, 2.211] | 3.041 [2.998, 3.282] | 2.848 [2.795, 2.865] |
+| calx | 0.664 [0.657, 3.151] | 0.297 [0.282, 0.305] | 0.292 [0.277, 0.299] |
 
 Calx 0.1.0 loads the full small sheet and queries Ruby arrays. Its value rules
 and APIs differ from roo, and it has no matching celltype API. This is a
@@ -58,11 +58,11 @@ parser, allocator, or Ruby VM costs.
 
 | Phase | Baseline | Fork |
 |---|---:|---:|
-| Open and raw records | 1.478 | 1.476 |
-| First 10k native cell reads and construction | 1.599 | 1.617 |
-| Read values from returned cells | 0.233 | 0.235 |
-| Warm native cell/value reads | 1.197 | 1.188 |
-| Warm public cell/value reads | 3.352 | 3.323 |
+| Open and raw records | 1.396 | 1.339 |
+| First 10k native cell reads and construction | 1.446 | 1.449 |
+| Read values from returned cells | 0.22 | 0.223 |
+| Warm native cell/value reads | 1.144 | 1.139 |
+| Warm public cell/value reads | 2.735 | 2.74 |
 
 [Raw component samples](components.json). Public dispatch and cell-construction
 costs remain after the parser moves into Calamine.

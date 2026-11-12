@@ -112,7 +112,7 @@ and `Roo::Calamine.available?` whether the extension is loaded.
 
 This branch runs the native worksheet reader through a pinned Calamine fork.
 The [evaluation](docs/calamine-fork.md) recommends rejecting adoption: the
-working candidate saves 20 owned implementation lines (0.30%).
+working candidate saves 20 owned implementation lines (0.29%).
 
 ## How it works
 

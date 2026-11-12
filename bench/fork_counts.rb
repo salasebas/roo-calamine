@@ -3,7 +3,7 @@
 require "json"
 require "open3"
 
-base = ARGV.fetch(0, "21f9da66f1260eb41469f1b6ef57a98b8d57f871")
+base = ARGV.fetch(0, "194b149d64a2682fa43fc54319a640dfe4eb300e")
 files, status = Open3.capture2("git", "ls-tree", "-r", "--name-only", base, "lib", "ext/roo_calamine/src")
 abort "cannot list baseline" unless status.success?
 production = ->(text) { text.split(/^#\[cfg\(test\)\]/, 2).first.to_s.lines.size }

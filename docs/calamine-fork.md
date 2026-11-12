@@ -1,8 +1,8 @@
 # Calamine backend evaluation
 
 Reject this candidate for adoption. It runs the complete plugin through a
-Calamine fork, but saves only 20 owned implementation lines out of 6,690
-(0.30%). A tested control without Calamine saves 50 lines. Keep this PR as
+Calamine fork, but saves only 20 owned implementation lines out of 6,783
+(0.29%). A tested control without Calamine saves 50 lines. Keep this PR as
 the working experimental candidate; do not merge it as a backend upgrade.
 This decision applies to the implementation measured here, not every possible
 Calamine integration.
@@ -10,11 +10,12 @@ Calamine integration.
 ## Candidate and baseline
 
 Work began at roo-calamine
-`43914e90cc018ba07fcc29f92d3e2a866ab3eccb`. Before review, #71 landed on
-main. The final comparison uses that updated baseline,
-`21f9da66f1260eb41469f1b6ef57a98b8d57f871`, and the rebased candidate.
-The initial 6,645-line baseline grew by 45 unrelated production lines; the
-fork saving was 32 lines before review and is 20 after restoring UTF-16
+`43914e90cc018ba07fcc29f92d3e2a866ab3eccb`. The first comparison was rebased
+on #71 at `21f9da66f1260eb41469f1b6ef57a98b8d57f871`. While the PR matrix
+was running, #73 landed; the final branch and comparison use
+`194b149d64a2682fa43fc54319a640dfe4eb300e`. Both rebases applied cleanly.
+The initial 6,645-line baseline grew by 138 unrelated production lines.
+The fork saving was 32 lines before review and is 20 after restoring UTF-16
 fallback. The machine runs Ruby 3.4.12 and Cargo 1.99.1 on arm64 macOS,
 Apple M5 Pro. Both native extensions use the same release profile, thin
 LTO, one codegen unit, Ruby, fixtures, and Ruby adapters.
@@ -81,13 +82,13 @@ only added or edited upstream lines, not unchanged Calamine source.
 
 | Term | Lines |
 |---|---:|
-| Baseline implementation | 6,690 |
+| Baseline implementation | 6,783 |
 | Old implementation removed | 1,161 |
 | Replacement imports, calls, module export, and separator added | 5 |
-| Remaining roo-calamine implementation | 5,534 |
+| Remaining roo-calamine implementation | 5,627 |
 | New fork implementation, including relocated rules | 1,134 |
 | Edited upstream lines | 2 |
-| Total owned candidate implementation | 6,670 |
+| Total owned candidate implementation | 6,763 |
 | Net owned saving | 20 |
 
 The 1,156-line net reduction in this repository is mostly relocation, not removal.
@@ -104,7 +105,7 @@ The fork changes two existing upstream lines: a public module declaration
 and the visibility of the existing entity helper. It adds three files:
 the raw reader, attribute checker, and the relocated reader tests, now
 484 lines after extending the encoding regression. The fork owns 43 functions, mostly transferred from the old reader.
-All 3,307 original Ruby test/support lines remain; the BOM regressions add
+All 3,343 original Ruby test/support lines remain; the BOM regressions add
 12 lines. Owned Rust tests grow from 717 to 734 physical lines, including
 the 8-line extension harness. The BOM fix adds a first-read loop and four
 match arms, using the existing started flag without another cache or state
@@ -131,7 +132,7 @@ worksheet and shared-string readers using quick-xml's existing
 `resolve_xml_entity`, and sends shared-string events through the existing
 validated event reader. That removes the second validation pass and its
 scoped worker. It changes no Ruby interface and saves 50 implementation
-lines, leaving 6,640. Its shared-string suite passes 21 tests and 165
+lines, leaving 6,733. Its shared-string suite passes 21 tests and 165
 assertions; its Rust suite passes all 25 tests.
 
 The control patch is retained with the evidence. It is an experimental
@@ -169,7 +170,7 @@ runs do not establish a speed benefit from the fork. The parsing and Ruby
 conversion algorithms are substantially the same. Other tasks also ran on
 the host during the experiment; variation must be read with that limitation.
 
-After the rebase, the built extension grows from 1,032,080 to 1,088,848 bytes (5.5%).
+After the rebase, the built extension grows from 1,032,544 to 1,089,504 bytes (5.5%).
 In the initial 43914e9 comparison, a single release build in a fresh target directory takes 12.07 seconds for
 the baseline and 14.01 seconds for the candidate. Both use the same compiler
 and shared compiler cache. These single builds are distribution evidence,
@@ -178,13 +179,17 @@ record the exact flags.
 
 ## Compatibility and distribution
 
-The final candidate passes `bundle exec rake test` with 719 runs and
-18,537 assertions, with zero failures, errors, or skips. The starting baseline
+The final candidate passes `bundle exec rake test` with 721 runs and
+18,544 assertions, with zero failures, errors, or skips. The starting baseline
 and initial candidate passed 717 runs and 18,496 assertions before #71
 and the new BOM regression.
 The rebased candidate also passes `bundle exec rake parity`: the six upstream suites have identical
 results with and without the plugin, including the two existing skips.
-Native-reader counters confirm the candidate uses the native path.
+Native-reader counters confirm the candidate uses the native path. The #73
+custom-normalization and late-read memory regressions are retained and pass.
+The first PR head passed all 49 CI checks, including the full source/binary
+gem and Ruby/platform matrix. The clean rebase on #73 is validated again
+on the final PR head before handoff.
 
 `cargo nextest run` passes all 25 extension/reader tests.
 `cargo test --doc`, `cargo clippy --all-targets -- -D warnings`,

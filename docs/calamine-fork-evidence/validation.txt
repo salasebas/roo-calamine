@@ -2,7 +2,7 @@ Starting baseline and initial candidate: bundle exec rake test
 717 runs, 18496 assertions, 0 failures, 0 errors, 0 skips
 
 Final reviewed candidate: bundle exec rake test
-719 runs, 18537 assertions, 0 failures, 0 errors, 0 skips
+721 runs, 18544 assertions, 0 failures, 0 errors, 0 skips
 
 Starting baseline, initial candidate, and rebased candidate: bundle exec rake parity
 All six upstream roo suites match. 252 tests/examples, two existing skips.
@@ -64,3 +64,10 @@ Count script: new one-line candidate file ignored before; counted as +1 after.
 Final reviewed fork re-exercised on both upstream releases with the same
 232/317 tests and 66/67 doctests passing.
 Fable 5.2 high: APPROVE in round 2, S1-S4 resolved, no new findings.
+
+Clean integration rebase on main #73, 194b149:
+bundle exec rake compile test parity
+721 runs, 18544 assertions, 0 failures, 0 errors, 0 skips
+All six parity suites still match plain roo.
+Custom-normalization and late-read memory regressions retained.
+First PR head e37bdac passed all 49 CI checks, including the full matrix.
