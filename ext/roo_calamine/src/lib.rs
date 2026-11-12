@@ -8,7 +8,7 @@
 pub mod archive;
 pub mod convert;
 pub mod numeric;
-pub mod reader;
+pub use calamine::roo as reader;
 pub mod shared_strings;
 pub mod sheet_parts;
 pub mod store;
@@ -303,4 +303,13 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     sheet_parts::define(native)?;
     archive::define(ruby, native)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod reader_tests {
+    use crate::reader::*;
+    use std::io::BufReader;
+    mod cases {
+        include!("../calamine/src/roo/tests.rs");
+    }
 }

@@ -23,8 +23,9 @@ use std::io::{BufRead, BufReader};
 use std::ops::Range;
 use std::path::Path;
 
-use quick_xml::events::{BytesRef, BytesStart, Event};
+use quick_xml::events::{BytesStart, Event};
 
+pub use crate::utils::unescape_entity_to_buffer as push_reference;
 use attributes::TagAttributes;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -141,7 +142,7 @@ impl From<quick_xml::events::attributes::AttrError> for Unsupported {
     }
 }
 
-type Result<T> = std::result::Result<T, Unsupported>;
+pub type Result<T> = std::result::Result<T, Unsupported>;
 
 /// `Roo::Utils.extract_coordinate` for well-formed references. `None` means
 /// roo raises.
@@ -290,7 +291,7 @@ impl<R: BufRead> SheetReader<R> {
     }
 
     /// Reads a validated XML event without building worksheet rows.
-    pub(crate) fn next_xml_event<'b>(&mut self, buf: &'b mut Vec<u8>) -> Result<Event<'b>> {
+    pub fn next_xml_event<'b>(&mut self, buf: &'b mut Vec<u8>) -> Result<Event<'b>> {
         let depth = self.open_elements;
         let event = self.read_event(buf)?;
         if depth == 0 {
@@ -453,6 +454,18 @@ impl<R: BufRead> SheetReader<R> {
     /// The next event, rejecting characters XML does not allow, which
     /// Nokogiri does not accept and quick-xml does not check.
     fn read_event<'b>(&mut self, buf: &'b mut Vec<u8>) -> Result<Event<'b>> {
+        if !self.started {
+            loop {
+                match self.xml.get_mut().fill_buf() {
+                    Ok(bytes) if matches!(bytes.first(), Some(0xFF | 0xFE)) => {
+                        return Err(Unsupported("a UTF-16 byte-order mark".into()));
+                    }
+                    Ok(_) => break,
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(error) => return Err(Unsupported(error.to_string())),
+                }
+            }
+        }
         let event = self.xml.read_event_into(buf)?;
         let first = !std::mem::replace(&mut self.started, true);
         match &event {
@@ -758,7 +771,7 @@ impl<R: BufRead> SheetReader<R> {
                 Event::End(_) => depth -= 1,
                 Event::Text(t) => out.push_str(&t.xml10_content()),
                 Event::CData(t) => out.push_str(&t.xml10_content()),
-                Event::GeneralRef(r) => push_reference(out, &r)?,
+                Event::GeneralRef(r) => push_reference(&r, out)?,
                 Event::Eof => return Err(Unsupported("unexpected end of element".into())),
                 _ => {}
             }
@@ -791,7 +804,7 @@ impl<R: BufRead> SheetReader<R> {
                 }
                 Event::Text(t) if t_depth.is_some() => out.push_str(&t.xml10_content()),
                 Event::CData(t) if t_depth.is_some() => out.push_str(&t.xml10_content()),
-                Event::GeneralRef(r) if t_depth.is_some() => push_reference(out, &r)?,
+                Event::GeneralRef(r) if t_depth.is_some() => push_reference(&r, out)?,
                 Event::Eof => return Err(Unsupported("unexpected end of element".into())),
                 _ => {}
             }
@@ -907,26 +920,6 @@ fn check_name(name: &str) -> Result<()> {
     if part_start {
         return Err(Unsupported(format!("the name {name:?}")));
     }
-    Ok(())
-}
-
-fn push_reference(text: &mut String, reference: &BytesRef<'_>) -> Result<()> {
-    if reference.is_char_ref() {
-        match reference.resolve_char_ref()? {
-            Some(c) => text.push(c),
-            None => return Err(Unsupported("invalid character reference".into())),
-        }
-        return Ok(());
-    }
-    let resolved = match reference.xml10_content().as_ref() {
-        "lt" => '<',
-        "gt" => '>',
-        "amp" => '&',
-        "apos" => '\'',
-        "quot" => '"',
-        other => return Err(Unsupported(format!("entity reference &{other};"))),
-    };
-    text.push(resolved);
     Ok(())
 }
 

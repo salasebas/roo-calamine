@@ -1,0 +1,147 @@
+diff --git a/ext/roo_calamine/src/reader.rs b/ext/roo_calamine/src/reader.rs
+index e770f73..1dfe721 100644
+--- a/ext/roo_calamine/src/reader.rs
++++ b/ext/roo_calamine/src/reader.rs
+@@ -910,23 +910,14 @@ fn check_name(name: &str) -> Result<()> {
+     Ok(())
+ }
+ 
+-fn push_reference(text: &mut String, reference: &BytesRef<'_>) -> Result<()> {
+-    if reference.is_char_ref() {
+-        match reference.resolve_char_ref()? {
+-            Some(c) => text.push(c),
+-            None => return Err(Unsupported("invalid character reference".into())),
+-        }
+-        return Ok(());
++pub fn push_reference(text: &mut String, reference: &BytesRef<'_>) -> Result<()> {
++    if let Some(c) = reference.resolve_char_ref()? {
++        text.push(c);
++    } else if let Some(value) = quick_xml::escape::resolve_xml_entity(reference.as_ref()) {
++        text.push_str(value);
++    } else {
++        return Err(Unsupported(format!("entity reference &{};", reference.as_ref())));
+     }
+-    let resolved = match reference.xml10_content().as_ref() {
+-        "lt" => '<',
+-        "gt" => '>',
+-        "amp" => '&',
+-        "apos" => '\'',
+-        "quot" => '"',
+-        other => return Err(Unsupported(format!("entity reference &{other};"))),
+-    };
+-    text.push(resolved);
+     Ok(())
+ }
+ 
+diff --git a/ext/roo_calamine/src/shared_strings.rs b/ext/roo_calamine/src/shared_strings.rs
+index 1a19d7d..ae8e2e8 100644
+--- a/ext/roo_calamine/src/shared_strings.rs
++++ b/ext/roo_calamine/src/shared_strings.rs
+@@ -10,17 +10,16 @@
+ use std::cell::RefCell;
+ use std::fs::File;
+ use std::io::{BufRead, BufReader};
+-use std::panic::resume_unwind;
+ use std::path::Path;
+ use std::sync::atomic::{AtomicBool, Ordering};
+ 
+ use magnus::gc::Marker;
+ use magnus::value::{Opaque, ReprValue};
+ use magnus::{prelude::*, DataTypeFunctions, Error, RArray, RString, Ruby, TypedData, Value};
+-use quick_xml::events::{BytesRef, BytesStart, Event};
++use quick_xml::events::{BytesStart, Event};
+ use quick_xml::XmlVersion;
+ 
+-use crate::reader::{Mode, SheetReader, Unsupported};
++use crate::reader::{push_reference, Mode, SheetReader, Unsupported};
+ use crate::{unsupported, without_gvl};
+ 
+ type Result<T> = std::result::Result<T, Unsupported>;
+@@ -227,7 +226,7 @@ impl Format {
+ }
+ 
+ struct SharedStringsReader<R: BufRead> {
+-    xml: quick_xml::Reader<R>,
++    xml: SheetReader<R>,
+     buf: Vec<u8>,
+     /// Whether to build `#to_html` too.
+     html: bool,
+@@ -279,7 +278,7 @@ fn name(e: &BytesStart<'_>) -> Name {
+ impl<R: BufRead> SharedStringsReader<R> {
+     fn new(input: R, html: bool) -> Self {
+         Self {
+-            xml: quick_xml::Reader::from_reader(input),
++            xml: SheetReader::new(input, Mode::Document),
+             buf: Vec::with_capacity(16 * 1024),
+             html,
+             depth: 0,
+@@ -514,7 +513,7 @@ impl<R: BufRead> SharedStringsReader<R> {
+     }
+ 
+     fn read_event<'b>(&mut self, buf: &'b mut Vec<u8>) -> Result<Event<'b>> {
+-        let event = self.xml.read_event_into(buf)?;
++        let event = self.xml.next_xml_event(buf)?;
+         match &event {
+             // roo's fix also replaces `_x000D_` in names, which breaks them.
+             Event::Start(e) | Event::Empty(e) if e.contains(CARRIAGE_RETURN) => {
+@@ -550,22 +549,6 @@ fn vert_align(e: &BytesStart<'_>) -> Result<String> {
+     value.ok_or_else(|| Unsupported("a `vertAlign` without a `val`".into()))
+ }
+ 
+-fn push_reference(text: &mut String, reference: &BytesRef<'_>) -> Result<()> {
+-    if let Some(c) = reference.resolve_char_ref()? {
+-        text.push(c);
+-        return Ok(());
+-    }
+-    text.push(match reference.xml10_content().as_ref() {
+-        "lt" => '<',
+-        "gt" => '>',
+-        "amp" => '&',
+-        "apos" => '\'',
+-        "quot" => '"',
+-        other => return Err(Unsupported(format!("entity reference &{other};"))),
+-    });
+-    Ok(())
+-}
+-
+ /// Calls `step` until it returns `false` (`Ok(true)`) or `interrupted`
+ /// turns true (`Ok(false)`).
+ fn until(interrupted: &AtomicBool, mut step: impl FnMut() -> Result<bool>) -> Result<bool> {
+@@ -584,34 +567,10 @@ fn read(
+     path: &Path,
+     html: bool,
+ ) -> std::result::Result<SharedStringsReader<BufReader<File>>, Error> {
+-    let mut check = SheetReader::open(path, Mode::Document).map_err(|e| unsupported(ruby, e))?;
+     let mut reader = SharedStringsReader::open(path, html).map_err(|e| unsupported(ruby, e))?;
+-    let (mut checked, mut read) = (false, false);
+-    while !(checked && read) {
+-        let (checking, reading) = without_gvl(|interrupted| {
+-            std::thread::scope(|scope| {
+-                let checking = if checked {
+-                    None
+-                } else {
+-                    let thread = std::thread::Builder::new()
+-                        .name("roo-calamine".into())
+-                        .spawn_scoped(scope, || {
+-                            until(interrupted, || Ok(check.next_row()?.is_some()))
+-                        })
+-                        .map_err(|e| Unsupported(e.to_string()))?;
+-                    Some(thread)
+-                };
+-                let reading = read || until(interrupted, || reader.next_item())?;
+-                let checking = match checking {
+-                    Some(thread) => thread.join().unwrap_or_else(|panic| resume_unwind(panic))?,
+-                    None => true,
+-                };
+-                Ok((checking, reading))
+-            })
+-        })?
+-        .map_err(|e| unsupported(ruby, e))?;
+-        (checked, read) = (checking, reading);
+-    }
++    while !without_gvl(|interrupted| until(interrupted, || reader.next_item()))?
++        .map_err(|e| unsupported(ruby, e))?
++    {}
+     Ok(reader)
+ }
+ 

@@ -1,0 +1,7 @@
+{
+  "small.xlsx": "0fef4735111857504a8201cc64a29da1485c8ffd828e8e98c0321168518ba623",
+  "mixed-100k.xlsx": "fc3dd8f27c5a582b4eeab96bfdf39cfac3b1b30474fec3f0d788404bc1feda84",
+  "shared-strings-100k.xlsx": "883d8110eb63ccacb5089eeee78409215a8cc0db9204de9206c5e3b11e476bf4",
+  "unique-strings-100k.xlsx": "0473a83cf30ab7dbecff3aad6fdf7d1fae472471acbeaa8fe0c2317d6cba1aa7",
+  "sparse.xlsx": "7bcc0cf5ec4eff792a98765411fa3d80b5b945d0281c6241aae7e837dbdcee8c"
+}

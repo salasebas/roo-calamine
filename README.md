@@ -29,7 +29,7 @@ without Bundler, `require "roo/calamine"`.
 | Ruby | CRuby 3.3, 3.4, 4.0 |
 | roo | `~> 4.0` |
 | Precompiled | Linux x86_64/aarch64 (glibc, musl), macOS x86_64/arm64, Windows x64 |
-| Other platforms | the source gem compiles with Rust 1.86 or later |
+| Other platforms | the source gem compiles with Rust 1.88 or later |
 | JRuby | installs without Rust and stays inert: roo reads every file itself |
 
 ## Benchmarks
@@ -107,6 +107,12 @@ ROO_CALAMINE=0 bundle exec rails server # also: false, off
 Either one makes roo read exactly as it does without the gem.
 `Roo::Calamine.enabled?` tells whether the next read uses the native reader,
 and `Roo::Calamine.available?` whether the extension is loaded.
+
+## Backend experiment
+
+This branch runs the native worksheet reader through a pinned Calamine fork.
+The [evaluation](docs/calamine-fork.md) recommends rejecting adoption: the
+working candidate saves 20 owned implementation lines (0.29%).
 
 ## How it works
 

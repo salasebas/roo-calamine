@@ -1,5 +1,6 @@
 [workspace]
 members = ["ext/roo_calamine"]
+default-members = ["ext/roo_calamine"]
 resolver = "2"
 
 [profile.release]

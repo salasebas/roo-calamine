@@ -1,0 +1,128 @@
+[
+  {
+    "backend": "baseline",
+    "run": 0,
+    "open_and_records": 0.001435000000128639,
+    "first_native_cells": 0.0014460000002145534,
+    "cell_values": 0.000218999999560765,
+    "warm_native_values": 0.0011439999998401618,
+    "warm_public_values": 0.0027200000004086178
+  },
+  {
+    "backend": "candidate",
+    "run": 0,
+    "open_and_records": 0.001244000000951928,
+    "first_native_cells": 0.0015509999993810197,
+    "cell_values": 0.000232000000323751,
+    "warm_native_values": 0.0011479999993753154,
+    "warm_public_values": 0.0027399999999033753
+  },
+  {
+    "backend": "candidate",
+    "run": 1,
+    "open_and_records": 0.0013400000007095514,
+    "first_native_cells": 0.0014489999994111713,
+    "cell_values": 0.00022300000091490801,
+    "warm_native_values": 0.0010999999994965037,
+    "warm_public_values": 0.002743999999438529
+  },
+  {
+    "backend": "baseline",
+    "run": 1,
+    "open_and_records": 0.0014860000010230578,
+    "first_native_cells": 0.001502999999502208,
+    "cell_values": 0.00023499999952036887,
+    "warm_native_values": 0.0011580000009416835,
+    "warm_public_values": 0.002786999999443651
+  },
+  {
+    "backend": "baseline",
+    "run": 2,
+    "open_and_records": 0.0013479999997798586,
+    "first_native_cells": 0.0015820000007806811,
+    "cell_values": 0.00023099999998521525,
+    "warm_native_values": 0.0011610000001383014,
+    "warm_public_values": 0.0027449999997770647
+  },
+  {
+    "backend": "candidate",
+    "run": 2,
+    "open_and_records": 0.0014989999999670545,
+    "first_native_cells": 0.001516000000265194,
+    "cell_values": 0.0002299999996466795,
+    "warm_native_values": 0.001239999999597785,
+    "warm_public_values": 0.002795000000332948
+  },
+  {
+    "backend": "baseline",
+    "run": 3,
+    "open_and_records": 0.0014159999991534278,
+    "first_native_cells": 0.0014430000010179356,
+    "cell_values": 0.0002229999990959186,
+    "warm_native_values": 0.0011530000010679942,
+    "warm_public_values": 0.0027399999999033753
+  },
+  {
+    "backend": "candidate",
+    "run": 3,
+    "open_and_records": 0.0013509999989764765,
+    "first_native_cells": 0.001492000001235283,
+    "cell_values": 0.000218999999560765,
+    "warm_native_values": 0.0011790000007749768,
+    "warm_public_values": 0.0027319999990140786
+  },
+  {
+    "backend": "candidate",
+    "run": 4,
+    "open_and_records": 0.0011520000007294584,
+    "first_native_cells": 0.0014470000005530892,
+    "cell_values": 0.0002119999990100041,
+    "warm_native_values": 0.0010959999999613501,
+    "warm_public_values": 0.0026890000008279458
+  },
+  {
+    "backend": "baseline",
+    "run": 4,
+    "open_and_records": 0.001344000000244705,
+    "first_native_cells": 0.0014289999999164138,
+    "cell_values": 0.00021999999989930075,
+    "warm_native_values": 0.0011329999997542473,
+    "warm_public_values": 0.0027239999999437714
+  },
+  {
+    "backend": "baseline",
+    "run": 5,
+    "open_and_records": 0.0012200000001030276,
+    "first_native_cells": 0.0014600000013160752,
+    "cell_values": 0.0002119999990100041,
+    "warm_native_values": 0.0011439999998401618,
+    "warm_public_values": 0.002735000000029686
+  },
+  {
+    "backend": "candidate",
+    "run": 5,
+    "open_and_records": 0.0013389999985520262,
+    "first_native_cells": 0.0014360000004671747,
+    "cell_values": 0.00022499999977299012,
+    "warm_native_values": 0.0011389999999664724,
+    "warm_public_values": 0.0027590000008785864
+  },
+  {
+    "backend": "baseline",
+    "run": 6,
+    "open_and_records": 0.0013959999996586703,
+    "first_native_cells": 0.001421999999365653,
+    "cell_values": 0.00021299999934853986,
+    "warm_native_values": 0.0010830000010173535,
+    "warm_public_values": 0.0026870000001508743
+  },
+  {
+    "backend": "candidate",
+    "run": 6,
+    "open_and_records": 0.0013380000000324799,
+    "first_native_cells": 0.001430999998774496,
+    "cell_values": 0.00021700000070268288,
+    "warm_native_values": 0.0011230000000068685,
+    "warm_public_values": 0.002725000000282307
+  }
+]
