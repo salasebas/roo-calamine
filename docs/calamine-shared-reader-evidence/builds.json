@@ -1,0 +1,50 @@
+[
+  {
+    "backend": "baseline",
+    "seconds": 12.6058320000011,
+    "binary_bytes": 1032560,
+    "command": [
+      "cargo",
+      "rustc",
+      "--manifest-path",
+      "tmp/issue-75/baseline-73/ext/roo_calamine/Cargo.toml",
+      "--target-dir",
+      "/Users/sebastiansala/.t3/worktrees/roo-calamine/t3-82fe4976-57bd22a947994165/tmp/shared-reader-build/baseline",
+      "--lib",
+      "--release",
+      "--",
+      "-C",
+      "linker=clang",
+      "-L",
+      "native=/Users/sebastiansala/.local/share/rv/rubies/ruby-3.4.12/lib",
+      "-C",
+      "link-arg=-Wl,-undefined,dynamic_lookup",
+      "-l",
+      "pthread"
+    ]
+  },
+  {
+    "backend": "candidate",
+    "seconds": 15.516147999998793,
+    "binary_bytes": 1183136,
+    "command": [
+      "cargo",
+      "rustc",
+      "--manifest-path",
+      "./ext/roo_calamine/Cargo.toml",
+      "--target-dir",
+      "/Users/sebastiansala/.t3/worktrees/roo-calamine/t3-82fe4976-57bd22a947994165/tmp/shared-reader-build/candidate",
+      "--lib",
+      "--release",
+      "--",
+      "-C",
+      "linker=clang",
+      "-L",
+      "native=/Users/sebastiansala/.local/share/rv/rubies/ruby-3.4.12/lib",
+      "-C",
+      "link-arg=-Wl,-undefined,dynamic_lookup",
+      "-l",
+      "pthread"
+    ]
+  }
+]

@@ -1,0 +1,13 @@
+{
+  "baseline_commit": "194b149d64a2682fa43fc54319a640dfe4eb300e",
+  "candidate_behavior_commit": "a1a680bd2d742e2f5158e64801176b4f9dac759b",
+  "calamine_commit": "a4dba3b5309d81b2774018a13be39e68d938c3c7",
+  "roo": "4.0.0",
+  "calx": "0.1.0",
+  "machine": "Apple M5 Pro, macOS arm64",
+  "ruby": "ruby 3.4.12 (2026-10-23 revision 366f5fdc00) +PRISM [arm64-darwin23]",
+  "cargo": "cargo 1.99.1 (5f94df478 2026-08-27)",
+  "candidate_bundle_sha256": "24eee0a3dfc788dfc8df1bc93088bc6ff97bed6476434595bedd33a6b01be643",
+  "baseline_bundle_sha256": "5be0e26739412ede2ad1fc7ac07c8fe9556caff11154595417cefb4056b3646d",
+  "note": "Final paired pass after all compilation/tests. Initial paired run retained separately; a brief lint overlapped it. Control/Calx measured separately, warm/sparse probes before final paired repeat. No samples dropped and no parallel benchmark jobs."
+}

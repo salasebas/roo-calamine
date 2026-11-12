@@ -1,0 +1,2200 @@
+diff --git a/src/lib.rs b/src/lib.rs
+index 4485f55..39ff064 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -86,6 +86,7 @@ mod cfb;
+ mod datatype;
+ mod formats;
+ mod ods;
++pub mod roo;
+ mod xls;
+ mod xlsb;
+ mod xlsx;
+diff --git a/src/roo/attributes.rs b/src/roo/attributes.rs
+new file mode 100644
+index 0000000..066e65e
+--- /dev/null
++++ b/src/roo/attributes.rs
+@@ -0,0 +1,199 @@
++//! The attributes of a start tag, read in one pass.
++//!
++//! quick-xml leaves most of an attribute list unchecked, so this reads it
++//! along the XML grammar `(S Name S? '=' S? AttValue)* S?` and rejects
++//! everything else, as libxml2 does: a missing `=` or quote, an unquoted
++//! value, `<` in a value, attributes without whitespace between them, and a
++//! name used twice.
++
++use std::borrow::Cow;
++use std::collections::HashSet;
++use std::ops::Range;
++
++use quick_xml::name::QName;
++use quick_xml::XmlVersion;
++
++use super::{check_chars, check_name, Result, Unsupported};
++
++/// An attribute as written, before references are resolved.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub struct Attribute<'a> {
++    pub key: &'a str,
++    pub value: &'a str,
++}
++
++impl<'a> Attribute<'a> {
++    /// The value with references resolved and whitespace normalized, as
++    /// libxml2 reads it. Fails on a reference XML does not define.
++    pub fn normalized_value(&self) -> Result<Cow<'a, str>> {
++        if !self
++            .value
++            .bytes()
++            .any(|b| matches!(b, b'&' | b'\t' | b'\n' | b'\r'))
++        {
++            return Ok(Cow::Borrowed(self.value));
++        }
++        let attribute = quick_xml::events::attributes::Attribute {
++            key: QName(self.key),
++            value: Cow::Borrowed(self.value),
++        };
++        Ok(attribute.normalized_value(XmlVersion::Implicit1_0)?)
++    }
++}
++
++/// The attributes of the last start tag read, as byte ranges of its
++/// attribute list, so a tag is read once. The buffer is reused from tag to
++/// tag.
++#[derive(Default)]
++pub struct TagAttributes {
++    spans: Vec<(Range<usize>, Range<usize>)>,
++    prefixed: bool,
++    references: bool,
++}
++
++impl TagAttributes {
++    /// Reads and checks `raw`, what quick-xml's `BytesStart::attributes_raw`
++    /// returns, in place of the tag read before.
++    pub fn read(&mut self, raw: &str) -> Result<()> {
++        self.prefixed = false;
++        self.references = false;
++        if self.read_common(raw) {
++            return Ok(());
++        }
++        self.spans.clear();
++        check_chars(raw)?;
++        let bytes = raw.as_bytes();
++        let mut position = 0;
++        loop {
++            let start = skip_whitespace(bytes, position);
++            if start == bytes.len() {
++                break;
++            }
++            if start == position {
++                return Err(Unsupported(
++                    "attributes without whitespace between them".into(),
++                ));
++            }
++            let key_end = start
++                + bytes[start..]
++                    .iter()
++                    .position(|&b| b == b'=' || is_whitespace(b))
++                    .unwrap_or(bytes.len() - start);
++            let key = &raw[start..key_end];
++            check_name(key)?;
++            self.prefixed |= key.contains(':');
++            let equals = skip_whitespace(bytes, key_end);
++            if bytes.get(equals) != Some(&b'=') {
++                return Err(Unsupported(format!("no `=` after the attribute {key}")));
++            }
++            let quote_at = skip_whitespace(bytes, equals + 1);
++            let quote = match bytes.get(quote_at) {
++                Some(&quote @ (b'"' | b'\'')) => quote,
++                _ => return Err(Unsupported(format!("an unquoted value for {key}"))),
++            };
++            let value_start = quote_at + 1;
++            let mut value_end = value_start;
++            loop {
++                match bytes.get(value_end) {
++                    Some(&b) if b == quote => break,
++                    Some(b'<') => return Err(Unsupported("`<` in an attribute value".into())),
++                    Some(b'&') => self.references = true,
++                    Some(_) => {}
++                    None => return Err(Unsupported(format!("an unclosed value for {key}"))),
++                }
++                value_end += 1;
++            }
++            self.spans.push((start..key_end, value_start..value_end));
++            position = value_end + 1;
++        }
++        self.check_unique(bytes)
++    }
++
++    /// Reads `raw` when it holds only ` r="…"`, ` s="…"`, and ` t="…"`, each at most once,
++    /// with printable ASCII values without references.
++    pub(super) fn read_common(&mut self, raw: &str) -> bool {
++        self.spans.clear();
++        let bytes = raw.as_bytes();
++        let mut seen = 0u8;
++        let mut position = 0;
++        while position < bytes.len() {
++            let &[b' ', key, b'=', b'"', ..] = &bytes[position..] else {
++                return false;
++            };
++            let bit = match key {
++                b'r' => 1,
++                b's' => 2,
++                b't' => 4,
++                _ => return false,
++            };
++            if seen & bit != 0 {
++                return false;
++            }
++            seen |= bit;
++            let value_start = position + 4;
++            let Some(length) = bytes[value_start..].iter().position(|&b| b == b'"') else {
++                return false;
++            };
++            let value_end = value_start + length;
++            if !bytes[value_start..value_end]
++                .iter()
++                .all(|&b| matches!(b, b' '..=b'~') && b != b'&' && b != b'<')
++            {
++                return false;
++            }
++            self.spans
++                .push((position + 1..position + 2, value_start..value_end));
++            position = value_end + 1;
++        }
++        true
++    }
++
++    /// Whether a key has a namespace prefix.
++    pub fn prefixed(&self) -> bool {
++        self.prefixed
++    }
++
++    /// Whether a value holds a reference.
++    pub fn references(&self) -> bool {
++        self.references
++    }
++
++    /// The attributes [`read`](Self::read) found in `raw`.
++    pub fn iter<'a>(&'a self, raw: &'a str) -> impl Iterator<Item = Attribute<'a>> + 'a {
++        self.spans.iter().map(move |(key, value)| Attribute {
++            key: &raw[key.clone()],
++            value: &raw[value.clone()],
++        })
++    }
++
++    fn check_unique(&self, bytes: &[u8]) -> Result<()> {
++        let key = |(key, _): &(Range<usize>, Range<usize>)| &bytes[key.clone()];
++        let unique = if self.spans.len() <= 8 {
++            self.spans.iter().enumerate().all(|(i, span)| {
++                let key = key(span);
++                self.spans[..i]
++                    .iter()
++                    .all(|earlier| bytes[earlier.0.clone()] != *key)
++            })
++        } else {
++            let mut seen = HashSet::with_capacity(self.spans.len());
++            self.spans.iter().all(|span| seen.insert(key(span)))
++        };
++        if unique {
++            Ok(())
++        } else {
++            Err(Unsupported("an attribute named twice".into()))
++        }
++    }
++}
++
++fn is_whitespace(b: u8) -> bool {
++    matches!(b, b' ' | b'\t' | b'\r' | b'\n')
++}
++
++fn skip_whitespace(bytes: &[u8], from: usize) -> usize {
++    from + bytes[from..]
++        .iter()
++        .take_while(|&&b| is_whitespace(b))
++        .count()
++}
+diff --git a/src/roo/mod.rs b/src/roo/mod.rs
+new file mode 100644
+index 0000000..265a68d
+--- /dev/null
++++ b/src/roo/mod.rs
+@@ -0,0 +1,277 @@
++//! Raw worksheet records and XML compatibility checks for roo consumers.
++mod attributes;
++mod xml;
++pub use crate::utils::unescape_entity_to_buffer as push_reference;
++use attributes::TagAttributes;
++use std::fmt;
++use std::ops::Range;
++pub use xml::XmlReader;
++/// Calamine's shared XLSX stream configured through `for_roo`.
++pub type SheetReader<R> = crate::xlsx::cells_reader::XlsxCellStream<'static, R>;
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum Mode {
++    Document,
++    Stream,
++}
++
++/// The `r` attribute.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub enum Reference {
++    Missing,
++    /// What `Roo::Utils.extract_coordinate` returns for it.
++    At {
++        row: i64,
++        column: i64,
++    },
++    /// A value `Roo::Utils.extract_coordinate` raises for.
++    Invalid(String),
++}
++
++/// The `s` attribute.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub enum Style {
++    /// Absent (index 0) or plain decimal digits.
++    Index(i64),
++    /// Anything else, for Ruby's `String#to_i` to read.
++    Other(String),
++}
++
++/// The `t` attribute, as far as `SheetDoc#cell_value_type` tells types apart.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum Kind {
++    /// Absent or any other value: the style's number format decides.
++    ByFormat,
++    Shared,
++    Boolean,
++    Str,
++    InlineStr,
++}
++
++/// A byte range of [`RawRow::text`].
++pub type Span = Range<usize>;
++
++/// The value-bearing part of a cell, as `cell_from_xml` sees it.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub enum Body {
++    /// No `v` child and no `is` child with text.
++    Empty,
++    /// Text of every `t` element inside the first non-empty `is` child.
++    Inline(Span),
++    /// Text content of the first `v` child.
++    Value(Span),
++}
++
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct RawCell {
++    pub reference: Reference,
++    pub style: Style,
++    pub kind: Kind,
++    pub formula: Option<Span>,
++    pub body: Body,
++}
++
++impl RawCell {
++    /// The `[row, column]` key of roo's document-mode `cells` hash for this
++    /// cell, the `index`-th of the `row_number`-th row (both 1-based), or
++    /// `None` when roo raises for its `r`.
++    pub fn position(&self, row_number: usize, index: usize) -> Option<(i64, i64)> {
++        match self.reference {
++            Reference::At { row, column } => Some((row, column)),
++            Reference::Missing => Some((row_number as i64, index as i64)),
++            Reference::Invalid(_) => None,
++        }
++    }
++}
++
++/// A row's cells. Their text lives in one buffer, so a row costs a few
++/// allocations rather than a few per cell.
++#[derive(Clone, Debug, Default, PartialEq, Eq)]
++pub struct RawRow {
++    pub text: String,
++    pub cells: Vec<RawCell>,
++}
++
++impl RawRow {
++    pub fn text(&self, span: &Span) -> &str {
++        &self.text[span.clone()]
++    }
++}
++
++/// The input uses XML that this reader does not reproduce exactly the way
++/// Nokogiri does, so the caller falls back to roo's own parser.
++#[derive(Debug, PartialEq, Eq)]
++pub struct Unsupported(pub String);
++
++impl fmt::Display for Unsupported {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.write_str(&self.0)
++    }
++}
++
++impl std::error::Error for Unsupported {}
++
++impl From<quick_xml::Error> for Unsupported {
++    fn from(error: quick_xml::Error) -> Self {
++        Unsupported(error.to_string())
++    }
++}
++
++impl From<quick_xml::events::attributes::AttrError> for Unsupported {
++    fn from(error: quick_xml::events::attributes::AttrError) -> Self {
++        Unsupported(error.to_string())
++    }
++}
++
++pub type Result<T> = std::result::Result<T, Unsupported>;
++
++/// `Roo::Utils.extract_coordinate` for well-formed references. `None` means
++/// roo raises.
++pub fn parse_reference(reference: &str) -> Option<(i64, i64)> {
++    let (mut column, mut row) = (0i64, 0i64);
++    let mut digits = false;
++    for byte in reference.bytes() {
++        match byte {
++            b'A'..=b'Z' | b'a'..=b'z' if !digits => {
++                column = column
++                    .checked_mul(26)?
++                    .checked_add(i64::from(byte & 0x1f))?;
++            }
++            b'0'..=b'9' => {
++                digits = true;
++                row = row.checked_mul(10)?.checked_add(i64::from(byte - b'0'))?;
++            }
++            _ => return None,
++        }
++    }
++    (column != 0 && digits).then_some((row, column))
++}
++
++/// `String#to_i` for plain decimal digits; `None` leaves it to Ruby.
++pub fn parse_index(text: &str) -> Option<usize> {
++    if text.is_empty() || text.len() > 18 || !text.bytes().all(|b| b.is_ascii_digit()) {
++        return None;
++    }
++    text.parse().ok()
++}
++
++pub(crate) fn cell_attributes(
++    attributes: &TagAttributes,
++    raw: &str,
++    mode: Mode,
++) -> Result<RawCell> {
++    let mut cell = RawCell {
++        reference: Reference::Missing,
++        style: Style::Index(0),
++        kind: Kind::ByFormat,
++        formula: None,
++        body: Body::Empty,
++    };
++    for attribute in attributes.iter(raw) {
++        let value = || attribute.normalized_value();
++        match attribute.key {
++            "r" => {
++                let value = value()?;
++                cell.reference = match parse_reference(&value) {
++                    Some((row, column)) => Reference::At { row, column },
++                    None => Reference::Invalid(value.into_owned()),
++                };
++            }
++            "s" => {
++                let value = value()?;
++                cell.style = match parse_index(&value).filter(|i| *i < 1 << 30) {
++                    Some(index) => Style::Index(index as i64),
++                    None => Style::Other(value.into_owned()),
++                };
++            }
++            "t" => {
++                cell.kind = match value()?.as_ref() {
++                    "s" => Kind::Shared,
++                    "b" => Kind::Boolean,
++                    "str" => Kind::Str,
++                    "inlineStr" => Kind::InlineStr,
++                    _ => Kind::ByFormat,
++                };
++            }
++            // roo's document read removes namespaces first, so `x:t` would
++            // count as `t` there.
++            key if mode == Mode::Document
++                && key.split_once(':').is_some_and(|(prefix, local)| {
++                    prefix != "xmlns" && matches!(local, "r" | "s" | "t")
++                }) =>
++            {
++                return Err(Unsupported(format!("the attribute {key} on a cell")));
++            }
++            _ => {}
++        }
++    }
++    Ok(cell)
++}
++/// XML 1.0 `Char`: tab, line feed, carriage return, and U+0020 up, except
++/// U+FFFE and U+FFFF (Rust strings hold no surrogates).
++fn check_chars(text: &str) -> Result<()> {
++    let bytes = text.as_bytes();
++    // U+FFFE and U+FFFF are EF BF BE and EF BF BF in UTF-8.
++    let suspect = bytes
++        .iter()
++        .fold(false, |suspect, &b| suspect | (b < 0x20) | (b == 0xEF));
++    if !suspect {
++        return Ok(());
++    }
++    let control = bytes
++        .iter()
++        .any(|&b| b < 0x20 && !matches!(b, b'\t' | b'\n' | b'\r'));
++    let noncharacter = bytes
++        .windows(3)
++        .any(|w| matches!(w, [0xEF, 0xBF, 0xBE | 0xBF]));
++    if control || noncharacter {
++        return Err(Unsupported("a character XML does not allow".into()));
++    }
++    Ok(())
++}
++
++/// An ASCII XML name: a letter or `_` first, then those, digits, `-`, and
++/// `.`, with at most one `:` between two non-empty parts. Non-ASCII names are
++/// valid XML but never appear in worksheets, so they are left to roo rather
++/// than checked character by character.
++fn check_name(name: &str) -> Result<()> {
++    let mut part_start = true;
++    let mut prefixed = false;
++    for &b in name.as_bytes() {
++        match b {
++            b'A'..=b'Z' | b'a'..=b'z' | b'_' => part_start = false,
++            b'0'..=b'9' | b'-' | b'.' if !part_start => {}
++            b':' if !part_start && !prefixed => {
++                part_start = true;
++                prefixed = true;
++            }
++            _ => return Err(Unsupported(format!("the name {name:?}"))),
++        }
++    }
++    if part_start {
++        return Err(Unsupported(format!("the name {name:?}")));
++    }
++    Ok(())
++}
++
++fn check_encoding(decl: &quick_xml::events::BytesDecl<'_>) -> Result<()> {
++    if let Some(encoding) = decl.encoding() {
++        let encoding = encoding?;
++        if !encoding.eq_ignore_ascii_case("utf-8") {
++            return Err(Unsupported(format!("XML encoding {encoding}")));
++        }
++    }
++    Ok(())
++}
++
++impl From<crate::XlsxError> for Unsupported {
++    fn from(error: crate::XlsxError) -> Self {
++        Self(error.to_string())
++    }
++}
++impl From<Unsupported> for crate::XlsxError {
++    fn from(error: Unsupported) -> Self {
++        Self::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, error))
++    }
++}
++#[cfg(test)]
++mod tests;
+diff --git a/src/roo/tests.rs b/src/roo/tests.rs
+new file mode 100644
+index 0000000..49f3f61
+--- /dev/null
++++ b/src/roo/tests.rs
+@@ -0,0 +1,485 @@
++use super::*;
++use std::io::BufReader;
++
++const NS: &str = r#"xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main""#;
++
++fn rows(xml: &str, mode: Mode) -> Vec<RawRow> {
++    let mut reader = SheetReader::for_roo(xml.as_bytes(), mode);
++    let mut out = Vec::new();
++    while let Some(row) = reader.next_row().unwrap() {
++        out.push(row);
++    }
++    out
++}
++
++/// `(reference, formula, body)` of every cell, with text resolved.
++fn texts(row: &RawRow) -> Vec<(Reference, Option<&str>, Option<&str>)> {
++    row.cells
++        .iter()
++        .map(|c| {
++            let body = match &c.body {
++                Body::Empty => None,
++                Body::Inline(s) | Body::Value(s) => Some(row.text(s)),
++            };
++            (
++                c.reference.clone(),
++                c.formula.as_ref().map(|s| row.text(s)),
++                body,
++            )
++        })
++        .collect()
++}
++
++fn at(row: i64, column: i64) -> Reference {
++    Reference::At { row, column }
++}
++
++#[test]
++fn reads_values_formulas_and_inline_strings() {
++    let xml = format!(
++        r#"<?xml version="1.0" encoding="UTF-8"?><worksheet {NS}><sheetData>
++        <row r="1"><c r="A1" s="2" t="n"><f>B1+1</f><v>1.0</v></c><c r="B1" t="inlineStr"><is><r><t>a</t></r><rPh><t>b</t></rPh></is></c></row>
++        </sheetData></worksheet>"#
++    );
++    let got = rows(&xml, Mode::Document);
++    assert_eq!(got.len(), 1);
++    assert_eq!(got[0].cells[0].style, Style::Index(2));
++    assert_eq!(got[0].cells[0].kind, Kind::ByFormat);
++    assert_eq!(got[0].cells[1].kind, Kind::InlineStr);
++    assert!(matches!(got[0].cells[1].body, Body::Inline(_)));
++    assert_eq!(
++        texts(&got[0]),
++        vec![
++            (at(1, 1), Some("B1+1"), Some("1.0")),
++            (at(1, 2), None, Some("ab"))
++        ]
++    );
++}
++
++#[test]
++fn keeps_attributes_ruby_has_to_read() {
++    let xml = format!(
++        r#"<worksheet {NS}><sheetData><row><c r="1A" s=" 3" t="e"/><c/></row></sheetData></worksheet>"#
++    );
++    let got = rows(&xml, Mode::Document);
++    let cells = &got[0].cells;
++    assert_eq!(cells[0].reference, Reference::Invalid("1A".into()));
++    assert_eq!(cells[0].style, Style::Other(" 3".into()));
++    assert_eq!(cells[0].kind, Kind::ByFormat);
++    assert_eq!(cells[1].reference, Reference::Missing);
++    assert_eq!(cells[1].style, Style::Index(0));
++
++    let many: String = (0..12).map(|i| format!(" a{i}=\"\"")).collect();
++    let xml = format!(
++        "<worksheet {NS}><sheetData><row><c{many}\n r = 'B2'\ts=\"4\" t='s'/></row></sheetData></worksheet>"
++    );
++    let cell = &rows(&xml, Mode::Document)[0].cells[0];
++    assert_eq!(cell.reference, at(2, 2));
++    assert_eq!(cell.style, Style::Index(4));
++    assert_eq!(cell.kind, Kind::Shared);
++
++    for tag in [
++        "<c r=\"B2\" s=\"4\"\tt='s'/>",
++        "<c r=\"B2\" s=\"4\" t=\"s\" />",
++        "<c r=\"B2\" s=\"4\" t = \"s\"/>",
++        "<c r=\"B2\" s=\"4\" t=\"&#115;\"/>",
++        "<c r=\"B2\" s=\"4\" x=\"\" t=\"s\"/>",
++    ] {
++        let xml = format!("<worksheet {NS}><sheetData><row>{tag}</row></sheetData></worksheet>");
++        let cell = &rows(&xml, Mode::Document)[0].cells[0];
++        assert_eq!(
++            (&cell.reference, &cell.style, cell.kind),
++            (&at(2, 2), &Style::Index(4), Kind::Shared),
++            "{tag}"
++        );
++    }
++}
++
++#[test]
++fn resolves_references_and_normalizes_line_ends() {
++    let xml = format!(
++        "<worksheet {NS}><sheetData><row><c r=\"A1\" t=\"str\"><v>a&amp;b&#13;\r\nc<![CDATA[<d>]]></v></c></row></sheetData></worksheet>"
++    );
++    let got = rows(&xml, Mode::Document);
++    assert_eq!(texts(&got[0])[0].2, Some("a&b\r\nc<d>"));
++}
++
++#[test]
++fn first_value_wins_and_formula_after_it_is_ignored() {
++    let xml = format!(
++        "<worksheet {NS}><sheetData><row><c r=\"A1\"><v>1</v><f>X</f><v>2</v></c><c r=\"B1\"><f>Y</f></c></row></sheetData></worksheet>"
++    );
++    let got = rows(&xml, Mode::Document);
++    assert_eq!(
++        texts(&got[0]),
++        vec![(at(1, 1), None, Some("1")), (at(1, 2), None, None)]
++    );
++}
++
++#[test]
++fn empty_inline_string_does_not_decide_the_value() {
++    let xml = format!(
++        "<worksheet {NS}><sheetData><row><c r=\"A1\" t=\"inlineStr\"><is><t></t></is><v>7</v></c></row></sheetData></worksheet>"
++    );
++    let got = rows(&xml, Mode::Document);
++    assert!(matches!(got[0].cells[0].body, Body::Value(_)));
++    assert_eq!(texts(&got[0])[0].2, Some("7"));
++}
++
++#[test]
++fn document_mode_reads_only_sheet_data_rows_and_c_children() {
++    let xml = format!(
++        "<worksheet {NS}><sheetPr><row/></sheetPr><sheetData><row r=\"1\"/><row r=\"2\"><x>1</x><c r=\"A2\"/></row></sheetData></worksheet>"
++    );
++    let got = rows(&xml, Mode::Document);
++    assert_eq!(got.len(), 2);
++    assert!(got[0].cells.is_empty());
++    assert_eq!(texts(&got[1]), vec![(at(2, 1), None, None)]);
++}
++
++#[test]
++fn document_mode_matches_prefixed_names_by_local_name() {
++    let xml = r#"<x:worksheet xmlns:x="urn:x"><x:sheetData><x:row><x:c r="A1"><x:v>3</x:v></x:c></x:row></x:sheetData></x:worksheet>"#;
++    let got = rows(xml, Mode::Document);
++    assert_eq!(texts(&got[0])[0].2, Some("3"));
++}
++
++#[test]
++fn stream_mode_needs_an_unprefixed_row_and_takes_every_child_element() {
++    let prefixed = r#"<x:worksheet xmlns:x="urn:x"><x:sheetData><x:row><x:c r="A1"/></x:row></x:sheetData></x:worksheet>"#;
++    assert!(rows(prefixed, Mode::Stream).is_empty());
++
++    let xml = format!(
++        "<worksheet {NS}><sheetData><row><c r=\"A1\"/><extra r=\"B1\"><v>1</v></extra></row></sheetData></worksheet>"
++    );
++    let got = rows(&xml, Mode::Stream);
++    assert_eq!(
++        texts(&got[0]),
++        vec![(at(1, 1), None, None), (at(1, 2), None, Some("1"))]
++    );
++}
++
++#[test]
++fn rejects_inputs_it_cannot_reproduce() {
++    for mark in [b"\xFF\xFE", b"\xFE\xFF"] {
++        let xml = [mark.as_slice(), br#"<?xml version="1.0" encoding="UTF-8"?><worksheet><sheetData><row><c><v>7</v></c></row></sheetData></worksheet>"#].concat();
++        for mode in [Mode::Document, Mode::Stream] {
++            for capacity in 1..=4 {
++                let input = BufReader::with_capacity(capacity, xml.as_slice());
++                assert!(SheetReader::for_roo(input, mode).next_row().is_err());
++            }
++        }
++    }
++    let latin1 = r#"<?xml version="1.0" encoding="ISO-8859-1"?><worksheet/>"#;
++    assert!(SheetReader::for_roo(latin1.as_bytes(), Mode::Document)
++        .next_row()
++        .is_err());
++    for body in [
++        "<v>&custom;</v>",
++        "<v>a&#1;b</v>",
++        "<v>a\u{1}b</v>",
++        "<v>\u{FFFE}</v>",
++    ] {
++        let xml =
++            format!("<worksheet {NS}><sheetData><row><c>{body}</c></row></sheetData></worksheet>");
++        assert!(
++            SheetReader::for_roo(xml.as_bytes(), Mode::Document)
++                .next_row()
++                .is_err(),
++            "{body:?}"
++        );
++    }
++    for tag in [
++        r#"<c r="A&#2;1"/>"#,
++        "<c r=\"A\u{1}1\"/>",
++        "<c t=\"\u{FFFE}\"/>",
++    ] {
++        let xml = format!("<worksheet {NS}><sheetData><row>{tag}</row></sheetData></worksheet>");
++        assert!(
++            SheetReader::for_roo(xml.as_bytes(), Mode::Document)
++                .next_row()
++                .is_err(),
++            "{tag:?}"
++        );
++    }
++    let truncated = format!("<worksheet {NS}><sheetData><row><c><v>1</v></c></row>");
++    let mut reader = SheetReader::for_roo(truncated.as_bytes(), Mode::Document);
++    assert!(reader.next_row().unwrap().is_some());
++    assert!(
++        reader.next_row().is_err(),
++        "a sheet that ends with open elements"
++    );
++}
++
++#[test]
++fn rejects_xml_that_is_not_well_formed() {
++    let rows = r#"<sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData>"#;
++    for (label, xml) in [
++        (
++            "unquoted value",
++            "<worksheet><sheetData><row r=1/></sheetData></worksheet>".to_string(),
++        ),
++        (
++            "no space between attributes",
++            r#"<worksheet><sheetData><row r="1"s="2"/></sheetData></worksheet>"#.to_string(),
++        ),
++        (
++            "`<` in a value",
++            format!(r#"<worksheet x="a<b">{rows}</worksheet>"#),
++        ),
++        (
++            "unknown entity in a value",
++            format!(r#"<worksheet x="&bogus;">{rows}</worksheet>"#),
++        ),
++        (
++            "unknown entity in a row's `r`",
++            r#"<worksheet><sheetData><row r="&bogus;"/></sheetData></worksheet>"#.to_string(),
++        ),
++        (
++            "no space before a cell's attribute",
++            r#"<worksheet><sheetData><row><c r="A1"xs="2"/></row></sheetData></worksheet>"#
++                .to_string(),
++        ),
++        (
++            "`<` in a cell's value",
++            r#"<worksheet><sheetData><row><c r="A<1"/></row></sheetData></worksheet>"#.to_string(),
++        ),
++        (
++            "bare `&` in a value",
++            format!(r#"<worksheet x="a & b">{rows}</worksheet>"#),
++        ),
++        (
++            "`]]>` in text",
++            format!("<worksheet>{rows}a ]]> b</worksheet>"),
++        ),
++        (
++            "second root",
++            format!("<worksheet>{rows}</worksheet><worksheet/>"),
++        ),
++        (
++            "text before the root",
++            format!("x<worksheet>{rows}</worksheet>"),
++        ),
++        (
++            "doctype",
++            format!("<!DOCTYPE worksheet><worksheet>{rows}</worksheet>"),
++        ),
++        (
++            "illegal character in a PI",
++            format!("<?pi \u{1}?><worksheet>{rows}</worksheet>"),
++        ),
++        (
++            "`--` in a comment",
++            format!("<!-- a -- b --><worksheet>{rows}</worksheet>"),
++        ),
++        (
++            "invalid name",
++            format!("<worksheet><1x/>{rows}</worksheet>"),
++        ),
++        (
++            "late declaration",
++            format!(r#"<!-- c --><?xml version="1.0"?><worksheet>{rows}</worksheet>"#),
++        ),
++        ("empty document", String::new()),
++        (
++            "PI in a value",
++            "<worksheet><sheetData><row><c><v>1<? x?></v></c></row></sheetData></worksheet>"
++                .to_string(),
++        ),
++        (
++            "non-ASCII attribute name",
++            "<worksheet><sheetData><row><c \u{d7}=\"1\"/></row></sheetData></worksheet>"
++                .to_string(),
++        ),
++        (
++            "non-ASCII element name",
++            "<worksheet><sheetData><row><c><v>1<\u{d7}/>2</v></c></row></sheetData></worksheet>"
++                .to_string(),
++        ),
++        (
++            "undeclared element prefix",
++            format!("<worksheet><sheetData><x:row>{rows}</x:row></sheetData></worksheet>"),
++        ),
++        (
++            "empty prefix",
++            "<worksheet><sheetData><:row/></sheetData></worksheet>".to_string(),
++        ),
++        (
++            "undeclared value prefix",
++            "<worksheet><sheetData><row><c><x:v>1</x:v><v>9</v></c></row></sheetData></worksheet>"
++                .to_string(),
++        ),
++    ] {
++        for mode in [Mode::Document, Mode::Stream] {
++            let mut reader = SheetReader::for_roo(xml.as_bytes(), mode);
++            let read: Result<Vec<RawRow>> =
++                std::iter::from_fn(|| reader.next_row().transpose()).collect();
++            assert!(read.is_err(), "{label} ({mode:?})");
++        }
++    }
++    for (label, xml) in [
++        (
++            "prefixed r",
++            r#"<worksheet xmlns:x="urn:x"><sheetData><row><c x:r="B9" r="A1"><v>1</v></c></row></sheetData></worksheet>"#,
++        ),
++        (
++            "prefixed t",
++            r#"<worksheet xmlns:x="urn:x"><sheetData><row><c r="A1" x:t="str"><v>1</v></c></row></sheetData></worksheet>"#,
++        ),
++    ] {
++        assert!(
++            SheetReader::for_roo(xml.as_bytes(), Mode::Document)
++                .next_rows(9)
++                .is_err(),
++            "{label}"
++        );
++        assert!(
++            SheetReader::for_roo(xml.as_bytes(), Mode::Stream)
++                .next_rows(9)
++                .is_ok(),
++            "{label} streams"
++        );
++    }
++    for (label, xml) in [
++        (
++            "comment in a row",
++            "<worksheet><sheetData><row><!-- c --><c r=\"A1\"/></row></sheetData></worksheet>",
++        ),
++        (
++            "text in a row",
++            "<worksheet><sheetData><row>x<c r=\"A1\"/></row></sheetData></worksheet>",
++        ),
++    ] {
++        assert!(
++            SheetReader::for_roo(xml.as_bytes(), Mode::Stream)
++                .next_rows(9)
++                .is_err(),
++            "{label}"
++        );
++        assert!(
++            SheetReader::for_roo(xml.as_bytes(), Mode::Document)
++                .next_rows(9)
++                .is_ok(),
++            "{label} in a document"
++        );
++    }
++    for (label, xml) in [
++        ("nested t", "<worksheet><sheetData><row><c t=\"inlineStr\"><is><t>a<t>b</t>c</t></is></c></row></sheetData></worksheet>"),
++        ("empty prefix namespace", "<worksheet><sheetData><row r=\"1\" xmlns:x=\"\"><x:c r=\"A1\"><v>1</v></x:c></row></sheetData></worksheet>"),
++        ("duplicated attribute", "<worksheet><sheetData><row r=\"1\" r=\"2\"><c r=\"A1\"><v>1</v></c></row></sheetData></worksheet>"),
++        ("duplicated attribute among many", "<worksheet><sheetData><row a1=\"\" a2=\"\" a3=\"\" a4=\"\" a5=\"\" a6=\"\" a7=\"\" a8=\"\" a9=\"\" a2=\"\"><c r=\"A1\"><v>1</v></c></row></sheetData></worksheet>"),
++        ("attribute without a value", "<worksheet><sheetData><row r><c r=\"A1\"><v>1</v></c></row></sheetData></worksheet>"),
++        ("attribute without `=`", "<worksheet><sheetData><row r \"1\"><c r=\"A1\"><v>1</v></c></row></sheetData></worksheet>"),
++        ("attribute without a name", "<worksheet><sheetData><row =\"1\"><c r=\"A1\"><v>1</v></c></row></sheetData></worksheet>"),
++        ("`/` before the end of a tag", "<worksheet><sheetData><row r=\"1\" / ><c r=\"A1\"><v>1</v></c></row></sheetData></worksheet>"),
++        ("attribute name with two prefixes", "<worksheet xmlns:a=\"urn:a\"><sheetData><row a:b:c=\"1\"><c r=\"A1\"><v>1</v></c></row></sheetData></worksheet>"),
++        ("unknown entity in skipped content", "<worksheet><sheetData><row><c r=\"A1\"><v>1</v></c></row></sheetData><ext>&bogus;</ext></worksheet>"),
++    ] {
++        for mode in [Mode::Document, Mode::Stream] {
++            let mut reader = SheetReader::for_roo(xml.as_bytes(), mode);
++            let read: Result<Vec<RawRow>> = std::iter::from_fn(|| reader.next_row().transpose()).collect();
++            assert!(read.is_err(), "{label} ({mode:?})");
++        }
++    }
++    for (label, xml) in [
++        ("nested row", "<worksheet><sheetData><row r=\"1\"><c r=\"A1\"><ext><row r=\"2\"/></ext></c></row></sheetData></worksheet>"),
++        ("prefixed t in a streamed row", "<worksheet><sheetData><row><c t=\"inlineStr\"><is><x:t xmlns:x=\"urn:other\">hi</x:t></is></c></row></sheetData></worksheet>"),
++        ("preserved whitespace in a row", "<worksheet><sheetData><row r=\"1\" xml:space=\"preserve\"> <c r=\"A1\"/> </row></sheetData></worksheet>"),
++    ] {
++        assert!(SheetReader::for_roo(xml.as_bytes(), Mode::Stream).next_rows(9).is_err(), "{label}");
++        assert!(SheetReader::for_roo(xml.as_bytes(), Mode::Document).next_rows(9).is_ok(), "{label} in a document");
++    }
++    let declared = r#"<x:worksheet xmlns:x="urn:x"><x:sheetData><x:row><x:c r="A1"><x:v>3</x:v></x:c></x:row></x:sheetData></x:worksheet>"#;
++    assert_eq!(
++        SheetReader::for_roo(declared.as_bytes(), Mode::Document)
++            .next_rows(9)
++            .unwrap()
++            .len(),
++        1
++    );
++    let scoped = r#"<worksheet><a xmlns:x="urn:x"/><sheetData><x:row/></sheetData></worksheet>"#;
++    assert!(
++        SheetReader::for_roo(scoped.as_bytes(), Mode::Document)
++            .next_rows(9)
++            .is_err(),
++        "a prefix out of scope"
++    );
++    let fine = format!(
++        r#"<?xml version="1.0"?>
++<!-- c --><?pi ok?><worksheet x="a &amp; b" y='1'>{rows}</worksheet>
++"#
++    );
++    let mut reader = SheetReader::for_roo(fine.as_bytes(), Mode::Document);
++    assert_eq!(reader.next_rows(10).unwrap().len(), 1);
++}
++
++#[test]
++fn returns_the_rows_before_an_error_first() {
++    let xml = format!(
++        "<worksheet {NS}><sheetData><row/><row><c><v>&x;</v></c></row></sheetData></worksheet>"
++    );
++    let mut reader = SheetReader::for_roo(xml.as_bytes(), Mode::Document);
++    assert_eq!(reader.next_rows(5).unwrap().len(), 1);
++    assert!(reader.next_rows(5).is_err());
++}
++
++#[test]
++fn batches_rows() {
++    let xml = format!("<worksheet {NS}><sheetData><row/><row/><row/></sheetData></worksheet>");
++    let mut reader = SheetReader::for_roo(xml.as_bytes(), Mode::Document);
++    assert_eq!(reader.next_rows(2).unwrap().len(), 2);
++    assert_eq!(reader.next_rows(2).unwrap().len(), 1);
++    assert!(reader.next_rows(2).unwrap().is_empty());
++
++    let xml = format!(
++        "<worksheet {NS}><sheetData><row><c/><c/><c/></row><row><c/></row></sheetData></worksheet>"
++    );
++    let mut reader = SheetReader::for_roo(xml.as_bytes(), Mode::Document);
++    assert_eq!(
++        reader.next_rows(2).unwrap().len(),
++        1,
++        "a batch ends once it holds enough cells"
++    );
++}
++
++#[test]
++fn parses_references_like_roo() {
++    assert_eq!(parse_reference("A1"), Some((1, 1)));
++    assert_eq!(parse_reference("aa10"), Some((10, 27)));
++    assert_eq!(parse_reference("XFD1048576"), Some((1048576, 16384)));
++    assert_eq!(parse_reference("1A"), None);
++    assert_eq!(parse_reference("A"), None);
++    assert_eq!(parse_reference("A1B"), None);
++    assert_eq!(parse_reference("$A$1"), None);
++}
++
++#[test]
++fn parses_only_plain_indexes() {
++    assert_eq!(parse_index("12"), Some(12));
++    assert_eq!(parse_index("007"), Some(7));
++    assert_eq!(parse_index(""), None);
++    assert_eq!(parse_index("+1"), None);
++    assert_eq!(parse_index(" 1"), None);
++}
++
++#[test]
++fn reads_cells_across_buffer_and_parser_boundaries() {
++    let xml = "<worksheet><sheetData><row><c r=\"A1\" t=\"inlineStr\"><is><t>part<![CDATA[extra]]></t></is></c><c r=\"B1\" ><f>A1&lt;2</f><v>2</v></c>\n <c r=\"C1\"><v>3</v></c>\n </row></sheetData></worksheet>";
++    for mode in [Mode::Document, Mode::Stream] {
++        for capacity in 1..=xml.len() {
++            let mut reader =
++                SheetReader::for_roo(BufReader::with_capacity(capacity, xml.as_bytes()), mode);
++            let row = reader.next_row().unwrap().unwrap();
++            assert_eq!(
++                texts(&row),
++                [
++                    (at(1, 1), None, Some("partextra")),
++                    (at(1, 2), Some("A1<2"), Some("2")),
++                    (at(1, 3), None, Some("3")),
++                ],
++                "{mode:?}, buffer capacity {capacity}"
++            );
++            assert_eq!(reader.next_row(), Ok(None));
++        }
++    }
++}
+diff --git a/src/roo/xml.rs b/src/roo/xml.rs
+new file mode 100644
+index 0000000..36563ea
+--- /dev/null
++++ b/src/roo/xml.rs
+@@ -0,0 +1,284 @@
++use super::{
++    attributes::TagAttributes, check_chars, check_encoding, check_name, Mode, RawCell, Result,
++    Unsupported,
++};
++use quick_xml::events::{BytesStart, Event};
++use quick_xml::name::QName;
++use std::io::BufRead;
++use std::ops::{Deref, DerefMut};
++
++/// XML events with optional roo/Nokogiri validation, shared by Calamine's XLSX paths.
++pub struct XmlReader<R> {
++    inner: quick_xml::Reader<R>,
++    checks: Option<Checks>,
++}
++struct Checks {
++    mode: Mode,
++    started: bool,
++    seen_root: bool,
++    open_elements: usize,
++    prefixes: Vec<(usize, String)>,
++    space: Vec<(usize, bool)>,
++    in_row: bool,
++    attributes: TagAttributes,
++}
++impl<R> Deref for XmlReader<R> {
++    type Target = quick_xml::Reader<R>;
++    fn deref(&self) -> &Self::Target {
++        &self.inner
++    }
++}
++impl<R> DerefMut for XmlReader<R> {
++    fn deref_mut(&mut self) -> &mut Self::Target {
++        &mut self.inner
++    }
++}
++impl<R: BufRead> XmlReader<R> {
++    pub(crate) fn from_reader(input: R) -> Self {
++        Self {
++            inner: quick_xml::Reader::from_reader(input),
++            checks: None,
++        }
++    }
++    pub(crate) fn for_roo(input: R, mode: Mode) -> Self {
++        let mut reader = Self::from_reader(input);
++        reader.inner.config_mut().check_end_names = true;
++        reader.inner.config_mut().check_comments = true;
++        reader.checks = Some(Checks {
++            mode,
++            started: false,
++            seen_root: false,
++            open_elements: 0,
++            prefixes: Vec::new(),
++            space: Vec::new(),
++            in_row: false,
++            attributes: TagAttributes::default(),
++        });
++        reader
++    }
++    pub(crate) fn read_event_into<'b>(
++        &mut self,
++        buf: &'b mut Vec<u8>,
++    ) -> quick_xml::Result<Event<'b>> {
++        if self.checks.as_ref().is_some_and(|checks| !checks.started) {
++            loop {
++                match self.inner.get_mut().fill_buf() {
++                    Ok(bytes) if matches!(bytes.first(), Some(0xFF | 0xFE)) => {
++                        return Err(xml_error(Unsupported("a UTF-16 byte-order mark".into())))
++                    }
++                    Ok(_) => break,
++                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
++                    Err(error) => return Err(error.into()),
++                }
++            }
++        }
++        let event = self.inner.read_event_into(buf)?;
++        if let Some(checks) = self.checks.as_mut() {
++            let depth = checks.open_elements;
++            checks.check_event(&event).map_err(xml_error)?;
++            if depth == 0 {
++                checks.check_top_level(&event).map_err(xml_error)?;
++            }
++            match &event {
++                Event::Decl(decl) => check_encoding(decl).map_err(xml_error)?,
++                Event::Eof if depth != 0 => {
++                    return Err(xml_error(Unsupported(
++                        "unexpected end of the document".into(),
++                    )))
++                }
++                _ => {}
++            }
++        }
++        Ok(event)
++    }
++    pub(crate) fn read_to_end_into(
++        &mut self,
++        end: QName<'_>,
++        buf: &mut Vec<u8>,
++    ) -> quick_xml::Result<std::ops::Range<u64>> {
++        if self.checks.is_none() {
++            return self.inner.read_to_end_into(end, buf);
++        }
++        let start = self.inner.buffer_position();
++        let mut depth = 0;
++        loop {
++            buf.clear();
++            match self.read_event_into(buf)? {
++                Event::Start(_) => depth += 1,
++                Event::End(e) if depth == 0 && e.name() == end => {
++                    return Ok(start..self.inner.buffer_position())
++                }
++                Event::End(_) if depth > 0 => depth -= 1,
++                Event::Eof => {
++                    return Err(xml_error(Unsupported("unexpected end of element".into())))
++                }
++                _ => {}
++            }
++        }
++    }
++    /// Returns one validated XML event without interpreting worksheet cells.
++    pub fn next_xml_event<'b>(&mut self, buf: &'b mut Vec<u8>) -> Result<Event<'b>> {
++        self.read_event_into(buf).map_err(Into::into)
++    }
++    pub(crate) fn depth(&self) -> usize {
++        self.checks
++            .as_ref()
++            .map_or(0, |checks| checks.open_elements)
++    }
++    pub(crate) fn in_row(&mut self, value: bool) {
++        if let Some(checks) = self.checks.as_mut() {
++            checks.in_row = value;
++        }
++    }
++    pub(crate) fn preserves_space(&self) -> bool {
++        self.checks.as_ref().is_some_and(Checks::preserves_space)
++    }
++    pub(crate) fn cell_attributes(&self, e: &BytesStart<'_>) -> Result<RawCell> {
++        let checks = self.checks.as_ref().expect("roo reader");
++        super::cell_attributes(&checks.attributes, e.attributes_raw(), checks.mode)
++    }
++}
++fn xml_error(error: Unsupported) -> quick_xml::Error {
++    std::io::Error::new(std::io::ErrorKind::InvalidData, error).into()
++}
++impl Checks {
++    fn check_start(&mut self, e: &BytesStart<'_>) -> Result<()> {
++        let name = e.name();
++        check_name(name.as_ref())?;
++        let raw = e.attributes_raw();
++        if self.mode == Mode::Stream && self.in_row {
++            // roo's streaming reader yields a nested `row` as a row of its own,
++            // and matches prefixed names in a row by namespace.
++            if name.as_ref() == "row" || name.as_ref().contains(':') {
++                return Err(Unsupported(format!(
++                    "<{}> inside a streamed row",
++                    name.as_ref()
++                )));
++            }
++        }
++        self.attributes.read(raw)?;
++        let prefixed = self.attributes.prefixed();
++        if !prefixed && !self.attributes.references() {
++            return self.check_prefix(name.as_ref());
++        }
++        let depth = self.open_elements + 1;
++        for attribute in self.attributes.iter(raw) {
++            let key = attribute.key;
++            if attribute.value.contains('&') {
++                check_chars(&attribute.normalized_value()?)?;
++            }
++            if let Some(prefix) = key.strip_prefix("xmlns:") {
++                if attribute.value.is_empty() {
++                    return Err(Unsupported(format!("an empty namespace for {prefix}")));
++                }
++                self.prefixes.push((depth, prefix.to_owned()));
++            }
++            if key == "xml:space" {
++                self.space.push((depth, attribute.value == "preserve"));
++            }
++        }
++        // A prefix may be declared after the attribute that uses it.
++        if prefixed {
++            for attribute in self.attributes.iter(raw) {
++                self.check_prefix(attribute.key)?;
++            }
++        }
++        self.check_prefix(name.as_ref())
++    }
++
++    /// Ends the namespace and `xml:space` scopes of an element at `depth`.
++    fn leave(&mut self, depth: usize) {
++        while self.prefixes.last().is_some_and(|(at, _)| *at == depth) {
++            self.prefixes.pop();
++        }
++        while self.space.last().is_some_and(|(at, _)| *at == depth) {
++            self.space.pop();
++        }
++    }
++
++    fn preserves_space(&self) -> bool {
++        self.space.last().is_some_and(|(_, preserve)| *preserve)
++    }
++
++    /// libxml2 keeps an undeclared prefix as part of the name, so roo would
++    /// not see `x:row` as `row`.
++    fn check_prefix(&self, name: &str) -> Result<()> {
++        match name.split_once(':') {
++            Some(("xml" | "xmlns", _)) | None => Ok(()),
++            Some((prefix, _)) if self.prefixes.iter().any(|(_, declared)| declared == prefix) => {
++                Ok(())
++            }
++            Some(_) => Err(Unsupported(format!("the undeclared prefix in {name}"))),
++        }
++    }
++
++    /// Outside the root element, XML allows only one root, whitespace,
++    /// comments, and processing instructions.
++    fn check_top_level(&mut self, event: &Event<'_>) -> Result<()> {
++        match event {
++            Event::Start(_) | Event::Empty(_) if self.seen_root => {
++                Err(Unsupported("a second root element".into()))
++            }
++            Event::Start(_) | Event::Empty(_) => {
++                self.seen_root = true;
++                Ok(())
++            }
++            Event::Text(t) if !t.trim_ascii().is_empty() => {
++                Err(Unsupported("text outside the root element".into()))
++            }
++            Event::CData(_) | Event::GeneralRef(_) => {
++                Err(Unsupported("text outside the root element".into()))
++            }
++            Event::Eof if !self.seen_root => Err(Unsupported("no root element".into())),
++            _ => Ok(()),
++        }
++    }
++
++    fn check_event(&mut self, event: &Event<'_>) -> Result<()> {
++        let first = !std::mem::replace(&mut self.started, true);
++        match &event {
++            Event::Start(e) => {
++                self.check_start(e)?;
++                self.open_elements += 1;
++            }
++            Event::Empty(e) => {
++                self.check_start(e)?;
++                self.leave(self.open_elements + 1);
++            }
++            Event::End(_) => {
++                self.leave(self.open_elements);
++                self.open_elements = self.open_elements.saturating_sub(1);
++            }
++            Event::Text(t) if t.contains("]]>") => {
++                return Err(Unsupported("`]]>` in text".into()));
++            }
++            Event::Text(t) | Event::Comment(t) => check_chars(t)?,
++            Event::CData(t) => check_chars(&t.xml10_content())?,
++            Event::PI(pi) => {
++                check_name(pi.target())?;
++                check_chars(pi)?;
++            }
++            Event::GeneralRef(r) => match r.resolve_char_ref()? {
++                Some(c) => check_chars(c.encode_utf8(&mut [0; 4]))?,
++                None => {
++                    if !matches!(
++                        r.xml10_content().as_ref(),
++                        "lt" | "gt" | "amp" | "apos" | "quot"
++                    ) {
++                        return Err(Unsupported(
++                            "an entity reference XML does not define".into(),
++                        ));
++                    }
++                }
++            },
++            Event::Decl(_) if !first => {
++                return Err(Unsupported("an XML declaration after the start".into()));
++            }
++            // A DTD can define entities and attribute defaults, which Nokogiri
++            // applies and this reader does not.
++            Event::DocType(_) => return Err(Unsupported("a document type declaration".into())),
++            _ => {}
++        }
++        Ok(())
++    }
++}
+diff --git a/src/utils.rs b/src/utils.rs
+index 65b94f6..9943865 100644
+--- a/src/utils.rs
++++ b/src/utils.rs
+@@ -95,7 +95,7 @@ pub(crate) fn column_name_digits(col: u32, out: &mut [u8]) -> usize {
+ // generated by a `quick_xml::Event::GeneralRef()`. Appends the result to the
+ // provided buffer or returns a `quick_xml::Error`.
+ #[inline]
+-pub(crate) fn unescape_entity_to_buffer(
++pub fn unescape_entity_to_buffer(
+     entity: &BytesRef,
+     buffer: &mut String,
+ ) -> Result<(), quick_xml::Error> {
+diff --git a/src/xlsx/cells_reader.rs b/src/xlsx/cells_reader.rs
+index 39ee153..811a952 100644
+--- a/src/xlsx/cells_reader.rs
++++ b/src/xlsx/cells_reader.rs
+@@ -3,19 +3,22 @@
+ // Copyright 2016-2026, Johann Tuffe.
+ 
+ use quick_xml::events::{BytesStart, Event};
+-use std::io::{Read, Seek};
++use std::io::{BufRead, BufReader};
+ 
+ use super::{
+     expand_shared_formula, get_dimension, get_row, get_row_column, read_string_with_bufs,
+-    Dimensions, XlReader,
++    Dimensions,
+ };
+ use crate::attrs::RawAttributes;
++use crate::roo::{Body, XmlReader};
++mod compat;
+ use crate::{
+     datatype::DataRef,
+     formats::{format_excel_f64_ref, CellFormat},
+     utils::{unescape_entity_to_buffer, unescape_xml},
+     Cell, XlsxError,
+ };
++use compat::{FormulaMode, RooState, RooTag};
+ 
+ #[derive(Clone, Debug)]
+ struct SharedFormula {
+@@ -28,6 +31,7 @@ struct WorkbookContext<'a> {
+     strings: &'a [String],
+     formats: &'a [CellFormat],
+     is_1904: bool,
++    raw: bool,
+ }
+ 
+ /// Reusable scratch buffers for cell value parsing (avoid per-cell allocations).
+@@ -166,6 +170,7 @@ struct XlsxCellFormulaMetadataRecordInternal<'a> {
+     pos: (u32, u32),
+     value: DataRef<'a>,
+     formula: Option<FormulaMetadata>,
++    style_id: usize,
+ }
+ 
+ /// An xlsx Cell Iterator.
+@@ -173,11 +178,10 @@ struct XlsxCellFormulaMetadataRecordInternal<'a> {
+ /// The `next_*` methods all advance the same XML stream. Use one streaming
+ /// method per reader; mixing methods on a single reader will consume cells from
+ /// the current stream position.
+-pub struct XlsxCellReader<'a, RS>
+-where
+-    RS: Read + Seek,
+-{
+-    xml: XlReader<'a, RS>,
++pub type XlsxCellReader<'a, RS> = XlsxCellStream<'a, BufReader<zip::read::ZipFile<'a, RS>>>;
++
++pub struct XlsxCellStream<'a, B: BufRead> {
++    xml: XmlReader<B>,
+     strings: &'a [String],
+     formats: &'a [CellFormat],
+     is_1904: bool,
+@@ -188,15 +192,13 @@ where
+     cell_buf: Vec<u8>,
+     value_bufs: ValueBufs,
+     formulas: Vec<Option<SharedFormula>>,
++    roo: Option<RooState>,
+ }
+ 
+-impl<'a, RS> XlsxCellReader<'a, RS>
+-where
+-    RS: Read + Seek,
+-{
++impl<'a, B: BufRead> XlsxCellStream<'a, B> {
+     /// Create a new XLSX cell reader over a worksheet XML stream.
+     pub fn new(
+-        mut xml: XlReader<'a, RS>,
++        mut xml: XmlReader<B>,
+         strings: &'a [String],
+         formats: &'a [CellFormat],
+         is_1904: bool,
+@@ -244,6 +246,7 @@ where
+             cell_buf: Vec::with_capacity(1024),
+             value_bufs: ValueBufs::new(),
+             formulas: Vec::with_capacity(1024),
++            roo: None,
+         })
+     }
+ 
+@@ -254,74 +257,19 @@ where
+ 
+     /// Return the next cell value in XML stream order.
+     pub fn next_cell(&mut self) -> Result<Option<Cell<DataRef<'a>>>, XlsxError> {
+-        loop {
+-            self.buf.clear();
+-            match self.xml.read_event_into(&mut self.buf) {
+-                Ok(Event::Start(row_element)) if row_element.local_name().as_ref() == "row" => {
+-                    if let Some(r) = row_element.raw_attr("r")? {
+-                        self.row_index = get_row(r)?;
+-                    }
+-                }
+-                Ok(Event::End(row_element)) if row_element.local_name().as_ref() == "row" => {
+-                    self.row_index += 1;
+-                    self.col_index = 0;
+-                }
+-                Ok(Event::Start(c_element)) if c_element.local_name().as_ref() == "c" => {
+-                    let (pos_attr, style_attr, type_attr) =
+-                        get_attrs!(c_element, "r" => r, "s" => s, "t" => t)?;
+-                    let pos = if let Some(range) = pos_attr {
+-                        let (row, col) = get_row_column(range)?;
+-                        self.col_index = col;
+-                        (row, col)
+-                    } else {
+-                        (self.row_index, self.col_index)
+-                    };
+-                    let mut value = DataRef::Empty;
+-                    loop {
+-                        self.cell_buf.clear();
+-                        match self.xml.read_event_into(&mut self.cell_buf) {
+-                            Ok(Event::Start(e)) => {
+-                                let ctx = WorkbookContext {
+-                                    strings: self.strings,
+-                                    formats: self.formats,
+-                                    is_1904: self.is_1904,
+-                                };
+-                                value = read_value(
+-                                    &ctx,
+-                                    &mut self.xml,
+-                                    &e,
+-                                    style_attr,
+-                                    type_attr,
+-                                    &mut self.value_bufs,
+-                                )?;
+-                            }
+-                            Ok(Event::End(e)) if e.local_name().as_ref() == "c" => break,
+-                            Ok(Event::Eof) => return Err(XlsxError::XmlEof("c")),
+-                            Err(e) => return Err(XlsxError::Xml(e)),
+-                            _ => (),
+-                        }
+-                    }
+-                    self.col_index += 1;
+-                    return Ok(Some(Cell::new(pos, value)));
+-                }
+-                Ok(Event::End(e)) if e.local_name().as_ref() == "sheetData" => {
+-                    return Ok(None);
+-                }
+-                Ok(Event::Eof) => return Err(XlsxError::XmlEof("sheetData")),
+-                Err(e) => return Err(XlsxError::Xml(e)),
+-                _ => (),
+-            }
+-        }
++        Ok(self
++            .next_cell_formula_record_impl(FormulaMode::Ignore)?
++            .map(|record| Cell::new(record.pos, record.value)))
+     }
+ 
+     fn read_formula_record(
+-        xml: &mut XlReader<'_, RS>,
++        xml: &mut XmlReader<B>,
+         formulas: &mut Vec<Option<SharedFormula>>,
+         e: &BytesStart<'_>,
+         pos: (u32, u32),
+         expand_shared_derived: bool,
+     ) -> Result<Option<FormulaMetadata>, XlsxError> {
+-        let formula = read_formula(xml, e)?;
++        let formula = read_formula(xml, e, false)?;
+ 
+         let (t_attr, si_attr, ref_attr) = get_attrs!(e, "t" => t, "si" => si, "ref" => ref_)?;
+         if t_attr == Some("shared") {
+@@ -385,7 +333,7 @@ where
+     /// [`Self::next_cell_with_formula_metadata`] when shared-formula metadata is needed.
+     pub fn next_cell_with_formula(&mut self) -> Result<Option<XlsxCellFormula<'a>>, XlsxError> {
+         Ok(self
+-            .next_cell_formula_record_impl(true)?
++            .next_cell_formula_record_impl(FormulaMode::Expanded)?
+             .map(|record| XlsxCellFormula {
+                 pos: record.pos,
+                 value: record.value,
+@@ -403,7 +351,7 @@ where
+         &mut self,
+     ) -> Result<Option<XlsxCellFormulaMetadataRecord<'a>>, XlsxError> {
+         Ok(self
+-            .next_cell_formula_record_impl(false)?
++            .next_cell_formula_record_impl(FormulaMode::Metadata)?
+             .map(|record| XlsxCellFormulaMetadataRecord {
+                 pos: record.pos,
+                 value: record.value,
+@@ -413,78 +361,208 @@ where
+ 
+     fn next_cell_formula_record_impl(
+         &mut self,
+-        expand_shared_derived: bool,
++        formula_mode: FormulaMode,
+     ) -> Result<Option<XlsxCellFormulaMetadataRecordInternal<'a>>, XlsxError> {
+         loop {
+             self.buf.clear();
+             match self.xml.read_event_into(&mut self.buf) {
+-                Ok(Event::Start(row_element)) if row_element.local_name().as_ref() == "row" => {
+-                    if let Some(r) = row_element.raw_attr("r")? {
+-                        self.row_index = get_row(r)?;
++                Ok(Event::Start(e)) => {
++                    if let Some(roo) = self.roo.as_mut() {
++                        match roo.start(&e, self.xml.depth(), false) {
++                            RooTag::Row => {
++                                self.xml.in_row(true);
++                                continue;
++                            }
++                            RooTag::Skip => {
++                                self.xml.read_to_end_into(e.name(), &mut self.cell_buf)?;
++                                continue;
++                            }
++                            RooTag::Other => continue,
++                            RooTag::Cell => {}
++                        }
++                    } else if e.local_name().as_ref() == "row" {
++                        if let Some(r) = e.raw_attr("r")? {
++                            self.row_index = get_row(r)?;
++                        }
++                        continue;
++                    } else if e.local_name().as_ref() != "c" {
++                        continue;
+                     }
+-                }
+-                Ok(Event::End(row_element)) if row_element.local_name().as_ref() == "row" => {
+-                    self.row_index += 1;
+-                    self.col_index = 0;
+-                }
+-                Ok(Event::Start(c_element)) if c_element.local_name().as_ref() == "c" => {
+-                    let (pos_attr, style_attr, type_attr) =
+-                        get_attrs!(c_element, "r" => r, "s" => s, "t" => t)?;
+-                    let pos = if let Some(range) = pos_attr {
+-                        let (row, col) = get_row_column(range)?;
+-                        self.col_index = col;
+-                        (row, col)
++                    let mut raw = if self.roo.is_some() {
++                        Some(self.xml.cell_attributes(&e)?)
++                    } else {
++                        None
++                    };
++                    let (pos_attr, style_attr, type_attr) = get_attrs!(e,"r"=>r,"s"=>s,"t"=>t)?;
++                    let pos = if raw.is_some() {
++                        (0, 0)
++                    } else if let Some(reference) = pos_attr {
++                        let (row, column) = get_row_column(reference)?;
++                        self.col_index = column;
++                        (row, column)
+                     } else {
+                         (self.row_index, self.col_index)
+                     };
++                    let style_id = if raw.is_some() {
++                        0
++                    } else {
++                        style_attr
++                            .and_then(|style| {
++                                atoi_simd::parse::<usize, true, false>(style.as_bytes()).ok()
++                            })
++                            .unwrap_or(0)
++                    };
+                     let mut value = DataRef::Empty;
+                     let mut formula = None;
++                    let mut decided = false;
+                     loop {
+                         self.cell_buf.clear();
+                         match self.xml.read_event_into(&mut self.cell_buf) {
+-                            Ok(Event::Start(e)) if e.local_name().as_ref() == "f" => {
+-                                formula = Self::read_formula_record(
+-                                    &mut self.xml,
+-                                    &mut self.formulas,
+-                                    &e,
+-                                    pos,
+-                                    expand_shared_derived,
+-                                )?;
++                            Ok(Event::Start(child)) => {
++                                if raw.is_some() && decided {
++                                    self.xml
++                                        .read_to_end_into(child.name(), &mut self.value_bufs.xml)?;
++                                    continue;
++                                }
++                                if child.local_name().as_ref() == "f" {
++                                    if let Some(cell) = raw.as_mut() {
++                                        let text = read_formula(&mut self.xml, &child, true)?
++                                            .unwrap_or_default();
++                                        cell.formula = Some(
++                                            self.roo.as_mut().expect("roo mode").append(&text),
++                                        );
++                                    } else if formula_mode != FormulaMode::Ignore {
++                                        formula = Self::read_formula_record(
++                                            &mut self.xml,
++                                            &mut self.formulas,
++                                            &child,
++                                            pos,
++                                            formula_mode == FormulaMode::Expanded,
++                                        )?;
++                                    } else {
++                                        self.xml.read_to_end_into(
++                                            child.name(),
++                                            &mut self.value_bufs.xml,
++                                        )?;
++                                    }
++                                } else {
++                                    let ctx = WorkbookContext {
++                                        strings: self.strings,
++                                        formats: self.formats,
++                                        is_1904: self.is_1904,
++                                        raw: raw.is_some(),
++                                    };
++                                    value = read_value(
++                                        &ctx,
++                                        &mut self.xml,
++                                        &child,
++                                        style_attr,
++                                        type_attr,
++                                        &mut self.value_bufs,
++                                    )?;
++                                    if let (Some(cell), DataRef::String(text)) =
++                                        (raw.as_mut(), &value)
++                                    {
++                                        let inline = child.local_name().as_ref() == "is";
++                                        if !inline || !text.is_empty() {
++                                            let span =
++                                                self.roo.as_mut().expect("roo mode").append(text);
++                                            cell.body = if inline {
++                                                Body::Inline(span)
++                                            } else {
++                                                Body::Value(span)
++                                            };
++                                            decided = true;
++                                        }
++                                    }
++                                }
+                             }
+-                            Ok(Event::Start(e)) => {
+-                                let ctx = WorkbookContext {
+-                                    strings: self.strings,
+-                                    formats: self.formats,
+-                                    is_1904: self.is_1904,
+-                                };
+-                                value = read_value(
+-                                    &ctx,
+-                                    &mut self.xml,
+-                                    &e,
+-                                    style_attr,
+-                                    type_attr,
+-                                    &mut self.value_bufs,
+-                                )?;
++                            Ok(Event::Empty(child)) if raw.is_some() && !decided => {
++                                let cell = raw.as_mut().expect("roo mode");
++                                let start = self.roo.as_ref().expect("roo mode").row.text.len();
++                                match child.local_name().as_ref() {
++                                    "f" => cell.formula = Some(start..start),
++                                    "v" => {
++                                        cell.body = Body::Value(start..start);
++                                        decided = true;
++                                    }
++                                    _ => {}
++                                }
++                            }
++                            Ok(Event::End(end))
++                                if self.roo.as_ref().map_or_else(
++                                    || end.local_name().as_ref() == "c",
++                                    |roo| self.xml.depth() == roo.row_depth.unwrap_or(0),
++                                ) =>
++                            {
++                                break
+                             }
+-                            Ok(Event::End(e)) if e.local_name().as_ref() == "c" => break,
+                             Ok(Event::Eof) => return Err(XlsxError::XmlEof("c")),
+-                            Err(e) => return Err(XlsxError::Xml(e)),
+-                            _ => (),
++                            Err(error) => return Err(XlsxError::Xml(error)),
++                            _ => {}
+                         }
+                     }
+-                    self.col_index += 1;
++                    if let Some(mut cell) = raw {
++                        if !decided {
++                            cell.formula = None;
++                        }
++                        self.roo.as_mut().expect("roo mode").row.cells.push(cell);
++                    } else {
++                        self.col_index += 1;
++                    }
+                     return Ok(Some(XlsxCellFormulaMetadataRecordInternal {
+                         pos,
+                         value,
+                         formula,
++                        style_id,
+                     }));
+                 }
+-                Ok(Event::End(e)) if e.local_name().as_ref() == "sheetData" => {
++                Ok(Event::Empty(e)) if self.roo.is_some() => {
++                    let roo = self.roo.as_mut().expect("roo mode");
++                    match roo.start(&e, self.xml.depth() + 1, true) {
++                        RooTag::Row => return Ok(None),
++                        RooTag::Cell => roo.row.cells.push(self.xml.cell_attributes(&e)?),
++                        _ => {}
++                    }
++                }
++                Ok(Event::End(e)) => {
++                    if let Some(roo) = self.roo.as_mut() {
++                        if roo.end(self.xml.depth()) {
++                            self.xml.in_row(false);
++                            return Ok(None);
++                        }
++                    } else if e.local_name().as_ref() == "row" {
++                        self.row_index += 1;
++                        self.col_index = 0;
++                    } else if e.local_name().as_ref() == "sheetData" {
++                        return Ok(None);
++                    }
++                }
++                Ok(Event::Eof) if self.roo.is_some() => {
++                    self.roo.as_mut().expect("roo mode").done = true;
+                     return Ok(None);
+                 }
++                Ok(event) if self.roo.as_ref().is_some_and(|roo| roo.in_streamed_row()) => {
++                    match event {
++                        Event::Text(text)
++                            if self.xml.preserves_space() || !text.trim_ascii().is_empty() =>
++                        {
++                            return Err(XlsxError::Unexpected("text in a streamed row"))
++                        }
++                        Event::Comment(_)
++                        | Event::PI(_)
++                        | Event::CData(_)
++                        | Event::GeneralRef(_) => {
++                            return Err(XlsxError::Unexpected(
++                                "a non-element child of a streamed row",
++                            ))
++                        }
++                        _ => {}
++                    }
++                }
+                 Ok(Event::Eof) => return Err(XlsxError::XmlEof("sheetData")),
+-                Err(e) => return Err(XlsxError::Xml(e)),
+-                _ => (),
++                Err(error) => return Err(XlsxError::Xml(error)),
++                _ => {}
+             }
+         }
+     }
+@@ -551,32 +629,29 @@ where
+ 
+ /// Reads a cell value using pre-extracted `s` and `t` attributes
+ /// (avoids repeating attribute iteration on the `<c>` element).
+-fn read_value<'s, RS>(
++fn read_value<'s, B: BufRead>(
+     ctx: &WorkbookContext<'s>,
+-    xml: &mut XlReader<'_, RS>,
++    xml: &mut XmlReader<B>,
+     e: &BytesStart<'_>,
+     style_attr: Option<&str>,
+     type_attr: Option<&str>,
+     bufs: &mut ValueBufs,
+-) -> Result<DataRef<'s>, XlsxError>
+-where
+-    RS: Read + Seek,
+-{
++) -> Result<DataRef<'s>, XlsxError> {
+     Ok(match e.local_name().as_ref() {
+         "is" => {
+             // inlineStr
+-            read_string_with_bufs(xml, e.name(), &mut bufs.xml, &mut bufs.str_inner)?
++            read_string_with_bufs(xml, e.name(), &mut bufs.xml, &mut bufs.str_inner, ctx.raw)?
+                 .map_or(DataRef::Empty, DataRef::String)
+         }
+         // Ignore <v> for inlineStr cells since it is redundant. The value is in
+         // the <is> element, which is handled above.
+-        "v" if matches!(type_attr, Some("inlineStr") | Some("is")) => {
++        "v" if !ctx.raw && matches!(type_attr, Some("inlineStr") | Some("is")) => {
+             bufs.xml.clear();
+             xml.read_to_end_into(e.name(), &mut bufs.xml)?;
+             DataRef::Empty
+         }
+         "v" => match type_attr {
+-            Some("n") | Some("s") | Some("b") | Some("e") | None => {
++            Some("n") | Some("s") | Some("b") | Some("e") | None if !ctx.raw => {
+                 // These types are always plain ASCII (no CR/LF or entities), so we can
+                 // parse directly from raw bytes, skipping `xml10_content()` + String
+                 bufs.xml.clear();
+@@ -593,14 +668,22 @@ where
+             _ => {
+                 // Types that may contain entities, or need owned Strings (eg: "str", "d")
+                 bufs.value.clear();
++                let mut depth = 0;
+                 loop {
+                     bufs.xml.clear();
+                     match xml.read_event_into(&mut bufs.xml)? {
+-                        Event::Text(t) => bufs.value.push_str(&t.xml10_content()),
+-                        Event::GeneralRef(e) => unescape_entity_to_buffer(&e, &mut bufs.value)?,
+-                        Event::End(end) if end.name() == e.name() => break,
++                        Event::Start(_) if ctx.raw => depth += 1,
++                        Event::Text(text) => bufs.value.push_str(&text.xml10_content()),
++                        Event::CData(text) if ctx.raw => bufs.value.push_str(&text.xml10_content()),
++                        Event::GeneralRef(entity) => {
++                            unescape_entity_to_buffer(&entity, &mut bufs.value)?
++                        }
++                        Event::End(end) if end.name() == e.name() && (!ctx.raw || depth == 0) => {
++                            break
++                        }
++                        Event::End(_) if ctx.raw && depth > 0 => depth -= 1,
+                         Event::Eof => return Err(XlsxError::XmlEof("v")),
+-                        _ => (),
++                        _ => {}
+                     }
+                 }
+                 read_v(ctx, &bufs.value, style_attr, type_attr)?
+@@ -611,6 +694,10 @@ where
+             xml.read_to_end_into(e.name(), &mut bufs.xml)?;
+             DataRef::Empty
+         }
++        _n if ctx.raw => {
++            xml.read_to_end_into(e.name(), &mut bufs.xml)?;
++            DataRef::Empty
++        }
+         _n => return Err(XlsxError::UnexpectedNode("v, f, or is")),
+     })
+ }
+@@ -623,6 +710,9 @@ fn read_v<'s>(
+     style_attr: Option<&str>,
+     type_attr: Option<&str>,
+ ) -> Result<DataRef<'s>, XlsxError> {
++    if ctx.raw {
++        return Ok(DataRef::String(v.to_owned()));
++    }
+     let cell_format = match style_attr {
+         Some(style) => {
+             let id = atoi_simd::parse::<usize, true, false>(style.as_bytes()).unwrap_or(0);
+@@ -668,10 +758,11 @@ fn read_v<'s>(
+     }
+ }
+ 
+-fn read_formula<RS>(xml: &mut XlReader<RS>, e: &BytesStart) -> Result<Option<String>, XlsxError>
+-where
+-    RS: Read + Seek,
+-{
++fn read_formula<B: BufRead>(
++    xml: &mut XmlReader<B>,
++    e: &BytesStart,
++    raw: bool,
++) -> Result<Option<String>, XlsxError> {
+     match e.local_name().as_ref() {
+         "is" | "v" => {
+             xml.read_to_end_into(e.name(), &mut Vec::new())?;
+@@ -680,11 +771,15 @@ where
+         "f" => {
+             let mut f_buf = Vec::with_capacity(512);
+             let mut f = String::new();
++            let mut depth = 0;
+             loop {
+                 match xml.read_event_into(&mut f_buf)? {
++                    Event::Start(_) if raw => depth += 1,
+                     Event::Text(t) => f.push_str(&t.xml10_content()),
++                    Event::CData(t) if raw => f.push_str(&t.xml10_content()),
+                     Event::GeneralRef(e) => unescape_entity_to_buffer(&e, &mut f)?,
+-                    Event::End(end) if end.name() == e.name() => break,
++                    Event::End(end) if end.name() == e.name() && (!raw || depth == 0) => break,
++                    Event::End(_) if raw && depth > 0 => depth -= 1,
+                     Event::Eof => return Err(XlsxError::XmlEof("f")),
+                     _ => (),
+                 }
+diff --git a/src/xlsx/cells_reader/compat.rs b/src/xlsx/cells_reader/compat.rs
+new file mode 100644
+index 0000000..a055827
+--- /dev/null
++++ b/src/xlsx/cells_reader/compat.rs
+@@ -0,0 +1,183 @@
++use super::{Dimensions, ValueBufs, XlsxCellStream};
++use crate::roo::{Mode, RawRow, Result, Span, Unsupported, XmlReader};
++use quick_xml::events::BytesStart;
++use std::fs::File;
++use std::io::{BufRead, BufReader};
++use std::path::Path;
++
++#[derive(Clone, Copy, PartialEq, Eq)]
++pub(super) enum FormulaMode {
++    Ignore,
++    Metadata,
++    Expanded,
++}
++pub(super) enum RooTag {
++    Row,
++    Cell,
++    Skip,
++    Other,
++}
++pub(super) struct RooState {
++    mode: Mode,
++    worksheet: bool,
++    sheet_depth: Option<usize>,
++    pub(super) row_depth: Option<usize>,
++    pub(super) row: RawRow,
++    row_size: (usize, usize),
++    pub(super) done: bool,
++    pending_error: Option<Unsupported>,
++}
++impl RooState {
++    pub(super) fn start(&mut self, e: &BytesStart<'_>, depth: usize, empty: bool) -> RooTag {
++        if let Some(row) = self.row_depth {
++            return if depth == row + 1 {
++                if self.mode == Mode::Document && e.local_name().as_ref() != "c" {
++                    RooTag::Skip
++                } else {
++                    RooTag::Cell
++                }
++            } else {
++                RooTag::Other
++            };
++        }
++        if depth == 1 {
++            self.worksheet = e.local_name().as_ref() == "worksheet";
++        }
++        if depth == 2 && self.worksheet && e.local_name().as_ref() == "sheetData" && !empty {
++            self.sheet_depth = Some(depth);
++        }
++        let row = match self.mode {
++            Mode::Document => {
++                self.sheet_depth == Some(depth - 1) && e.local_name().as_ref() == "row"
++            }
++            Mode::Stream => e.name().as_ref() == "row",
++        };
++        if row {
++            if !empty {
++                self.row_depth = Some(depth);
++            }
++            RooTag::Row
++        } else {
++            RooTag::Other
++        }
++    }
++    pub(super) fn end(&mut self, depth: usize) -> bool {
++        if self.sheet_depth == Some(depth + 1) {
++            self.sheet_depth = None;
++        }
++        if self.row_depth == Some(depth + 1) {
++            self.row_depth = None;
++            true
++        } else {
++            false
++        }
++    }
++    pub(super) fn append(&mut self, text: &str) -> Span {
++        let start = self.row.text.len();
++        self.row.text.push_str(text);
++        start..self.row.text.len()
++    }
++    pub(super) fn in_streamed_row(&self) -> bool {
++        self.mode == Mode::Stream && self.row_depth.is_some()
++    }
++    fn take_row(&mut self) -> RawRow {
++        let row = std::mem::take(&mut self.row);
++        self.row_size = (row.text.len(), row.cells.len());
++        self.row = RawRow {
++            text: String::with_capacity(self.row_size.0),
++            cells: Vec::with_capacity(self.row_size.1),
++        };
++        row
++    }
++}
++impl<B: BufRead> XlsxCellStream<'static, B> {
++    /// Creates a direct XLSX stream preserving roo's raw values and row selection.
++    /// Workbook metadata remains with the caller; no ZIP, styles, or shared strings are loaded here.
++    pub fn for_roo(input: B, mode: Mode) -> Self {
++        Self {
++            xml: XmlReader::for_roo(input, mode),
++            strings: &[],
++            formats: &[],
++            is_1904: false,
++            dimensions: Dimensions::default(),
++            row_index: 0,
++            col_index: 0,
++            buf: Vec::with_capacity(16 * 1024),
++            cell_buf: Vec::with_capacity(1024),
++            value_bufs: ValueBufs::new(),
++            formulas: Vec::new(),
++            roo: Some(RooState {
++                mode,
++                worksheet: false,
++                sheet_depth: None,
++                row_depth: None,
++                row: RawRow::default(),
++                row_size: (0, 0),
++                done: false,
++                pending_error: None,
++            }),
++        }
++    }
++    /// Returns the next selected row, including empty rows, or None after validating EOF.
++    pub fn next_row(&mut self) -> Result<Option<RawRow>> {
++        if self.roo.as_ref().expect("for_roo reader").done {
++            return Ok(None);
++        }
++        while self
++            .next_cell_formula_record_impl(FormulaMode::Ignore)?
++            .is_some()
++        {}
++        let roo = self.roo.as_mut().expect("for_roo reader");
++        if roo.done {
++            Ok(None)
++        } else {
++            Ok(Some(roo.take_row()))
++        }
++    }
++    /// Reads bounded row batches. Rows before a failure are returned before the error.
++    pub fn next_rows(&mut self, cells: usize) -> Result<Vec<RawRow>> {
++        if let Some(error) = self
++            .roo
++            .as_mut()
++            .expect("for_roo reader")
++            .pending_error
++            .take()
++        {
++            return Err(error);
++        }
++        let mut rows = Vec::new();
++        let mut count = 0;
++        while count < cells {
++            match self.next_row() {
++                Ok(Some(row)) => {
++                    count += row.cells.len().max(1);
++                    rows.push(row);
++                }
++                Ok(None) => break,
++                Err(error) if rows.is_empty() => return Err(error),
++                Err(error) => {
++                    self.roo.as_mut().expect("for_roo reader").pending_error = Some(error);
++                    break;
++                }
++            }
++        }
++        Ok(rows)
++    }
++    /// Returns a validated event without constructing worksheet rows.
++    pub fn next_xml_event<'b>(
++        &mut self,
++        buf: &'b mut Vec<u8>,
++    ) -> Result<quick_xml::events::Event<'b>> {
++        self.xml.next_xml_event(buf)
++    }
++}
++impl XlsxCellStream<'static, BufReader<File>> {
++    /// Opens a worksheet or metadata part with the same compatibility checks as `for_roo`.
++    pub fn open(path: &Path, mode: Mode) -> Result<Self> {
++        let file = File::open(path).map_err(|error| Unsupported(error.to_string()))?;
++        Ok(Self::for_roo(
++            BufReader::with_capacity(64 * 1024, file),
++            mode,
++        ))
++    }
++}
+diff --git a/src/xlsx/mod.rs b/src/xlsx/mod.rs
+index ea620c5..0414c7a 100644
+--- a/src/xlsx/mod.rs
++++ b/src/xlsx/mod.rs
+@@ -4,19 +4,19 @@
+ 
+ #![warn(missing_docs)]
+ 
+-mod cells_reader;
++pub(crate) mod cells_reader;
+ 
+ use std::collections::HashMap;
+ #[cfg(feature = "picture")]
+ use std::collections::HashSet;
+-use std::io::BufReader;
++use std::io::{BufRead, BufReader};
+ use std::io::{Read, Seek};
+ use std::str::FromStr;
+ 
++use crate::roo::XmlReader;
+ use log::warn;
+ use quick_xml::events::{BytesStart, Event};
+ use quick_xml::name::QName;
+-use quick_xml::Reader as XmlReader;
+ use zip::read::{ZipArchive, ZipFile};
+ use zip::result::ZipError;
+ 
+@@ -368,9 +368,13 @@ impl<RS: Read + Seek> Xlsx<RS> {
+             buf.clear();
+             match xml.read_event_into(&mut buf) {
+                 Ok(Event::Start(e)) if e.local_name().as_ref() == "si" => {
+-                    if let Some(s) =
+-                        read_string_with_bufs(&mut xml, e.name(), &mut str_buf, &mut str_val_buf)?
+-                    {
++                    if let Some(s) = read_string_with_bufs(
++                        &mut xml,
++                        e.name(),
++                        &mut str_buf,
++                        &mut str_val_buf,
++                        false,
++                    )? {
+                         self.strings.push(s);
+                     }
+                 }
+@@ -2927,68 +2931,80 @@ fn get_row_and_optional_column(range: &str) -> Result<(u32, Option<u32>), XlsxEr
+ 
+ /// Attempts to read either a simple or richtext string, reusing caller-provided
+ /// buffers to avoid per-call allocations.
+-pub(crate) fn read_string_with_bufs<RS>(
+-    xml: &mut XlReader<'_, RS>,
+-    closing: QName,
++pub(crate) fn read_string_with_bufs<B: BufRead>(
++    xml: &mut XmlReader<B>,
++    closing: QName<'_>,
+     xml_buf: &mut Vec<u8>,
+     text_buf: &mut Vec<u8>,
+-) -> Result<Option<String>, XlsxError>
+-where
+-    RS: Read + Seek,
+-{
++    raw: bool,
++) -> Result<Option<String>, XlsxError> {
+     let mut rich_buffer: Option<String> = None;
+     let mut is_phonetic_text = false;
++    let mut depth = 0;
+     loop {
+         xml_buf.clear();
+         match xml.read_event_into(xml_buf) {
+             Ok(Event::Start(e)) if e.local_name().as_ref() == "r" && rich_buffer.is_none() => {
+-                // use a buffer since richtext has multiples <r> and <t> for the same cell
+                 rich_buffer = Some(String::new());
++                if raw {
++                    depth += 1;
++                }
+             }
+             Ok(Event::Start(e)) if e.local_name().as_ref() == "rPh" => {
+                 is_phonetic_text = true;
+-            }
+-            Ok(Event::End(e)) if e.name() == closing => {
+-                if rich_buffer.is_none() {
+-                    // An empty <s></s> element, without <t> or other
+-                    // subelements, is treated as a valid empty string in Excel.
+-                    rich_buffer = Some(String::new());
++                if raw {
++                    depth += 1;
+                 }
+-                return Ok(rich_buffer);
++            }
++            Ok(Event::End(e)) if e.name() == closing && (!raw || depth == 0) => {
++                return Ok(Some(rich_buffer.unwrap_or_default()))
+             }
+             Ok(Event::End(e)) if e.local_name().as_ref() == "rPh" => {
+                 is_phonetic_text = false;
++                if raw && depth > 0 {
++                    depth -= 1;
++                }
+             }
+-            Ok(Event::Start(e)) if e.local_name().as_ref() == "t" && !is_phonetic_text => {
+-                let preserve_space = matches!(e.raw_attr("xml:space")?, Some(v) if v == "preserve");
++            Ok(Event::Start(e)) if e.local_name().as_ref() == "t" && (raw || !is_phonetic_text) => {
++                let preserve_space = raw || matches!(e.raw_attr("xml:space")?, Some("preserve"));
+                 text_buf.clear();
+                 let mut value = String::new();
++                let mut text_depth = 0;
+                 loop {
+                     match xml.read_event_into(text_buf)? {
+-                        Event::Text(t) => value.push_str(&t.xml10_content()),
+-                        Event::CData(t) => value.push_str(&t.xml10_content()),
+-                        Event::GeneralRef(e) => unescape_entity_to_buffer(&e, &mut value)?,
+-                        Event::End(end) if end.name() == e.name() => break,
++                        Event::Start(child) if raw => {
++                            if child.local_name().as_ref() == "t" {
++                                return Err(XlsxError::Unexpected("a t inside a t"));
++                            }
++                            text_depth += 1;
++                        }
++                        Event::Text(text) => value.push_str(&text.xml10_content()),
++                        Event::CData(text) => value.push_str(&text.xml10_content()),
++                        Event::GeneralRef(entity) => {
++                            unescape_entity_to_buffer(&entity, &mut value)?
++                        }
++                        Event::End(end) if end.name() == e.name() && (!raw || text_depth == 0) => {
++                            break
++                        }
++                        Event::End(_) if raw && text_depth > 0 => text_depth -= 1,
+                         Event::Eof => return Err(XlsxError::XmlEof("t")),
+-                        _ => (),
++                        _ => {}
+                     }
+                 }
+-                let value = if preserve_space {
++                let value = if raw {
++                    value
++                } else if preserve_space {
+                     unescape_xml(&value).into_owned()
+                 } else {
+-                    // Trim ASCII whitespace (space/tab/CR/LF). Unicode spaces
+-                    // such as U+00A0 (NBSP) are preserved.
+                     unescape_xml(value.trim_matches([' ', '\t', '\r', '\n'])).into_owned()
+                 };
+-                if let Some(s) = &mut rich_buffer {
+-                    s.push_str(&value);
+-                } else {
+-                    rich_buffer = Some(value);
+-                }
++                rich_buffer.get_or_insert_with(String::new).push_str(&value);
+             }
++            Ok(Event::Start(_)) if raw => depth += 1,
++            Ok(Event::End(_)) if raw && depth > 0 => depth -= 1,
+             Ok(Event::Eof) => return Err(XlsxError::XmlEof("")),
+-            Err(e) => return Err(XlsxError::Xml(e)),
+-            _ => (),
++            Err(error) => return Err(XlsxError::Xml(error)),
++            _ => {}
+         }
+     }
+ }

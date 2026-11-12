@@ -1,0 +1,91 @@
+$ bundle exec rake test
+.............
+
+Finished in 78.873218s, 9.1413 runs/s, 235.1115 assertions/s.
+
+721 runs, 18544 assertions, 0 failures, 0 errors, 0 skips
+
+$ bundle exec rake parity
+| Suite | Tests | roo: failed / skipped | roo-calamine: failed / skipped | Native readers | roo cell parses (plugin run) | Same |
+|---|---:|---:|---:|---:|---:|---|
+| `test/roo/test_excelx.rb` | 25 | 0 / 1 | 0 / 1 | 20 | 14 | yes |
+| `test/test_roo.rb` | 41 | 0 / 1 | 0 / 1 | 66 | 0 | yes |
+| `test/excelx` | 51 | 0 / 0 | 0 / 0 | 0 | 0 | yes |
+| `spec/lib/roo/excelx_spec.rb` | 65 | 0 / 0 | 0 / 0 | 35 | 0 | yes |
+| `spec/lib/roo/strict_spec.rb` | 8 | 0 / 0 | 0 / 0 | 12 | 0 | yes |
+| `spec/lib/roo/excelx` | 62 | 0 / 0 | 0 / 0 | 1 | 0 | yes |
+
+$ cargo nextest run
+────────────
+     Summary [   0.059s] 25 tests run: 25 passed, 0 skipped
+
+$ cargo nextest run --manifest-path CALAMINE_037/Cargo.toml
+────────────
+     Summary [   0.534s] 232 tests run: 232 passed, 1 skipped
+
+$ cargo test --manifest-path CALAMINE_037/Cargo.toml --doc
+test result: ok. 66 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.18s
+
+
+$ cargo nextest run --manifest-path CALAMINE_UPDATED/Cargo.toml
+────────────
+     Summary [   0.570s] 318 tests run: 318 passed, 1 skipped
+
+$ cargo test --manifest-path CALAMINE_UPDATED/Cargo.toml --doc
+test result: ok. 67 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.66s
+
+
+$ Stock formula-order regression before fix
+    failures:
+
+    failures:
+        xlsx::cells_reader::tests::value_only_api_keeps_upstream_formula_order_behavior
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 106 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'xlsx::cells_reader::tests::value_only_api_keeps_upstream_formula_order_behavior' (3357696) panicked at src/xlsx/cells_reader.rs:912:9:
+    assertion `left == right` failed
+      left: Float(7.0)
+     right: Empty
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+  Cancelling due to test failure
+────────────
+     Summary [   0.028s] 1 test run: 0 passed, 1 failed, 318 skipped
+        FAIL [   0.010s] (1/1) calamine xlsx::cells_reader::tests::value_only_api_keeps_upstream_formula_order_behavior
+error: test run failed
+
+$ bundle exec rake build && ruby script/check_gem.rb pkg/roo-calamine-0.0.1.gem ruby
+roo-calamine 0.0.1 built to pkg/roo-calamine-0.0.1.gem.
+roo-calamine-0.0.1.gem: ruby, 76 files, required Ruby >= 3.3
+
+$ gem install SOURCE_GEM --local --install-dir ISOLATED --ignore-dependencies --no-document
+Building native extensions. This could take a while...
+Successfully installed roo-calamine-0.0.1
+1 gem installed
+
+$ GEM_PATH=ISOLATED:DEPENDENCIES ruby script/smoke.rb
+ok: roo-calamine 0.0.1 is enabled on arm64-darwin23, Ruby 3.4.12
+ok: Roo::Spreadsheet.open reads "name", 1.0, 2, #<Date: 2023-03-15 ((2460019j,0s,0n),+0s,2299161j)>
+ok: each_row_streaming yields the row
+ok: both reads went through the native reader
+
+$ bundle exec rubocop
+Inspecting 45 files
+.............................................
+
+45 files inspected, no offenses detected
+
+$ cargo clippy -p calamine --lib -- -D warnings
+    Checking calamine v0.38.0 (/Users/sebastiansala/.t3/worktrees/roo-calamine/t3-82fe4976-57bd22a947994165/vendor/calamine)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.78s
+
+$ cargo deny check advisories bans licenses sources
+advisories ok, bans ok, licenses ok, sources ok
+
+
+All Rust sources in the updated checkout equal vendor/calamine/src byte for byte.
+Format checks (root and fork), actionlint, zizmor and yamllint pass.
+Full platform/precompiled/JRuby matrix: see final PR checks.
