@@ -539,12 +539,20 @@ impl<R: BufRead> SheetReader<R> {
             text: String::with_capacity(text),
             cells: Vec::with_capacity(cells),
         };
+        // quick-xml expects markup after a text event; bypass it only after tags.
+        // https://docs.rs/quick-xml/0.42.0/src/quick_xml/reader/mod.rs.html#350-392
+        let mut after_tag = true;
         loop {
+            if after_tag && self.read_plain_cell(&mut row)? {
+                continue;
+            }
             buf.clear();
+            after_tag = true;
             match self.read_event(buf)? {
                 Event::Start(e) => {
                     if self.is_cell(&e) {
-                        let cell = self.cell_attributes(&e)?;
+                        let cell =
+                            Self::cell_attributes(&self.attributes, e.attributes_raw(), self.mode)?;
                         self.read_cell(buf, &mut row, cell)?;
                     } else {
                         self.skip(buf)?;
@@ -552,7 +560,11 @@ impl<R: BufRead> SheetReader<R> {
                 }
                 Event::Empty(e) => {
                     if self.is_cell(&e) {
-                        row.cells.push(self.cell_attributes(&e)?);
+                        row.cells.push(Self::cell_attributes(
+                            &self.attributes,
+                            e.attributes_raw(),
+                            self.mode,
+                        )?);
                     }
                 }
                 Event::End(_) => {
@@ -573,9 +585,113 @@ impl<R: BufRead> SheetReader<R> {
                 {
                     return Err(Unsupported("a non-element child of a streamed row".into()));
                 }
-                _ => {}
+                _ => after_tag = false,
             }
         }
+    }
+
+    /// Reads a whole cell written the plain way straight from the input,
+    /// without the event parser: `<c` with only `r`, `s`, and `t` attributes,
+    /// then `<f>`, `<v>`, or `<is><t>` children that hold only text and the
+    /// five references XML defines, then `</c>`. Reads nothing and returns
+    /// `false` for any other bytes, and for a cell that the input buffer cuts
+    /// short.
+    fn read_plain_cell(&mut self, row: &mut RawRow) -> Result<bool> {
+        let Ok(input) = self.xml.get_mut().fill_buf() else {
+            return Ok(false);
+        };
+        let Some(tag) = input.strip_prefix(b"<c") else {
+            return Ok(false);
+        };
+        let Some(tag_end) = tag.iter().position(|&b| b == b'>') else {
+            return Ok(false);
+        };
+        let Ok(raw) = std::str::from_utf8(&tag[..tag_end]) else {
+            return Ok(false);
+        };
+        // XML allows whitespace before the `>` of a start tag.
+        let raw = raw.trim_end_matches(' ');
+        if !self.attributes.read_common(raw) {
+            return Ok(false);
+        }
+        let mut cell = Self::cell_attributes(&self.attributes, raw, self.mode)?;
+        let text_start = row.text.len();
+        let mut rest = &tag[tag_end + 1..];
+        let mut decided = false;
+        loop {
+            if let Some(after) = rest.strip_prefix(b"</c>") {
+                rest = after;
+                break;
+            }
+            let (child, open, close): (Child, &[u8], &[u8]) = match rest {
+                [b'<', b'v', b'>', ..] => (Child::V, b"<v>", b"</v>"),
+                [b'<', b'f', b'>', ..] => (Child::F, b"<f>", b"</f>"),
+                _ if rest.starts_with(b"<is><t>") => (Child::Is, b"<is><t>", b"</t></is>"),
+                _ => return Self::not_plain(row, text_start),
+            };
+            let start = row.text.len();
+            let mut content = &rest[open.len()..];
+            rest = loop {
+                let length = content
+                    .iter()
+                    .position(|&b| b < b' ' || matches!(b, b'<' | b'>' | b'&'))
+                    .unwrap_or(content.len());
+                let Ok(text) = std::str::from_utf8(&content[..length]) else {
+                    return Self::not_plain(row, text_start);
+                };
+                if check_chars(text).is_err() {
+                    return Self::not_plain(row, text_start);
+                }
+                row.text.push_str(text);
+                content = &content[length..];
+                if let Some(after) = content.strip_prefix(close) {
+                    break after;
+                }
+                let references: [(&[u8], char); 5] = [
+                    (b"&amp;", '&'),
+                    (b"&lt;", '<'),
+                    (b"&gt;", '>'),
+                    (b"&quot;", '"'),
+                    (b"&apos;", '\''),
+                ];
+                let Some((reference, resolved)) = references
+                    .into_iter()
+                    .find(|(reference, _)| content.starts_with(reference))
+                else {
+                    return Self::not_plain(row, text_start);
+                };
+                row.text.push(resolved);
+                content = &content[reference.len()..];
+            };
+            if decided {
+                row.text.truncate(start);
+                continue;
+            }
+            match child {
+                Child::V => {
+                    cell.body = Body::Value(start..row.text.len());
+                    decided = true;
+                }
+                Child::Is if row.text.len() > start => {
+                    cell.body = Body::Inline(start..row.text.len());
+                    decided = true;
+                }
+                Child::F => cell.formula = Some(start..row.text.len()),
+                Child::Is | Child::Other => {}
+            }
+        }
+        if !decided {
+            cell.formula = None;
+        }
+        let used = input.len() - rest.len();
+        row.cells.push(cell);
+        self.xml.get_mut().consume(used);
+        Ok(true)
+    }
+
+    fn not_plain(row: &mut RawRow, text_start: usize) -> Result<bool> {
+        row.text.truncate(text_start);
+        Ok(false)
     }
 
     /// Reads the children of an open cell up to its end tag.
@@ -697,8 +813,7 @@ impl<R: BufRead> SheetReader<R> {
         }
     }
 
-    /// `e` is the start tag `read_event` returned last.
-    fn cell_attributes(&self, e: &BytesStart<'_>) -> Result<RawCell> {
+    fn cell_attributes(attributes: &TagAttributes, raw: &str, mode: Mode) -> Result<RawCell> {
         let mut cell = RawCell {
             reference: Reference::Missing,
             style: Style::Index(0),
@@ -706,7 +821,7 @@ impl<R: BufRead> SheetReader<R> {
             formula: None,
             body: Body::Empty,
         };
-        for attribute in self.attributes.iter(e.attributes_raw()) {
+        for attribute in attributes.iter(raw) {
             let value = || attribute.normalized_value();
             match attribute.key {
                 "r" => {
@@ -734,7 +849,7 @@ impl<R: BufRead> SheetReader<R> {
                 }
                 // roo's document read removes namespaces first, so `x:t` would
                 // count as `t` there.
-                key if self.mode == Mode::Document
+                key if mode == Mode::Document
                     && key.split_once(':').is_some_and(|(prefix, local)| {
                         prefix != "xmlns" && matches!(local, "r" | "s" | "t")
                     }) =>
