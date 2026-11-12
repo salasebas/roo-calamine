@@ -1,9 +1,10 @@
 use super::*;
+use std::io::BufReader;
 
 const NS: &str = r#"xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main""#;
 
 fn rows(xml: &str, mode: Mode) -> Vec<RawRow> {
-    let mut reader = SheetReader::new(xml.as_bytes(), mode);
+    let mut reader = SheetReader::for_roo(xml.as_bytes(), mode);
     let mut out = Vec::new();
     while let Some(row) = reader.next_row().unwrap() {
         out.push(row);
@@ -160,8 +161,17 @@ fn stream_mode_needs_an_unprefixed_row_and_takes_every_child_element() {
 
 #[test]
 fn rejects_inputs_it_cannot_reproduce() {
+    for mark in [b"\xFF\xFE", b"\xFE\xFF"] {
+        let xml = [mark.as_slice(), br#"<?xml version="1.0" encoding="UTF-8"?><worksheet><sheetData><row><c><v>7</v></c></row></sheetData></worksheet>"#].concat();
+        for mode in [Mode::Document, Mode::Stream] {
+            for capacity in 1..=4 {
+                let input = BufReader::with_capacity(capacity, xml.as_slice());
+                assert!(SheetReader::for_roo(input, mode).next_row().is_err());
+            }
+        }
+    }
     let latin1 = r#"<?xml version="1.0" encoding="ISO-8859-1"?><worksheet/>"#;
-    assert!(SheetReader::new(latin1.as_bytes(), Mode::Document)
+    assert!(SheetReader::for_roo(latin1.as_bytes(), Mode::Document)
         .next_row()
         .is_err());
     for body in [
@@ -173,7 +183,7 @@ fn rejects_inputs_it_cannot_reproduce() {
         let xml =
             format!("<worksheet {NS}><sheetData><row><c>{body}</c></row></sheetData></worksheet>");
         assert!(
-            SheetReader::new(xml.as_bytes(), Mode::Document)
+            SheetReader::for_roo(xml.as_bytes(), Mode::Document)
                 .next_row()
                 .is_err(),
             "{body:?}"
@@ -186,14 +196,14 @@ fn rejects_inputs_it_cannot_reproduce() {
     ] {
         let xml = format!("<worksheet {NS}><sheetData><row>{tag}</row></sheetData></worksheet>");
         assert!(
-            SheetReader::new(xml.as_bytes(), Mode::Document)
+            SheetReader::for_roo(xml.as_bytes(), Mode::Document)
                 .next_row()
                 .is_err(),
             "{tag:?}"
         );
     }
     let truncated = format!("<worksheet {NS}><sheetData><row><c><v>1</v></c></row>");
-    let mut reader = SheetReader::new(truncated.as_bytes(), Mode::Document);
+    let mut reader = SheetReader::for_roo(truncated.as_bytes(), Mode::Document);
     assert!(reader.next_row().unwrap().is_some());
     assert!(
         reader.next_row().is_err(),
@@ -301,7 +311,7 @@ fn rejects_xml_that_is_not_well_formed() {
         ),
     ] {
         for mode in [Mode::Document, Mode::Stream] {
-            let mut reader = SheetReader::new(xml.as_bytes(), mode);
+            let mut reader = SheetReader::for_roo(xml.as_bytes(), mode);
             let read: Result<Vec<RawRow>> =
                 std::iter::from_fn(|| reader.next_row().transpose()).collect();
             assert!(read.is_err(), "{label} ({mode:?})");
@@ -318,13 +328,13 @@ fn rejects_xml_that_is_not_well_formed() {
         ),
     ] {
         assert!(
-            SheetReader::new(xml.as_bytes(), Mode::Document)
+            SheetReader::for_roo(xml.as_bytes(), Mode::Document)
                 .next_rows(9)
                 .is_err(),
             "{label}"
         );
         assert!(
-            SheetReader::new(xml.as_bytes(), Mode::Stream)
+            SheetReader::for_roo(xml.as_bytes(), Mode::Stream)
                 .next_rows(9)
                 .is_ok(),
             "{label} streams"
@@ -341,13 +351,13 @@ fn rejects_xml_that_is_not_well_formed() {
         ),
     ] {
         assert!(
-            SheetReader::new(xml.as_bytes(), Mode::Stream)
+            SheetReader::for_roo(xml.as_bytes(), Mode::Stream)
                 .next_rows(9)
                 .is_err(),
             "{label}"
         );
         assert!(
-            SheetReader::new(xml.as_bytes(), Mode::Document)
+            SheetReader::for_roo(xml.as_bytes(), Mode::Document)
                 .next_rows(9)
                 .is_ok(),
             "{label} in a document"
@@ -366,7 +376,7 @@ fn rejects_xml_that_is_not_well_formed() {
         ("unknown entity in skipped content", "<worksheet><sheetData><row><c r=\"A1\"><v>1</v></c></row></sheetData><ext>&bogus;</ext></worksheet>"),
     ] {
         for mode in [Mode::Document, Mode::Stream] {
-            let mut reader = SheetReader::new(xml.as_bytes(), mode);
+            let mut reader = SheetReader::for_roo(xml.as_bytes(), mode);
             let read: Result<Vec<RawRow>> = std::iter::from_fn(|| reader.next_row().transpose()).collect();
             assert!(read.is_err(), "{label} ({mode:?})");
         }
@@ -376,12 +386,12 @@ fn rejects_xml_that_is_not_well_formed() {
         ("prefixed t in a streamed row", "<worksheet><sheetData><row><c t=\"inlineStr\"><is><x:t xmlns:x=\"urn:other\">hi</x:t></is></c></row></sheetData></worksheet>"),
         ("preserved whitespace in a row", "<worksheet><sheetData><row r=\"1\" xml:space=\"preserve\"> <c r=\"A1\"/> </row></sheetData></worksheet>"),
     ] {
-        assert!(SheetReader::new(xml.as_bytes(), Mode::Stream).next_rows(9).is_err(), "{label}");
-        assert!(SheetReader::new(xml.as_bytes(), Mode::Document).next_rows(9).is_ok(), "{label} in a document");
+        assert!(SheetReader::for_roo(xml.as_bytes(), Mode::Stream).next_rows(9).is_err(), "{label}");
+        assert!(SheetReader::for_roo(xml.as_bytes(), Mode::Document).next_rows(9).is_ok(), "{label} in a document");
     }
     let declared = r#"<x:worksheet xmlns:x="urn:x"><x:sheetData><x:row><x:c r="A1"><x:v>3</x:v></x:c></x:row></x:sheetData></x:worksheet>"#;
     assert_eq!(
-        SheetReader::new(declared.as_bytes(), Mode::Document)
+        SheetReader::for_roo(declared.as_bytes(), Mode::Document)
             .next_rows(9)
             .unwrap()
             .len(),
@@ -389,7 +399,7 @@ fn rejects_xml_that_is_not_well_formed() {
     );
     let scoped = r#"<worksheet><a xmlns:x="urn:x"/><sheetData><x:row/></sheetData></worksheet>"#;
     assert!(
-        SheetReader::new(scoped.as_bytes(), Mode::Document)
+        SheetReader::for_roo(scoped.as_bytes(), Mode::Document)
             .next_rows(9)
             .is_err(),
         "a prefix out of scope"
@@ -399,7 +409,7 @@ fn rejects_xml_that_is_not_well_formed() {
 <!-- c --><?pi ok?><worksheet x="a &amp; b" y='1'>{rows}</worksheet>
 "#
     );
-    let mut reader = SheetReader::new(fine.as_bytes(), Mode::Document);
+    let mut reader = SheetReader::for_roo(fine.as_bytes(), Mode::Document);
     assert_eq!(reader.next_rows(10).unwrap().len(), 1);
 }
 
@@ -408,7 +418,7 @@ fn returns_the_rows_before_an_error_first() {
     let xml = format!(
         "<worksheet {NS}><sheetData><row/><row><c><v>&x;</v></c></row></sheetData></worksheet>"
     );
-    let mut reader = SheetReader::new(xml.as_bytes(), Mode::Document);
+    let mut reader = SheetReader::for_roo(xml.as_bytes(), Mode::Document);
     assert_eq!(reader.next_rows(5).unwrap().len(), 1);
     assert!(reader.next_rows(5).is_err());
 }
@@ -416,7 +426,7 @@ fn returns_the_rows_before_an_error_first() {
 #[test]
 fn batches_rows() {
     let xml = format!("<worksheet {NS}><sheetData><row/><row/><row/></sheetData></worksheet>");
-    let mut reader = SheetReader::new(xml.as_bytes(), Mode::Document);
+    let mut reader = SheetReader::for_roo(xml.as_bytes(), Mode::Document);
     assert_eq!(reader.next_rows(2).unwrap().len(), 2);
     assert_eq!(reader.next_rows(2).unwrap().len(), 1);
     assert!(reader.next_rows(2).unwrap().is_empty());
@@ -424,7 +434,7 @@ fn batches_rows() {
     let xml = format!(
         "<worksheet {NS}><sheetData><row><c/><c/><c/></row><row><c/></row></sheetData></worksheet>"
     );
-    let mut reader = SheetReader::new(xml.as_bytes(), Mode::Document);
+    let mut reader = SheetReader::for_roo(xml.as_bytes(), Mode::Document);
     assert_eq!(
         reader.next_rows(2).unwrap().len(),
         1,
@@ -458,7 +468,7 @@ fn reads_cells_across_buffer_and_parser_boundaries() {
     for mode in [Mode::Document, Mode::Stream] {
         for capacity in 1..=xml.len() {
             let mut reader =
-                SheetReader::new(BufReader::with_capacity(capacity, xml.as_bytes()), mode);
+                SheetReader::for_roo(BufReader::with_capacity(capacity, xml.as_bytes()), mode);
             let row = reader.next_row().unwrap().unwrap();
             assert_eq!(
                 texts(&row),

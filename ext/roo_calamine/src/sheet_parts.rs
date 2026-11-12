@@ -52,7 +52,7 @@ pub struct SheetPartsReader<R: BufRead> {
 impl<R: BufRead> SheetPartsReader<R> {
     pub fn new(input: R) -> Self {
         Self {
-            xml: SheetReader::new(input, Mode::Document),
+            xml: SheetReader::for_roo(input, Mode::Document),
             buf: Vec::new(),
             depth: 0,
             root_is_worksheet: false,

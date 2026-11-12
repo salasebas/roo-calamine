@@ -24,7 +24,9 @@ errors << "requires roo #{spec.dependencies.find { |d| d.name == "roo" }&.requir
 
 if platform == "ruby"
   errors << "extensions are #{spec.extensions}" unless spec.extensions == ["ext/roo_calamine/extconf.rb"]
-  %w[ext/roo_calamine/src/lib.rs Cargo.toml Cargo.lock].each do |f|
+  %w[ext/roo_calamine/src/lib.rs vendor/calamine/Cargo.toml
+     vendor/calamine/LICENSE-MIT.md vendor/calamine/UPSTREAM
+     vendor/calamine/src/roo/mod.rs Cargo.toml Cargo.lock].each do |f|
     errors << "#{f} is missing" unless files.include?(f)
   end
   errors << "carries a compiled binary" if files.grep(/\.(so|bundle|dll)\z/).any?

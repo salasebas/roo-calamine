@@ -29,6 +29,8 @@ Gem::Specification.new do |spec|
     "lib/**/*.rb",
     "ext/roo_calamine/{Cargo.toml,extconf.rb}",
     "ext/roo_calamine/src/**/*.rs",
+    "vendor/calamine/{Cargo.toml,LICENSE-MIT.md,README.md,Changelog.md,UPSTREAM}",
+    "vendor/calamine/{src,examples,benches}/**/*.rs",
     "Cargo.toml", "Cargo.lock", "LICENSE", "README.md", "CHANGELOG.md"
   ]
   spec.require_paths = ["lib"]

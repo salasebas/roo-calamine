@@ -58,10 +58,14 @@ jobs:
         run: bundle exec rubocop
 
       - name: Lint — Rust format
-        run: cargo fmt --all --check
+        run: |
+          cargo fmt --all --check
+          cargo fmt --manifest-path vendor/calamine/Cargo.toml --check
 
       - name: Lint — Rust clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: |
+          cargo clippy --all-targets -- -D warnings
+          cargo clippy -p calamine --lib -- -D warnings
 
       - name: Lint — Actions
         run: actionlint
@@ -185,6 +189,22 @@ jobs:
 
       - name: Test — cargo test
         run: cargo test
+
+      - name: Checkout pinned Calamine fixtures
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: tafia/calamine
+          ref: a4dba3b5309d81b2774018a13be39e68d938c3c7
+          path: tmp/calamine-upstream
+          persist-credentials: false
+
+      - name: Test — shared Calamine core
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        run: |
+          ruby script/calamine_patch.rb tmp/calamine-upstream > tmp/calamine.patch
+          git -C tmp/calamine-upstream apply ../calamine.patch
+          cargo test --manifest-path tmp/calamine-upstream/Cargo.toml
 
   test-jruby:
     name: test-jruby
