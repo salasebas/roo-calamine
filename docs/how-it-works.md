@@ -32,8 +32,8 @@ iteration read values from the records. Inline and `t="str"` links become
 `Roo::Link` values without a full cell; shared-string links still build one.
 
 A value already returned stays the same object when its full cell is built.
-Requesting `Sheet#cells`, writing with `set`, or cleaning the sheet builds
-the whole cell hash. Sheets with merged-range expansion, or a cell that would
+Requesting `Sheet#cells` or writing with `set` builds the whole cell hash.
+Sheets with merged-range expansion, or a cell that would
 raise, are also built whole.
 
 Link targets and single-cell references are read natively. Metadata uses the
@@ -47,7 +47,10 @@ exist, large sheets use a row index. A block that writes, reloads, or changes
 the active sheet sees that change on the next row, as in roo.
 
 Header queries and `parse` retain roo's header handling. Each row hash comes
-from the native records; `clean: true` first builds the full cells.
+from the native records. `clean: true` applies roo's sanitizer once per string
+and keeps cleaned values separate from raw cell values. Later reads and cell
+materialization preserve roo's `value` and `cell_value` behavior. Sheets
+already built whole use roo's cleaning loop.
 
 `each_row_streaming` returns roo cells and preserves its padding, offsets,
 and row limits. `Roo::Calamine.each_row_values` returns the same values as a

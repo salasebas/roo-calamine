@@ -89,6 +89,14 @@ module Roo
 
       private
 
+      def clean_sheet(name)
+        store = sheet_for(name).lazy_cells if Calamine.enabled?
+        return super unless store
+
+        store.clean(self)
+        @cleaned[name] = true
+      end
+
       def each_with_headers(headers)
         first, last = headers.map(&:last).minmax
         slots = headers.map { |key, column| [key, column - first] }
