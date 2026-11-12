@@ -80,6 +80,7 @@ if RUBY_ENGINE == "ruby"
   Roo::Excelx::SheetDoc.prepend(Roo::Calamine::DeferredSheetDoc)
   Roo::Excelx::SheetDoc.prepend(Roo::Calamine::SheetDoc)
   Roo::Excelx::SheetDoc.prepend(Roo::Calamine::SheetParts)
+  Roo::Excelx::Relationships.prepend(Roo::Calamine::HyperlinkRelationships)
   Roo::Excelx::Sheet.prepend(Roo::Calamine::Sheet)
   Roo::Excelx.prepend(Roo::Calamine::DeferredSheets)
   Roo::Excelx.prepend(Roo::Calamine::Excelx)

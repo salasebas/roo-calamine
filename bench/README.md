@@ -47,11 +47,8 @@ call with `samply record`.
 ## Results
 
 Apple M5 Pro, Ruby 3.4.12, roo 4.0.0, calx 0.1.0, xsv 1.4.1.
-- **roo-calamine:** the median of 5 runs on 2660f9a.
-- **roo and calx:** from the same machine on 65bd561. Neither changes with
-  roo-calamine.
-- **roo's `to_yaml`, `to_xml`, and `to_matrix`, and xsv:** 3–10 runs on
-  7250ff9.
+Iteration timings use five fresh processes per scenario. Other rows keep
+their earlier measurements.
 
 [RESULTS.md](RESULTS.md) has every other scenario and file.
 
@@ -59,12 +56,12 @@ Apple M5 Pro, Ruby 3.4.12, roo 4.0.0, calx 0.1.0, xsv 1.4.1.
 
 | Scenario | roo 4.0.0 | roo + roo-calamine | Faster | calx 0.1.0 | xsv 1.4.1 |
 |---|---:|---:|---:|---:|---:|
-| `each_row_streaming` | 13.49 s · 119 MB | **0.59 s · 51 MB** | 23× | 0.52 s · 178 MB | 9.66 s · 51 MB |
+| `each_row_streaming` | 13.49 s · 119 MB | **0.55 s · 51 MB** | 24.6× | 0.52 s · 179 MB | 9.66 s · 51 MB |
 | `parse(headers: true)` | 19.61 s · 3300 MB | **0.75 s · 282 MB** | 26× | 0.71 s · 290 MB | 11.18 s · 203 MB |
-| `each` | 18.81 s · 3282 MB | **0.62 s · 174 MB** | 30× | 0.45 s · 178 MB | 9.77 s · 51 MB |
+| `each` | 18.81 s · 3282 MB | **0.57 s · 176 MB** | 33.1× | 0.45 s · 179 MB | 9.77 s · 51 MB |
 | 10,000 random `cell(row, col)` | 17.25 s · 3272 MB | **0.48 s · 104 MB** | 36× | 0.51 s · 250 MB | 10.89 s · 172 MB |
 | `to_csv` | 21.72 s · 3369 MB | **0.77 s · 118 MB** | 28× | 0.66 s · 178 MB | 9.85 s · 50 MB |
-| values only: `each_row_values` | 13.43 s · 118 MB | **0.44 s · 47 MB** | 31× | 0.52 s · 178 MB | 9.65 s · 51 MB |
+| values only: `each_row_values` | 13.43 s · 118 MB | **0.43 s · 48 MB** | 31.3× | 0.51 s · 179 MB | 9.65 s · 51 MB |
 | `to_yaml` | 24.26 s · 3430 MB | **1.28 s · 322 MB** | 19× | — | — |
 | `to_xml` | 50.81 s · 3991 MB | **1.04 s · 711 MB** | 49× | — | — |
 | `to_matrix` | 19.97 s · 3287 MB | **0.65 s · 216 MB** | 31× | — | — |
@@ -73,9 +70,9 @@ Apple M5 Pro, Ruby 3.4.12, roo 4.0.0, calx 0.1.0, xsv 1.4.1.
 
 | Scenario | roo 4.0.0 | roo + roo-calamine | Faster | calx 0.1.0 | xsv 1.4.1 |
 |---|---:|---:|---:|---:|---:|
-| `each_row_streaming` | 4.92 s · 121 MB | **0.26 s · 52 MB** | 19× | 0.24 s · 114 MB | 4.19 s · 48 MB |
+| `each_row_streaming` | 4.92 s · 121 MB | **0.24 s · 53 MB** | 20.4× | 0.24 s · 114 MB | 4.19 s · 48 MB |
 | `parse(headers: true)` | 6.02 s · 1630 MB | **0.34 s · 117 MB** | 18× | 0.33 s · 208 MB | 4.72 s · 108 MB |
-| `each` | 5.66 s · 1631 MB | **0.27 s · 74 MB** | 21× | 0.20 s · 113 MB | 4.26 s · 54 MB |
+| `each` | 5.66 s · 1631 MB | **0.24 s · 79 MB** | 23.5× | 0.20 s · 114 MB | 4.26 s · 54 MB |
 | 10,000 random `cell(row, col)` | 4.93 s · 1602 MB | **0.22 s · 71 MB** | 22× | 0.22 s · 167 MB | 4.68 s · 85 MB |
 | `to_csv` | 7.17 s · 1619 MB | **0.25 s · 88 MB** | 29× | 0.22 s · 114 MB | 4.28 s · 51 MB |
 | values only: `each_row_values` | 5.12 s · 120 MB | **0.19 s · 50 MB** | 27× | 0.24 s · 113 MB | 4.33 s · 49 MB |
@@ -87,9 +84,9 @@ Apple M5 Pro, Ruby 3.4.12, roo 4.0.0, calx 0.1.0, xsv 1.4.1.
 
 | Scenario | roo 4.0.0 | roo + roo-calamine | Faster | calx 0.1.0 | xsv 1.4.1 |
 |---|---:|---:|---:|---:|---:|
-| `each_row_streaming` | 10.27 s · 933 MB | **0.48 s · 250 MB** | 21× | 0.38 s · 152 MB | 14.88 s · 254 MB |
+| `each_row_streaming` | 10.27 s · 933 MB | **0.47 s · 254 MB** | 22.0× | 0.37 s · 152 MB | 14.88 s · 254 MB |
 | `parse(headers: true)` | 9.07 s · 2327 MB | **0.58 s · 211 MB** | 16× | 0.47 s · 206 MB | 15.18 s · 347 MB |
-| `each` | 8.80 s · 2262 MB | **0.48 s · 170 MB** | 18× | 0.34 s · 152 MB | 11.21 s · 248 MB |
+| `each` | 8.80 s · 2262 MB | **0.44 s · 174 MB** | 20.0× | 0.34 s · 152 MB | 11.21 s · 248 MB |
 | 10,000 random `cell(row, col)` | 8.49 s · 2213 MB | **0.42 s · 157 MB** | 20× | 0.36 s · 206 MB | 14.89 s · 295 MB |
 | `to_csv` | 10.40 s · 2366 MB | **0.48 s · 175 MB** | 22× | 0.37 s · 153 MB | 10.09 s · 286 MB |
 | values only: `each_row_values` | 10.32 s · 925 MB | **0.38 s · 160 MB** | 27× | 0.37 s · 152 MB | 10.06 s · 265 MB |
@@ -101,9 +98,9 @@ Apple M5 Pro, Ruby 3.4.12, roo 4.0.0, calx 0.1.0, xsv 1.4.1.
 
 | Scenario | roo 4.0.0 | roo + roo-calamine | Faster | calx 0.1.0 | xsv 1.4.1 |
 |---|---:|---:|---:|---:|---:|
-| `each_row_streaming` | 15.9 ms · 45 MB | **2.1 ms · 41 MB** | 7.6× | 0.7 ms · 27 MB | 11.5 ms · 42 MB |
+| `each_row_streaming` | 15.9 ms · 45 MB | **2.0 ms · 42 MB** | 8.0× | 0.7 ms · 27 MB | 11.5 ms · 42 MB |
 | `parse(headers: true)` | 12.8 ms · 45 MB | **2.0 ms · 41 MB** | 6.4× | 0.7 ms · 27 MB | 11.5 ms · 42 MB |
-| `each` | 12.4 ms · 45 MB | **1.9 ms · 40 MB** | 6.5× | 0.6 ms · 27 MB | 11.4 ms · 42 MB |
+| `each` | 12.4 ms · 45 MB | **1.9 ms · 42 MB** | 6.7× | 0.6 ms · 27 MB | 11.4 ms · 42 MB |
 | 10,000 random `cell(row, col)` | 19.4 ms · 46 MB | **7.5 ms · 41 MB** | 2.6× | 1.5 ms · 27 MB | 12.5 ms · 43 MB |
 | `to_csv` | 15.3 ms · 46 MB | **2.1 ms · 41 MB** | 7.3× | 0.8 ms · 27 MB | 12.9 ms · 42 MB |
 | values only: `each_row_values` | 16.2 ms · 45 MB | **1.9 ms · 41 MB** | 8.5× | 0.7 ms · 27 MB | 13.9 ms · 43 MB |

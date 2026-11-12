@@ -8,6 +8,7 @@ mod csv;
 pub use csv::CsvOutput;
 
 use std::cell::{Cell as StdCell, RefCell};
+use std::collections::HashMap;
 use std::os::raw::c_int;
 
 use magnus::encoding::{self, EncodingCapable};
@@ -126,6 +127,8 @@ pub struct Converter {
     build_cells: bool,
     context: Opaque<Value>,
     hyperlinks: Option<Opaque<RHash>>,
+    /// Document reads snapshot hyperlinks; streams keep roo's live hash.
+    link_index: Option<HashMap<(i64, i64), Opaque<Value>>>,
     base_date: Opaque<Value>,
     base_timestamp: Opaque<Value>,
     /// `base_timestamp`, when it is an integer a double holds exactly.
@@ -152,6 +155,11 @@ impl DataTypeFunctions for Converter {
         marker.mark(self.context);
         if let Some(hyperlinks) = self.hyperlinks {
             marker.mark(hyperlinks);
+        }
+        if let Some(index) = &self.link_index {
+            for value in index.values() {
+                marker.mark(*value);
+            }
         }
         marker.mark(self.base_date);
         marker.mark(self.base_timestamp);
@@ -207,6 +215,27 @@ impl Converter {
     pub fn new(ruby: &Ruby, context: Value, stream: bool) -> Result<Self, Error> {
         let hyperlinks: RHash = context.funcall("hyperlinks", ())?;
         let base_timestamp: Value = context.funcall("base_timestamp", ())?;
+        let mut link_index = (!stream).then(HashMap::new);
+        hyperlinks.foreach(|key: Value, value: Value| {
+            if let Some(index) = &mut link_index {
+                let key = RArray::from_value(key).filter(|key| key.len() == 2);
+                let coordinate = key.and_then(|key| {
+                    let row = magnus::Integer::from_value(key.entry(0).ok()?)?;
+                    let column = magnus::Integer::from_value(key.entry(1).ok()?)?;
+                    Some((
+                        i64::try_convert(row.as_value()).ok()?,
+                        i64::try_convert(column.as_value()).ok()?,
+                    ))
+                });
+                match coordinate {
+                    Some(key) => {
+                        index.insert(key, value.into());
+                    }
+                    None => link_index = None,
+                }
+            }
+            Ok(magnus::r_hash::ForEach::Continue)
+        })?;
         Ok(Self {
             mode: if stream { Mode::Stream } else { Mode::Document },
             empty_cell: context.funcall::<_, _, Value>("empty_cell", ())?.to_bool(),
@@ -215,6 +244,7 @@ impl Converter {
                 .to_bool(),
             context: context.into(),
             hyperlinks: (!hyperlinks.is_empty()).then(|| hyperlinks.into()),
+            link_index,
             base_date: context.funcall::<_, _, Value>("base_date", ())?.into(),
             base_timestamp: base_timestamp.into(),
             base_seconds: i64::try_convert(base_timestamp)
@@ -325,15 +355,40 @@ impl Converter {
         }
     }
 
-    /// `SheetDoc#each_cell` for a streamed row: every cell, empty ones too.
-    pub fn row_cells(ruby: &Ruby, rb_self: &Self, row: &crate::Row) -> Result<RArray, Error> {
+    /// Streamed cells, with optional nil padding. `None` when padding needs
+    /// roo's coordinate or constructor rules.
+    pub fn row_cells(
+        ruby: &Ruby,
+        rb_self: &Self,
+        row: &crate::Row,
+        pad: bool,
+    ) -> Result<Option<RArray>, Error> {
+        if pad
+            && (!rb_self.build_cells
+                || row
+                    .raw()
+                    .cells
+                    .iter()
+                    .any(|raw| !matches!(raw.reference, Reference::At { .. })))
+        {
+            return Ok(None);
+        }
         let cells = ruby.ary_new_capa(row.raw().cells.len());
+        let mut last_column = 0;
         for (index, raw) in row.raw().cells.iter().enumerate() {
             if let Some((_, cell)) = rb_self.cell(ruby, &row.raw().text, raw, 0, index + 1, None)? {
+                if pad {
+                    if let Reference::At { column, .. } = raw.reference {
+                        for _ in last_column + 1..column {
+                            cells.push(ruby.qnil())?;
+                        }
+                        last_column = column;
+                    }
+                }
                 cells.push(cell)?;
             }
         }
-        Ok(cells)
+        Ok(Some(cells))
     }
 
     /// `SheetDoc#extract_cells` for one row, adding to `cells`.
@@ -405,12 +460,24 @@ impl Converter {
     }
 
     pub fn has_link(&self, ruby: &Ruby, row: i64, column: i64) -> bool {
+        !self.link_at(ruby, row, column).is_nil()
+    }
+
+    fn link_at(&self, ruby: &Ruby, row: i64, column: i64) -> Value {
+        if let Some(index) = &self.link_index {
+            return index
+                .get(&(row, column))
+                .map(|value| ruby.get_inner(*value))
+                .unwrap_or_else(|| ruby.qnil().as_value());
+        }
         let Some(hyperlinks) = self.hyperlinks else {
-            return false;
+            return ruby.qnil().as_value();
         };
         let key =
             ruby.ary_new_from_values(&[row.into_value_with(ruby), column.into_value_with(ruby)]);
-        ruby.get_inner(hyperlinks).get(key).is_some()
+        ruby.get_inner(hyperlinks)
+            .get(key)
+            .unwrap_or_else(|| ruby.qnil().as_value())
     }
 
     /// `cell&.presence` for the cell [`Self::cell`] builds for `raw`, when it

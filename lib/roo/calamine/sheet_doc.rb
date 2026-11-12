@@ -5,8 +5,7 @@ module Roo
     # Prepended to Roo::Excelx::SheetDoc, where every worksheet read in roo
     # starts: Sheet#cells (and with it #row, #each, #parse), the lazy cells
     # behind Excelx#cell and the other single-cell lookups, and Sheet#each_row
-    # (#each_row_streaming). Everything else, including roo's padding, offset,
-    # and row limits, stays roo's code.
+    # (#each_row_streaming). Offsets and row limits stay roo's code.
     module SheetDoc
       # Cells the native reader parses ahead of Ruby, per batch.
       BATCH_CELLS = 16_384
@@ -59,15 +58,15 @@ module Roo
       def each_cell(row_xml, &)
         return super unless row_xml.is_a?(Native::Row)
 
-        calamine_stream_converter.row_cells(row_xml).each(&)
+        calamine_stream_converter.row_cells(row_xml, false).each(&)
       end
 
       # The cells #each_cell yields for a Native::Row, as a new Array; nil for
-      # rows roo reads itself and when #each_cell is not this module's.
-      def native_row_cells(row)
+      # rows roo reads itself, custom #each_cell, or roo-only padding.
+      def native_row_cells(row, pad_cells: false)
         return unless row.is_a?(Native::Row) && method(:each_cell).owner.equal?(SheetDoc)
 
-        calamine_stream_converter.row_cells(row)
+        calamine_stream_converter.row_cells(row, pad_cells)
       end
 
       # Roo::Calamine.each_row_values. `sheet` is the Roo::Excelx::Sheet that

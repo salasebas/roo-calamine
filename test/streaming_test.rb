@@ -10,6 +10,10 @@ class StreamingTest < Minitest::Test
     def each_cell(row) = super { |cell| yield cell unless cell.value == 2 }
   end
 
+  EXTRA_PADDING = Module.new do
+    def pad_cells(cell, last_column) = super + [nil]
+  end
+
   def setup
     @dir = Dir.mktmpdir("roo-calamine")
   end
@@ -29,5 +33,18 @@ class StreamingTest < Minitest::Test
         Oracle.describe_stream(xlsx, options)
       end
     end
+  end
+
+  def test_streaming_rows_keep_custom_padding
+    sheet = Workbook.sheet(%(<row r="1"><c r="A1"><v>1</v></c><c r="C1"><v>3</v></c></row>))
+    path = Workbook.write(@dir, "padding", sheets: { "Sheet1" => sheet })
+    read = lambda do
+      xlsx = Roo::Excelx.new(path)
+      xlsx.sheet_for(nil).singleton_class.prepend(EXTRA_PADDING)
+      Oracle.describe_stream(xlsx, pad_cells: true)
+    end
+
+    assert_equal :ok, Oracle.read(native: false, &read).first.first
+    assert_same_as_roo("custom padding", &read)
   end
 end

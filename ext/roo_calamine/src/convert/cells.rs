@@ -4,7 +4,7 @@
 //! otherwise, and for any value it does not compute exactly the way roo
 //! does, it calls roo's constructor with the same arguments.
 
-use magnus::rb_sys::{AsRawId, AsRawValue};
+use magnus::rb_sys::{AsRawId, AsRawValue, FromRawValue};
 use magnus::value::{IntoId, Lazy, LazyId, ReprValue};
 use magnus::{prelude::*, Error, IntoValue, RArray, RClass, RObject, RString, Ruby, Value};
 
@@ -16,6 +16,7 @@ use crate::numeric::{create_numeric, leading_integer};
 use crate::reader::{Body, Kind, Mode, RawCell, Reference};
 
 static TIME: Lazy<RClass> = Lazy::new(|r| r.class_time());
+static LINK: Lazy<RClass> = Lazy::new(|r| r.eval("Roo::Link").expect("roo defines Roo::Link"));
 
 static CELL_VALUE: LazyId = LazyId::new("@cell_value");
 static CELL_TYPE: LazyId = LazyId::new("@cell_type");
@@ -72,11 +73,15 @@ impl Converter {
         if !self.build_cells {
             return class.new_instance((row, column));
         }
-        let coordinate = RArray::from_value(class.obj_alloc()?).expect("Coordinate is an Array");
-        coordinate.push(row)?;
-        coordinate.push(column)?;
-        coordinate.freeze();
-        Ok(coordinate.as_value())
+        let row = row.into_value_with(ruby);
+        let column = column.into_value_with(ruby);
+        let coordinate = magnus::rb_sys::protect(|| unsafe {
+            let coordinate = rb_sys::rb_obj_alloc(class.as_raw());
+            rb_sys::rb_ary_push(coordinate, row.as_raw());
+            rb_sys::rb_ary_push(coordinate, column.as_raw());
+            rb_sys::rb_obj_freeze(coordinate)
+        })?;
+        Ok(unsafe { Value::from_raw(coordinate) })
     }
 
     /// Builds the cell `SheetDoc#cell_from_xml` builds for `raw`. `None` means
@@ -117,8 +122,10 @@ impl Converter {
                 }
             }
             Body::Inline(text) => {
-                let value = known.unwrap_or_else(|| ruby.str_new(&buffer[text.clone()]).as_value());
-                self.string(ruby, value, &common)?
+                let value = known
+                    .filter(|_| !common.link.to_bool())
+                    .unwrap_or_else(|| ruby.str_new(&buffer[text.clone()]).as_value());
+                self.string(ruby, value, &common, known)?
             }
             // roo looks up the style format for every `v` cell, which raises when
             // the workbook has no styles part, so this does too.
@@ -127,12 +134,14 @@ impl Converter {
                 match (raw.kind, self.style_info(ruby, style)?) {
                     (Kind::Shared, _) => {
                         let value = self.shared_string(ruby, text)?;
-                        self.string(ruby, value, &common)?
+                        self.string(ruby, value, &common, known)?
                     }
                     (Kind::Boolean, _) => self.boolean(ruby, text, &common)?,
                     (Kind::Str, _) => {
-                        let value = known.unwrap_or_else(|| ruby.str_new(text).as_value());
-                        self.string(ruby, value, &common)?
+                        let value = known
+                            .filter(|_| !common.link.to_bool())
+                            .unwrap_or_else(|| ruby.str_new(text).as_value());
+                        self.string(ruby, value, &common, known)?
                     }
                     (kind, (format, format_type, number_format)) => {
                         let value_type = if kind == Kind::InlineStr {
@@ -161,8 +170,18 @@ impl Converter {
         let Reference::At { row, column } = raw.reference else {
             return Ok(None);
         };
-        if !self.build_cells || self.has_link(ruby, row, column) {
+        if !self.build_cells {
             return Ok(None);
+        }
+        let link = self.link_at(ruby, row, column);
+        if link.to_bool() {
+            let value = match (&raw.body, raw.kind) {
+                (Body::Inline(text), _) | (Body::Value(text), Kind::Str) => {
+                    ruby.str_new(&buffer[text.clone()]).as_value()
+                }
+                _ => return Ok(None),
+            };
+            return ruby.get_inner(&LINK).new_instance((link, value)).map(Some);
         }
         let text = match &raw.body {
             Body::Empty => return Ok(Some(ruby.qnil().as_value())),
@@ -192,10 +211,9 @@ impl Converter {
         Ok(self.computed(ruby, numeric, text)?.map(|(value, _)| value))
     }
 
-    /// Whether this cell can be built without its constructor: a link makes
-    /// roo wrap the value in a `Roo::Link`, which its constructor does.
+    /// Non-text cells with a truthy link keep roo's link constructors.
     fn builds(&self, common: &Common) -> bool {
-        self.build_cells && common.link.is_nil()
+        self.build_cells && !common.link.to_bool()
     }
 
     fn allocate(ruby: &Ruby, class: &Lazy<RClass>) -> Result<RObject, Error> {
@@ -214,7 +232,7 @@ impl Converter {
         value: Value,
         rest: &[(&LazyId, Value)],
     ) -> Result<Value, Error> {
-        let cell = Self::allocate(ruby, class)?;
+        let class = ruby.get_inner(class);
         let fields = [
             Some((*CELL_VALUE, cell_value)),
             cell_type.map(|value| (*CELL_TYPE, value.as_value())),
@@ -223,30 +241,37 @@ impl Converter {
             Some((*COORDINATE_IVAR, common.coordinate)),
             Some((*VALUE, value)),
         ];
-        magnus::rb_sys::protect(|| unsafe {
+        let cell = magnus::rb_sys::protect(|| unsafe {
+            let cell = rb_sys::rb_obj_alloc(class.as_raw());
             for (name, value) in fields.into_iter().flatten() {
-                rb_sys::rb_ivar_set(
-                    cell.as_raw(),
-                    name.into_id_with(ruby).as_raw(),
-                    value.as_raw(),
-                );
+                rb_sys::rb_ivar_set(cell, name.into_id_with(ruby).as_raw(), value.as_raw());
             }
             for (name, value) in rest {
-                rb_sys::rb_ivar_set(
-                    cell.as_raw(),
-                    (***name).into_id_with(ruby).as_raw(),
-                    value.as_raw(),
-                );
+                rb_sys::rb_ivar_set(cell, (***name).into_id_with(ruby).as_raw(), value.as_raw());
             }
-            cell.as_raw()
+            cell
         })?;
-        Ok(cell.as_value())
+        Ok(unsafe { Value::from_raw(cell) })
     }
 
     /// `Cell::String.new(value, formula, style, link, coordinate)`.
-    fn string(&self, ruby: &Ruby, value: Value, common: &Common) -> Result<Value, Error> {
-        if self.builds(common) {
-            return Self::build_cell(ruby, &CELL_STRING, value, None, common, value, &[]);
+    fn string(
+        &self,
+        ruby: &Ruby,
+        value: Value,
+        common: &Common,
+        known: Option<Value>,
+    ) -> Result<Value, Error> {
+        if self.build_cells {
+            let result = if !common.link.to_bool() {
+                value
+            } else {
+                match known {
+                    Some(link) => link,
+                    None => ruby.get_inner(&LINK).new_instance((common.link, value))?,
+                }
+            };
+            return Self::build_cell(ruby, &CELL_STRING, value, None, common, result, &[]);
         }
         let Common {
             formula,
