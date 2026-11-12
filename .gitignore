@@ -3,6 +3,7 @@
 /tmp/
 /target/
 /bench/fixtures/
+/bench/profiles/
 /bench/Gemfile.lock
 *.bundle
 *.so

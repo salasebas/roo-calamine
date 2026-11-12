@@ -1,19 +1,27 @@
 # Benchmarks
 
-`run.rb` compares plain roo, roo with roo-calamine, and
-[calx](https://github.com/7a6163/calx) on four generated workbooks.
+`run.rb` compares plain roo, roo with roo-calamine,
+[calx](https://github.com/7a6163/calx), and [xsv](https://github.com/martijn/xsv)
+on generated workbooks.
 
 ## Run it
 
 ```sh
 cd bench && bundle install
-bundle exec ruby run.rb                  # every library, 3–10 runs per scenario, stopping after 10 s
+bundle exec ruby run.rb                  # the tables below, 3–10 runs per scenario, stopping after 10 s
 bundle exec ruby run.rb 5 roo-calamine   # 5 runs, and only the libraries named
+bundle exec ruby run.rb --scenario row,column --fixture mixed-100k roo-calamine  # only these rows
+bundle exec ruby run.rb --group single-cell                  # only this group
+bundle exec ruby run.rb --all                                # every scenario on every file, as in RESULTS.md
+bundle exec ruby run.rb --profile each-headers mixed-100k    # vernier profile and allocations
 bundle exec ruby scenario.rb roo-calamine yaml fixtures/mixed-100k.xlsx  # one run of one scenario
 ```
 
-`run.rb` writes the fixtures on its first run (`generate.rb`). Append `digest`
-to a `scenario.rb` call to hash every value it reads.
+`run.rb` writes the fixtures it needs (`generate.rb`). Append `digest` to a
+`scenario.rb` call to hash every value it reads. `run.rb --help` lists the
+groups: `default`, `open`, `rows`, `single-cell`, `iteration`, `builders`,
+`writes`, `metadata`, and `options`. For the Rust side, record a `scenario.rb`
+call with `samply record`.
 
 ## Method
 
@@ -25,12 +33,16 @@ to a `scenario.rb` call to hash every value it reads.
   they read, and the run stops if the two hashes differ.
 - **Values only:** plain roo runs `each_row_streaming(pad_cells: true)` and
   reads each cell's value.
-- **calx** is a reference, not a drop-in replacement:
-  - its values follow its own rules: a whole number is an Integer whatever
-    the cell's format, a date with a time is a local `Time`, and there are no
-    roo cells or `Roo::Link`s;
-  - it loads the whole sheet before it yields the first row;
-  - it has no `to_yaml`, `to_xml`, or `to_matrix`.
+- **Flags:** a row is flagged when roo-calamine is less than 5× faster than
+  roo, or more than 1.2× slower than calx.
+  [RESULTS.md](RESULTS.md#flagged) says why for each one.
+- **calx and xsv** are references, not drop-in replacements:
+  - their values follow their own rules: calx makes a whole number an
+    Integer whatever the cell's format and a date with a time a local
+    `Time`, and neither has roo cells or `Roo::Link`s;
+  - calx loads the whole sheet before it yields the first row;
+  - neither has `to_yaml`, `to_xml`, or `to_matrix`, and random `cell` reads
+    load every row first.
 
 ## Results
 
