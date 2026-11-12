@@ -1083,6 +1083,16 @@ class EdgeCasesTest < Minitest::Test
     end
   end
 
+  def test_utf16_marks_on_utf8_xml_fall_back_to_roo
+    xml = Workbook.sheet(%(<row r="1"><c r="A1"><v>7</v></c></row>)).b
+    ["\xFF\xFE".b, "\xFE\xFF".b].each_with_index do |mark, index|
+      path = Workbook.write(@dir, "byte_order_mark#{index}", sheets: { "Sheet1" => mark + xml })
+
+      assert_nil roo_cell(path, 1, 1)
+      assert_every_path_same_as_roo(path, native_only: false)
+    end
+  end
+
   def test_kill_switch_restores_roo
     path = write(%(<row r="1"><c r="A1"><v>1</v></c></row>))
 

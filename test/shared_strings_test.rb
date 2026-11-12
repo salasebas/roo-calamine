@@ -301,6 +301,8 @@ class SharedStringsTest < Minitest::Test
     main = %(xmlns="#{Workbook::MAIN}")
     parts = [
       %(<!DOCTYPE sst [<!ENTITY e "entity">]><sst #{main}><si><t>&e;</t></si></sst>),
+      "\xFF\xFE".b + %(<sst #{main}><si><t>wrong</t></si></sst>).b,
+      "\xFE\xFF".b + %(<sst #{main}><si><t>wrong</t></si></sst>).b,
       %(<?xml version="1.0" encoding="ISO-8859-1"?><sst #{main}><si><t>caf\xE9</t></si></sst>).b,
       %(<sst #{main}><si><t>&bogus;</t></si></sst>),
       %(<sst #{main}><si><t>truncated</t></si><si><t>a),

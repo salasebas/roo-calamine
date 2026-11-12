@@ -1,5 +1,10 @@
 # roo-calamine
 
+> **Experiment branch:** this candidate shares Calamine's existing XLSX
+> reader. It preserves the Roo tests but adds owned code and regresses several
+> reads against main. [Evaluation and recommendation](docs/calamine-shared-reader.md).
+> The performance figures below describe the current architecture on main.
+
 Make [roo](https://github.com/roo-rb/roo) read `.xlsx` and `.xlsm` files
 **16–36× faster** on large sheets, with **2–31× less memory** and identical
 results. Your roo code does not change.
@@ -29,7 +34,7 @@ without Bundler, `require "roo/calamine"`.
 | Ruby | CRuby 3.3, 3.4, 4.0 |
 | roo | `~> 4.0` |
 | Precompiled | Linux x86_64/aarch64 (glibc, musl), macOS x86_64/arm64, Windows x64 |
-| Other platforms | the source gem compiles with Rust 1.86 or later |
+| Other platforms | the source gem compiles with Rust 1.88 or later |
 | JRuby | installs without Rust and stays inert: roo reads every file itself |
 
 ## Benchmarks
@@ -116,9 +121,9 @@ a Rust extension and returns the objects roo would return, or hands the call
 back to roo.
 
 - **Opening:** worksheets stay in the zip until they are read.
-- **Parsing:** worksheet XML is streamed with
-  [quick-xml](https://github.com/tafia/quick-xml) instead of loaded into a
-  Nokogiri document.
+- **Parsing:** a pinned [Calamine](https://github.com/tafia/calamine) fork
+  streams worksheet XML through its existing XLSX cell reader and quick-xml.
+  Its raw mode keeps the numeric spelling and metadata Roo needs.
 - **Lazy cells:** the sheet lives in compact native records, and a
   `Roo::Excelx::Cell` is built only when something reads it.
 - **Output:** `to_csv`, `to_yaml`, `to_xml`, and `to_matrix` are written from

@@ -1,0 +1,52 @@
+{
+  "baseline": "194b149d64a2682fa43fc54319a640dfe4eb300e",
+  "before": 6783,
+  "remaining": 5627,
+  "fork_new": 942,
+  "fork_upstream_added": 292,
+  "fork_upstream_deleted": 246,
+  "owned_after": 6861,
+  "net_saved": -78,
+  "fork": {
+    "src/lib.rs": {
+      "added": 1,
+      "deleted": 0,
+      "new": false
+    },
+    "src/roo/attributes.rs": {
+      "added": 199,
+      "deleted": 0,
+      "new": true
+    },
+    "src/roo/mod.rs": {
+      "added": 275,
+      "deleted": 0,
+      "new": true
+    },
+    "src/roo/xml.rs": {
+      "added": 284,
+      "deleted": 0,
+      "new": true
+    },
+    "src/utils.rs": {
+      "added": 1,
+      "deleted": 1,
+      "new": false
+    },
+    "src/xlsx/cells_reader.rs": {
+      "added": 236,
+      "deleted": 207,
+      "new": false
+    },
+    "src/xlsx/cells_reader/compat.rs": {
+      "added": 184,
+      "deleted": 0,
+      "new": true
+    },
+    "src/xlsx/mod.rs": {
+      "added": 54,
+      "deleted": 38,
+      "new": false
+    }
+  }
+}

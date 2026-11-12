@@ -1,0 +1,21 @@
+{
+  "upstream_from": "f2c5948242fdfe390e292313a1f87f9db19b9633",
+  "upstream_to": "a4dba3b5309d81b2774018a13be39e68d938c3c7",
+  "fork_from": "7b9ac8612db7a74d4c953f858af8fa1c4d2846bf",
+  "merge": "978533273500dc399560ee9791ce9519b128f830",
+  "conflict_hunks": 2,
+  "conflict_files": [
+    "src/lib.rs",
+    "src/xlsx/mod.rs"
+  ],
+  "manual_integration": [
+    "combine module imports in both conflict hunks",
+    "replace the newly added next_cell_with_style_id loop with a call to the shared core",
+    "initialize the new styles field in for_roo"
+  ],
+  "merge_session_seconds": 74,
+  "timing_scope": "Git commit timestamps, including interactive waits and a discarded resolution-script retry; excludes initial 0.37 port and compilation/tests. Not a clean estimate of future upgrade effort.",
+  "before_tests": "232 pass, 1 skipped; 66 doctests pass",
+  "after_tests": "318 pass, 1 skipped; 67 doctests pass",
+  "post_merge_fix": "One stock-only value reset plus its regression test added after the merge; all Rust source files in the validated checkout match the final candidate."
+}

@@ -9,11 +9,18 @@ files go through roo's own reader.
 | roo 4.0.0 | roo-calamine |
 |---|---|
 | Extracts every worksheet when opening a workbook | Leaves worksheets in a ZIP snapshot until needed |
-| Loads worksheet XML into Nokogiri and walks it with XPath | Reads rows with [quick-xml](https://github.com/tafia/quick-xml) |
+| Loads worksheet XML into Nokogiri and walks it with XPath | Streams raw rows through the Calamine fork's XLSX cell reader |
 | Builds every cell before reading the sheet | Keeps compact records and builds cells when requested |
 | Writes whole-sheet output through repeated cell lookups | Visits the native records in order |
 
 Styles, formats, comments, images, and open options keep roo's behavior.
+
+This experiment configures Calamine's existing cell stream over a `BufRead`.
+It shares the cell loop, value/formula readers and inline-string helper with
+Calamine's stock APIs. It does not construct `Xlsx` or `Range`, load workbook
+metadata a second time, or allocate a rectangle for distant coordinates.
+The [evaluation](calamine-shared-reader.md) explains the remaining Roo rules
+and the recommendation to retain main's current backend.
 
 ## Ruby and Rust
 

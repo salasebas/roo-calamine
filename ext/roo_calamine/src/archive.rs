@@ -423,7 +423,7 @@ impl Source {
     }
 
     pub fn open(&self, ruby: &Ruby, mode: Mode) -> Result<SheetReader<Input>, Error> {
-        Ok(SheetReader::new(self.input(ruby)?, mode))
+        Ok(SheetReader::for_roo(self.input(ruby)?, mode))
     }
 }
 
