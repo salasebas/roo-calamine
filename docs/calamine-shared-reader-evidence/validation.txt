@@ -90,3 +90,22 @@ All Rust sources in the updated checkout equal vendor/calamine/src byte for byte
 Format checks (root and fork), actionlint, zizmor and yamllint pass.
 Source whitespace checks exclude unchanged upstream and serialized patch context.
 Full platform/precompiled/JRuby matrix: see final PR checks.
+
+Review fixes: exact CI layout and missing-rg environment
+$ Original detector under PATH containing git/grep but no rg
+exit=0
+/tmp/roo-shared-detector-before.sh: line 7: rg: command not found
+
+gems=false
+$ Fixed detector, same PATH and actual branch diff
+exit=0
+gems=true
+$ cargo metadata --manifest-path tmp/calamine-upstream/Cargo.toml (before exclusion)
+error: current package believes it's in a workspace when it's not:
+current:   /Users/sebastiansala/.t3/worktrees/roo-calamine/t3-82fe4976-57bd22a947994165/tmp/calamine-upstream/Cargo.toml
+workspace: /Users/sebastiansala/.t3/worktrees/roo-calamine/t3-82fe4976-57bd22a947994165/Cargo.toml
+$ Fixed exclusion + pinned checkout + patch + CARGO_TARGET_DIR=target cargo test --manifest-path tmp/calamine-upstream/Cargo.toml
+test result: ok. 107 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 211 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.39s
+test result: ok. 67 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.74s
+actionlint, shellcheck (extracted Bash step), zizmor, yamllint and cargo fmt pass.

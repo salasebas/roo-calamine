@@ -1,6 +1,6 @@
 [workspace]
 members = ["ext/roo_calamine"]
-exclude = ["vendor/calamine"]
+exclude = ["vendor/calamine", "tmp/calamine-upstream"]
 resolver = "2"
 
 [profile.release]

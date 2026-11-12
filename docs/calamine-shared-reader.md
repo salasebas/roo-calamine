@@ -62,6 +62,11 @@ lines do not. Deleted upstream lines are reported separately, not credited
 as deletions of our old implementation. The full delta, including deletions,
 still needs review at every update.
 
+The counts include cosmetic changes in the shared helpers: local variable
+names, match-arm spelling and comments, plus equivalent rich-string buffer
+rewrites. The measured snapshot retains this churn. A cleanup could reduce
+the patch surface; its exact line saving and runtime effects were not measured.
+
 | Term | Lines |
 |---|---:|
 | Main at `194b149d64a2682fa43fc54319a640dfe4eb300e` | 6,783 |
@@ -140,9 +145,12 @@ in fresh processes on the same Ruby 3.4.12 / Apple M5 Pro machine; every
 public scenario's digest matches plain Roo 4.0.0. No samples were removed.
 
 The shared engine lacks main's fused plain-cell fast path and creates
-intermediate strings before appending to the raw row. The cold-reading
-regression is consistent with those differences; no profiler establishes
-how much each contributes. Transplanting the old fast parser into the fork
+intermediate strings before appending to the raw row. It also reads cell
+attributes twice: Roo's `cell_attributes` builds the raw record, then
+Calamine's `get_attrs!` reads `r`, `s` and `t` although raw mode does not use
+those second results. The cold-reading regression is consistent with these
+differences; no profiler establishes how much each contributes.
+Transplanting the old fast parser into the fork
 would add more owned code and has not been credited as an improvement.
 Warm Ruby dispatch and cell construction remain after either parser finishes.
 Calx has different values/APIs and is a reference, not a compatible target.
@@ -154,7 +162,8 @@ not total native memory. Existing large late-read memory tests also pass.
 The normal dependency graph grows from 17 to 46 unique packages. The root
 lockfile grows from 40 to 77, rather than #76's 145: `vendor/calamine` is
 explicitly excluded from the workspace, so its dev-dependencies do not enter
-the gem's lock/deny graph. Cargo's
+the gem's lock/deny graph. The temporary upstream CI checkout is excluded
+separately so Cargo treats it as an independent crate. Cargo's
 [workspace rules](https://doc.rust-lang.org/cargo/reference/workspaces.html#the-members-and-exclude-fields)
 explain automatic path membership. CI explicitly formats and lints the fork,
 then applies the exact patch to a pinned upstream checkout and runs its tests
