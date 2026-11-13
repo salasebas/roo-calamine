@@ -6,7 +6,7 @@ class CleanTest < Minitest::Test
   include OracleAssertions
 
   def setup
-    @dir = Dir.mktmpdir("roo-calamine-clean")
+    @dir = Dir.mktmpdir("roo-oxide-clean")
     rows = <<~XML
       <row r="1"><c r="A1" t="inlineStr"><is><t> name&#9; </t></is></c>
         <c r="B1" t="str"><v> value </v></c><c r="C1" t="str"><v> link </v></c></row>

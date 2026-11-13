@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Roo
-  module Calamine
+  module Oxide
     # Prepended to Roo::Excelx::SheetDoc. roo finds a sheet's hyperlinks
     # (#hyperlinks, behind every read of a sheet with a hyperlink
     # relationship) and its merged ranges with XPath on the whole sheet.
@@ -15,9 +15,9 @@ module Roo
         return @hyperlinks if @hyperlinks
         return @hyperlinks = {} if @options[:no_hyperlinks]
 
-        targets = relationships.calamine_hyperlink_targets
+        targets = relationships.oxide_hyperlink_targets
         return @hyperlinks = {} unless targets
-        return super unless (parts = calamine_parts(targets))
+        return super unless (parts = oxide_parts(targets))
 
         @hyperlinks = parts.first
       end
@@ -25,7 +25,7 @@ module Roo
       private
 
       def expand_merged_ranges(cells)
-        return super unless (parts = calamine_parts)
+        return super unless (parts = oxide_parts)
 
         merges = {}
         parts.last.each { |ref| merge_range(merges, ref, cells) }
@@ -45,20 +45,20 @@ module Roo
 
       # [hyperlinks, merge_cells] from Native.sheet_parts, or nil when roo
       # reads them from the whole document.
-      def calamine_parts(targets = {})
+      def oxide_parts(targets = {})
         return unless native? && ROO_VERSIONS.include?(Roo::VERSION)
 
-        @calamine_parts = Native.sheet_parts(sheet_source, targets) if @calamine_parts.nil?
-        @calamine_parts || nil
+        @oxide_parts = Native.sheet_parts(sheet_source, targets) if @oxide_parts.nil?
+        @oxide_parts || nil
       rescue UnsupportedError
-        @calamine_parts = false
+        @oxide_parts = false
         nil
       end
     end
 
     # roo's relationship nodes stay lazy; hyperlink reads need only targets.
     module HyperlinkRelationships
-      def calamine_hyperlink_targets
+      def oxide_hyperlink_targets
         return targets_from_roo if @relationships || !doc_exists?
 
         Native.hyperlink_targets(@path)

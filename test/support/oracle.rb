@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # roo is the oracle: these helpers read a workbook once with roo's own reader
-# and once with roo-calamine, and describe everything roo exposes about the
+# and once with roo-oxide, and describe everything roo exposes about the
 # result, so a test can compare the two descriptions.
 module Oracle
   @counts = Hash.new(0)
@@ -38,28 +38,28 @@ module Oracle
       end)
     end
 
-  Roo::Calamine::Native::Reader.singleton_class.prepend(Module.new do
+  Roo::Oxide::Native::Reader.singleton_class.prepend(Module.new do
     define_method(:new) do |*args|
       Oracle.counts[:native_readers] += 1
       super(*args)
     end
   end)
 
-  Roo::Calamine::Native.singleton_class.prepend(Module.new do
+  Roo::Oxide::Native.singleton_class.prepend(Module.new do
     define_method(:sheet_parts) do |*args|
       Oracle.counts[:native_readers] += 1
       super(*args)
     end
   end)
 
-  Roo::Calamine::Native::Store.singleton_class.prepend(Module.new do
+  Roo::Oxide::Native::Store.singleton_class.prepend(Module.new do
     define_method(:read) do |*args|
       Oracle.counts[:native_readers] += 1
       super(*args).tap { |store| Oracle.counts[:lazy_stores] += 1 if store }
     end
   end)
 
-  Roo::Calamine::Native.singleton_class.prepend(Module.new do
+  Roo::Oxide::Native.singleton_class.prepend(Module.new do
     define_method(:shared_strings) do |*args|
       super(*args).tap { Oracle.counts[:native_shared_strings] += 1 }
     end
@@ -74,11 +74,11 @@ module Oracle
   # Runs the block with the native reader on or off and returns its result,
   # or the error it raised, plus how many cells each reader parsed.
   def read(native:, &)
-    Roo::Calamine.enabled = native
+    Roo::Oxide.enabled = native
     counts.clear
     [outcome(&), counts.dup]
   ensure
-    Roo::Calamine.enabled = true
+    Roo::Oxide.enabled = true
   end
 
   def outcome
@@ -119,7 +119,7 @@ module Oracle
     end
   end
 
-  # What Roo::Calamine.each_row_values must yield: the value of each cell
+  # What Roo::Oxide.each_row_values must yield: the value of each cell
   # that roo's each_row_streaming(pad_cells: true) yields.
   def describe_streamed_values(workbook)
     workbook.sheets.map do |sheet|
@@ -132,7 +132,7 @@ module Oracle
 
   def describe_each_row_values(path, options)
     Roo::Excelx.new(path, options.dup).sheets.map do |sheet|
-      rows = Roo::Calamine.each_row_values(path, sheet:, **options).map do |values|
+      rows = Roo::Oxide.each_row_values(path, sheet:, **options).map do |values|
         values.map { |value| describe_value(value) }
       end
       [sheet, rows]

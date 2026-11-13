@@ -1,13 +1,16 @@
-# roo-calamine
+# roo-oxide
 
-Make [roo](https://github.com/roo-rb/roo) read `.xlsx` and `.xlsm` files
-**16–36× faster** on large sheets, with **2–31× less memory** and identical
-results. Your roo code does not change.
+Native acceleration for [Roo](https://github.com/roo-rb/roo), powered by Rust.
+
+roo-oxide is built on top of Roo and installs it as a dependency. It replaces
+Roo's busiest `.xlsx` and `.xlsm` read paths with a native engine, while you
+keep using `Roo::Spreadsheet`, `Roo::Excelx` and the same cell/value APIs.
+On the measured large sheets, reads are **16–36× faster** with **2–31× less
+memory**. Your existing Roo code stays the same.
 
 ```ruby
 # Gemfile
-gem "roo"
-gem "roo-calamine"
+gem "roo-oxide"
 ```
 
 ```ruby
@@ -16,13 +19,27 @@ xlsx.each_row_streaming { |row| ... }        # read by the native reader
 xlsx.parse(headers: true)                    # this too
 ```
 
-> **Unofficial.** roo-calamine is not affiliated with or endorsed by roo-rb or
+> **Unofficial.** roo-oxide is not affiliated with or endorsed by roo-rb or
 > the roo maintainers.
 
 ## Install
 
-Add the gem next to roo, as above. Bundler requires it on `Bundler.require`;
-without Bundler, `require "roo/calamine"`.
+Add only `gem "roo-oxide"` to your Gemfile. Bundler installs Roo automatically
+and loads the acceleration layer on `Bundler.require` (as Rails does).
+Without Bundler, install `roo-oxide` and `require "roo/oxide"`; it loads Roo
+for you.
+
+### Migrating from roo-calamine
+
+Replace `gem "roo-calamine"` with `gem "roo-oxide"`. Roo is installed as a
+dependency, so a separate `gem "roo"` line is optional.
+Use `require "roo/oxide"` and `Roo::Oxide` in new code. The old
+`require "roo/calamine"`, version require and `Roo::Calamine` constant remain
+available as compatibility aliases in the new gem. Load one plugin gem at a
+time; loading the old plugin before roo-oxide raises a migration error.
+
+`ROO_CALAMINE` still works when `ROO_OXIDE` is unset. When both are set,
+`ROO_OXIDE` takes precedence.
 
 | | |
 |---|---|
@@ -37,7 +54,7 @@ without Bundler, `require "roo/calamine"`.
 100,000 rows × 20 mixed columns, Apple M5 Pro, Ruby 3.4.12. Time and peak
 memory include opening the workbook.
 
-| | roo 4.0.0 | roo + roo-calamine | Faster |
+| | roo 4.0.0 | roo + roo-oxide | Faster |
 |---|---:|---:|---:|
 | `each_row_streaming` | 13.49 s · 119 MB | **0.59 s · 51 MB** | 23× |
 | `parse(headers: true)` | 19.61 s · 3300 MB | **0.75 s · 282 MB** | 26× |
@@ -53,17 +70,17 @@ On the other test files it is 18–43× faster with shared strings, 16–33× wi
 unique strings, and 2.6–10× on a 100-row sheet. See
 [bench/README.md](bench/README.md) for every file, the method, and how to run
 it. [bench/RESULTS.md](bench/RESULTS.md) times every public roo read. It
-ties roo only where roo reads the file itself: CSV, and XML roo-calamine
+ties roo only where roo reads the file itself: CSV, and XML roo-oxide
 hands back.
 
 ## Values only
 
-If you only need values, `Roo::Calamine.each_row_values` skips roo's cell
-objects. It is roo-calamine's own API, not roo's, and using it changes nothing
+If you only need values, `Roo::Oxide.each_row_values` skips roo's cell
+objects. It is roo-oxide's own API, not roo's, and using it changes nothing
 in what roo does.
 
 ```ruby
-Roo::Calamine.each_row_values("orders.xlsx", sheet: "Orders") do |values|
+Roo::Oxide.each_row_values("orders.xlsx", sheet: "Orders") do |values|
   values # => [1001, "Ada", #<Date: 2024-05-01>, 19.5, nil, true]
 end
 ```
@@ -97,21 +114,21 @@ end
 ## Turning it off
 
 ```ruby
-Roo::Calamine.enabled = false # from the next sheet read on
+Roo::Oxide.enabled = false # from the next sheet read on
 ```
 
 ```sh
-ROO_CALAMINE=0 bundle exec rails server # also: false, off
+ROO_OXIDE=0 bundle exec rails server # also: false, off
 ```
 
 Either one makes roo read exactly as it does without the gem.
-`Roo::Calamine.enabled?` tells whether the next read uses the native reader,
-and `Roo::Calamine.available?` whether the extension is loaded.
+`Roo::Oxide.enabled?` tells whether the next read uses the native reader,
+and `Roo::Oxide.available?` whether the extension is loaded.
 
 ## How it works
 
-roo-calamine prepends modules to roo's classes. A read such as
-`each_row_streaming` reaches roo-calamine first, which either does the work in
+roo-oxide prepends modules to roo's classes. A read such as
+`each_row_streaming` reaches roo-oxide first, which either does the work in
 a Rust extension and returns the objects roo would return, or hands the call
 back to roo.
 
@@ -128,7 +145,7 @@ back to roo.
 
 Styles, number formats, comments, images, and every open option stay roo's
 code. roo is the test oracle: roo 4.0.0's own suite, every roo fixture, and the
-edge-case suites must give the same results with and without roo-calamine.
+edge-case suites must give the same results with and without roo-oxide.
 [docs/how-it-works.md](docs/how-it-works.md) has the details and the test
 coverage.
 
@@ -193,7 +210,7 @@ These are by design.
 bundle install
 bundle exec rake compile   # build the extension
 bundle exec rake test      # unit, fixture, and edge-case tests
-bundle exec rake parity    # roo 4.0.0's own suites, with and without roo-calamine
+bundle exec rake parity    # roo 4.0.0's own suites, with and without roo-oxide
 bundle exec rubocop
 cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check
 ```

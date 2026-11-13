@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Roo
-  module Calamine
+  module Oxide
     # Prepended to Roo::Excelx::Sheet: single-cell lookups, rows, columns, and
     # the sheet's bounds read the lazy cells of SheetDoc#lazy_cells while
     # #cells has not been built, so they build only the cells they read. Rows

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Compares plain roo, roo with roo-calamine, and two readers that skip roo's
+# Compares plain roo, roo with roo-oxide, and two readers that skip roo's
 # cell model, calx and xsv (as references), on generated workbooks.
 #
 #   cd bench && bundle install && bundle exec ruby run.rb [OPTIONS] [RUNS] [LIBRARY...]
@@ -10,7 +10,7 @@
 # most 10 times, stopping once it has run for 10 seconds, so a slow library
 # gets 3 runs and a fast one 10. LIBRARY limits the timed runs to those
 # libraries; the others show "-". Before timing, one run of roo and one of
-# roo-calamine hash every value they read; the two hashes must match.
+# roo-oxide hash every value they read; the two hashes must match.
 #
 # Without options, run.rb times the default table. --scenario, --group, and
 # --fixture select other rows, and --all selects every row. --profile runs one
@@ -41,7 +41,7 @@ SCENARIOS = {
                          [*DEFAULT_FIXTURES, *FEATURE_FIXTURES, *CSV_FIXTURE]),
   "cell" => Scenario.new("default", "10,000 random `cell(row, col)`", [*DEFAULT_FIXTURES, *CSV_FIXTURE]),
   "csv" => Scenario.new("default", "`to_csv`", [*DEFAULT_FIXTURES, *FEATURE_FIXTURES, *CSV_FIXTURE]),
-  "values" => Scenario.new("default", "values only: `Roo::Calamine.each_row_values`",
+  "values" => Scenario.new("default", "values only: `Roo::Oxide.each_row_values`",
                            [*DEFAULT_FIXTURES, "large-1m.xlsx"]),
   "yaml" => Scenario.new("default", "`to_yaml`", [*DEFAULT_FIXTURES, "dates-10k.xlsx"]),
   "xml" => Scenario.new("default", "`to_xml`", [*DEFAULT_FIXTURES, "dates-10k.xlsx"]),
@@ -107,10 +107,10 @@ SCENARIOS = {
   "no_hyperlinks" => Scenario.new("options", "`no_hyperlinks: true` + `each`", LINKS)
 }.freeze
 GROUPS = SCENARIOS.values.map(&:group).uniq.freeze
-LIBRARIES = %w[roo roo-calamine calx xsv].freeze
+LIBRARIES = %w[roo roo-oxide calx xsv].freeze
 REFERENCES = %w[calx xsv].freeze
 REFERENCE_SCENARIOS = %w[stream parse each cell csv values].freeze
-COMPARED = %w[roo roo-calamine].freeze
+COMPARED = %w[roo roo-oxide].freeze
 MIN_RUNS = 3
 MAX_RUNS = 10
 BUDGET_SECONDS = 10
@@ -163,7 +163,7 @@ if options[:profile]
   raise OptionParser::MissingArgument, "--profile SCENARIO FIXTURE" unless name && fixture
 
   names([name], SCENARIOS.keys, "scenario")
-  library = names([library || "roo-calamine"], LIBRARIES, "library").first
+  library = names([library || "roo-oxide"], LIBRARIES, "library").first
   fixture = fixture_name(fixture)
   generate([fixture])
   result = scenario(library, name, fixture_path(fixture))
@@ -244,22 +244,22 @@ raise OptionParser::InvalidArgument, "no scenario runs on the fixtures selected"
 generate(rows.map(&:last).uniq)
 puts "Ruby #{RUBY_VERSION} (#{RUBY_PLATFORM}), #{`uname -sr`.strip}, #{cpu}, #{Etc.nprocessors} cores, " \
      "median of #{RUN_COUNT}", ""
-puts "| File | Scenario | roo | roo + roo-calamine | Faster | Less memory | calx (reference) | Time vs calx | " \
+puts "| File | Scenario | roo | roo + roo-oxide | Faster | Less memory | calx (reference) | Time vs calx | " \
      "xsv (reference) | Flag |",
      "|---|---|---:|---:|---:|---:|---:|---:|---:|---|"
 flagged = 0
 rows.each do |name, fixture|
   path = fixture_path(fixture)
   digests = COMPARED.map { |library| scenario(library, name, path, "digest")["digest"] }
-  raise "roo-calamine read different values than roo: #{fixture} #{name}" unless digests.uniq.size == 1
+  raise "roo-oxide read different values than roo: #{fixture} #{name}" unless digests.uniq.size == 1
 
-  roo, calamine, calx, xsv = LIBRARIES.map { |library| timed(library, name, path) if timed?(library, name, fixture) }
-  faster = ratio(roo&.dig(:seconds), calamine&.dig(:seconds))
-  vs_calx = ratio(calamine&.dig(:seconds), calx&.dig(:seconds))
+  roo, oxide, calx, xsv = LIBRARIES.map { |library| timed(library, name, path) if timed?(library, name, fixture) }
+  faster = ratio(roo&.dig(:seconds), oxide&.dig(:seconds))
+  vs_calx = ratio(oxide&.dig(:seconds), calx&.dig(:seconds))
   flag = flags(faster, vs_calx)
   flagged += 1 unless flag.empty?
-  puts "| #{fixture} | #{SCENARIOS[name].label} | #{describe(roo)} | #{describe(calamine)} | " \
-       "#{describe_ratio(faster)} | #{describe_ratio(ratio(roo&.dig(:peak_rss), calamine&.dig(:peak_rss)))} | " \
+  puts "| #{fixture} | #{SCENARIOS[name].label} | #{describe(roo)} | #{describe(oxide)} | " \
+       "#{describe_ratio(faster)} | #{describe_ratio(ratio(roo&.dig(:peak_rss), oxide&.dig(:peak_rss)))} | " \
        "#{describe(calx)} | #{describe_ratio(vs_calx)} | #{describe(xsv)} | #{flag.join(", ")} |"
 end
 puts "", "#{rows.size} rows, #{flagged} flagged."

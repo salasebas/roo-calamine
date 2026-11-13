@@ -94,7 +94,7 @@ pub(crate) enum HtmlSelection {
 
 #[derive(TypedData)]
 #[magnus(
-    class = "Roo::Calamine::Native::HtmlStrings",
+    class = "Roo::Oxide::Native::HtmlStrings",
     mark,
     free_immediately,
     size
@@ -594,7 +594,7 @@ fn read(
                     None
                 } else {
                     let thread = std::thread::Builder::new()
-                        .name("roo-calamine".into())
+                        .name("roo-oxide".into())
                         .spawn_scoped(scope, || {
                             until(interrupted, || Ok(check.next_row()?.is_some()))
                         })
@@ -617,7 +617,7 @@ fn read(
 
 /// `Native.shared_strings(path, html, plain)`: plain strings and deferred HTML
 /// for roo's `SharedStrings`, with `nil` for an unrequested table. Raises
-/// `Roo::Calamine::UnsupportedError` for a file roo reads differently.
+/// `Roo::Oxide::UnsupportedError` for a file roo reads differently.
 fn shared_strings(
     ruby: &Ruby,
     path: String,

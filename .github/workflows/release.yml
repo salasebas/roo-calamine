@@ -95,15 +95,15 @@ jobs:
 
       - name: Check the tag, the version, and the set of gems
         run: |
-          version=$(ruby -Ilib -rroo/calamine/version -e 'print Roo::Calamine::VERSION')
+          version=$(ruby -Ilib -rroo/oxide/version -e 'print Roo::Oxide::VERSION')
           if [ "$TAG" != "v${version}" ]; then
-            echo "::error::tag ${TAG} does not match Roo::Calamine::VERSION ${version}"
+            echo "::error::tag ${TAG} does not match Roo::Oxide::VERSION ${version}"
             exit 1
           fi
           ls -l pkg
           for platform in ruby x86_64-linux aarch64-linux x86_64-linux-musl aarch64-linux-musl x86_64-darwin arm64-darwin x64-mingw-ucrt; do
-            name="roo-calamine-${version}-${platform}.gem"
-            [ "$platform" = "ruby" ] && name="roo-calamine-${version}.gem"
+            name="roo-oxide-${version}-${platform}.gem"
+            [ "$platform" = "ruby" ] && name="roo-oxide-${version}.gem"
             ls pkg/"${name}" > /dev/null || { echo "::error::${name} is missing"; exit 1; }
           done
           if [ "$(find pkg -name '*.gem' | wc -l)" -ne 8 ]; then
@@ -137,12 +137,12 @@ jobs:
           version="${TAG#v}"
           # A run that failed partway can be run again: gems RubyGems.org
           # already has are skipped, because it rejects a second push.
-          published=$(curl -sS https://rubygems.org/api/v1/versions/roo-calamine.json |
+          published=$(curl -sS https://rubygems.org/api/v1/versions/roo-oxide.json |
             jq -r --arg v "$version" '.[]? | select(.number == $v) | .platform' || true)
           # The source gem first: it creates the gem on RubyGems.org.
-          for gem in "pkg/roo-calamine-${version}.gem" pkg/roo-calamine-"${version}"-*.gem; do
+          for gem in "pkg/roo-oxide-${version}.gem" pkg/roo-oxide-"${version}"-*.gem; do
             platform=$(basename "$gem" .gem)
-            platform=${platform#"roo-calamine-${version}"}
+            platform=${platform#"roo-oxide-${version}"}
             platform=${platform#-}
             if grep -qx "${platform:-ruby}" <<< "$published"; then
               echo "${gem} is already on RubyGems.org"

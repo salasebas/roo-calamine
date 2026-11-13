@@ -4,10 +4,10 @@ require "bundler/gem_tasks"
 require "minitest/test_task"
 require "rb_sys/extensiontask"
 
-GEMSPEC = Gem::Specification.load("roo-calamine.gemspec")
+GEMSPEC = Gem::Specification.load("roo-oxide.gemspec")
 
-RbSys::ExtensionTask.new("roo_calamine", GEMSPEC) do |ext|
-  ext.lib_dir = "lib/roo/calamine"
+RbSys::ExtensionTask.new("roo_oxide", GEMSPEC) do |ext|
+  ext.lib_dir = "lib/roo/oxide"
 end
 
 Minitest::TestTask.create(:test) do |t|
@@ -16,7 +16,7 @@ end
 
 task default: %i[compile test]
 
-desc "Run roo 4.0.0's own Excelx tests with and without roo-calamine and compare"
+desc "Run roo 4.0.0's own Excelx tests with and without roo-oxide and compare"
 task parity: :compile do
   ruby "test/parity/run.rb"
 end

@@ -1,13 +1,13 @@
 # frozen_string_literal: true
 
 module Roo
-  module Calamine
+  module Oxide
     # Roo::Base#each reads the current sheet's row after every block call.
     module Excelx
       private
 
       def native_rows?
-        Calamine.enabled? && method(:row).owner.equal?(::Roo::Excelx)
+        Oxide.enabled? && method(:row).owner.equal?(::Roo::Excelx)
       end
 
       def each_without_options(&)
@@ -16,7 +16,7 @@ module Roo
         return each_lazy_row(sheet, lazy, &) if lazy && sheet.first_column
 
         index = RowIndex.new(self)
-        1.upto(last_row) { |line| yield index.row(line, @calamine_set_calls) }
+        1.upto(last_row) { |line| yield index.row(line, @oxide_set_calls) }
       end
 
       def each_lazy_row(sheet, lazy)

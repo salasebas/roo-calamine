@@ -1,9 +1,11 @@
 # frozen_string_literal: true
 
-# Run against an installed roo-calamine gem: `ruby script/smoke.rb`.
+# Run against an installed roo-oxide gem: `ruby script/smoke.rb`.
 # Writes a small workbook, reads it with plain roo code, and checks that the
 # native reader served the read and returned roo's values.
 require "tmpdir"
+require "roo/oxide"
+require "roo/calamine/version"
 require "roo/calamine"
 require "zip"
 
@@ -26,19 +28,20 @@ parts = {
 }
 
 native_reads = 0
-Roo::Calamine::Native::Reader.singleton_class.prepend(Module.new do
+Roo::Oxide::Native::Reader.singleton_class.prepend(Module.new do
   define_method(:new) do |*args|
     native_reads += 1
     super(*args)
   end
 end)
-Roo::Calamine::Native::Store.singleton_class.prepend(Module.new do
+Roo::Oxide::Native::Store.singleton_class.prepend(Module.new do
   define_method(:read) do |*args|
     super(*args).tap { |store| native_reads += 1 if store }
   end
 end)
 
-check Roo::Calamine.enabled?, "roo-calamine #{Roo::Calamine::VERSION} is enabled on #{RUBY_PLATFORM}, Ruby #{RUBY_VERSION}"
+check Roo::Oxide.enabled?, "roo-oxide #{Roo::Oxide::VERSION} is enabled on #{RUBY_PLATFORM}, Ruby #{RUBY_VERSION}"
+check Roo::Calamine.equal?(Roo::Oxide), "the legacy namespace refers to roo-oxide"
 Dir.mktmpdir do |dir|
   path = File.join(dir, "smoke.xlsx")
   Zip::File.open(path, create: true) { |zip| parts.each { |name, xml| zip.get_output_stream(name) { |io| io.write(xml) } } }

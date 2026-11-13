@@ -182,7 +182,7 @@ fn read(ruby: &Ruby, source: &Source) -> std::result::Result<SheetPartsReader<In
 /// `Native.sheet_parts(source, targets)`, for a worksheet's path or
 /// `Native::ZipEntry`: `[hyperlinks, merge_cells]`, with resolved targets
 /// keyed by roo coordinates and merged references in document order. Raises
-/// `Roo::Calamine::UnsupportedError` for a sheet roo reads differently.
+/// `Roo::Oxide::UnsupportedError` for a sheet roo reads differently.
 fn sheet_parts(
     ruby: &Ruby,
     source: Source,

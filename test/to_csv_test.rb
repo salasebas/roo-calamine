@@ -21,7 +21,7 @@ class ToCsvTest < Minitest::Test
     end
   end)
 
-  Roo::Calamine::Native::Store.prepend(Module.new do
+  Roo::Oxide::Native::Store.prepend(Module.new do
     define_method(:write_csv) do |*args|
       ToCsvTest.native_writes += 1
       super(*args)
@@ -50,7 +50,7 @@ class ToCsvTest < Minitest::Test
   XML
 
   def setup
-    @dir = Dir.mktmpdir("roo-calamine")
+    @dir = Dir.mktmpdir("roo-oxide")
     @csv = File.join(@dir, "out.csv")
   end
 
@@ -89,10 +89,10 @@ class ToCsvTest < Minitest::Test
   end
 
   def roo_csv(path, **options)
-    Roo::Calamine.enabled = false
+    Roo::Oxide.enabled = false
     Roo::Excelx.new(path, options).to_csv
   ensure
-    Roo::Calamine.enabled = true
+    Roo::Oxide.enabled = true
   end
 
   def test_every_cell_type_separator_sheet_and_file

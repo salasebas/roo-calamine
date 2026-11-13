@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Roo
-  module Calamine
+  module Oxide
     # The answers the native reader needs from roo while it builds cells. Each
     # one comes from the roo object or method that SheetDoc#cell_from_xml uses,
     # so formats, shared strings, and errors are roo's own.
@@ -51,7 +51,7 @@ module Roo
         strings = @shared.shared_strings
         html_disabled = strings.instance_variable_get(:@options)[:disable_html_wrapper]
         plain = strings.to_a
-        [plain, (strings.calamine_html unless html_disabled)]
+        [plain, (strings.oxide_html unless html_disabled)]
       end
 
       def shared_string(text)

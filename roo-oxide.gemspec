@@ -1,20 +1,21 @@
 # frozen_string_literal: true
 
-require_relative "lib/roo/calamine/version"
+require_relative "lib/roo/oxide/version"
 
 Gem::Specification.new do |spec|
-  spec.name = "roo-calamine"
-  spec.version = Roo::Calamine::VERSION
+  spec.name = "roo-oxide"
+  spec.version = Roo::Oxide::VERSION
   spec.authors = ["Sebastian Sala"]
 
-  spec.summary = "A native reader that makes roo read .xlsx and .xlsm files faster, with the same results."
+  spec.summary = "Rust-powered native acceleration for Roo's XLSX and XLSM readers."
   spec.description = <<~DESCRIPTION.strip.gsub(/\s+/, " ")
-    Unofficial plugin for roo. Add it to the Gemfile and Roo::Excelx reads worksheets
-    through a Rust extension instead of Nokogiri, building the same Roo::Excelx::Cell
-    objects. Anything the native reader does not reproduce exactly goes to roo's own
-    code. Not affiliated with roo-rb.
+    An unofficial acceleration layer built on top of Roo. Add roo-oxide to the
+    Gemfile; Roo is installed as a dependency and its spreadsheet API stays the
+    same. A Rust extension speeds up XLSX and XLSM reads while preserving Roo's
+    cell and value rules. Unsupported input uses Roo's own reader. Not affiliated
+    with roo-rb.
   DESCRIPTION
-  spec.homepage = "https://github.com/salasebas/roo-calamine"
+  spec.homepage = "https://github.com/salasebas/roo-oxide"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.3"
   spec.required_rubygems_version = ">= 3.3.11"
@@ -27,12 +28,12 @@ Gem::Specification.new do |spec|
 
   spec.files = Dir[
     "lib/**/*.rb",
-    "ext/roo_calamine/{Cargo.toml,extconf.rb}",
-    "ext/roo_calamine/src/**/*.rs",
+    "ext/roo_oxide/{Cargo.toml,extconf.rb}",
+    "ext/roo_oxide/src/**/*.rs",
     "Cargo.toml", "Cargo.lock", "LICENSE", "README.md", "CHANGELOG.md"
   ]
   spec.require_paths = ["lib"]
-  spec.extensions = ["ext/roo_calamine/extconf.rb"]
+  spec.extensions = ["ext/roo_oxide/extconf.rb"]
 
   spec.add_dependency "rb_sys", "~> 0.9.130"
   spec.add_dependency "roo", "~> 4.0"

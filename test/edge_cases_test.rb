@@ -6,7 +6,7 @@ require_relative "test_helper"
 # Hand-built worksheets for the cases where a reader that does not follow
 # roo's own rules would return something else. Each test first pins what roo
 # itself returns, so the workbook is known to exercise the case, then asserts
-# that roo-calamine returns the same thing on every read path.
+# that roo-oxide returns the same thing on every read path.
 class EdgeCasesTest < Minitest::Test
   include OracleAssertions
 
@@ -35,7 +35,7 @@ class EdgeCasesTest < Minitest::Test
   XML
 
   def setup
-    @dir = Dir.mktmpdir("roo-calamine")
+    @dir = Dir.mktmpdir("roo-oxide")
   end
 
   def teardown
@@ -67,25 +67,25 @@ class EdgeCasesTest < Minitest::Test
   end
 
   def roo_cell(path, row, column)
-    Roo::Calamine.enabled = false
+    Roo::Oxide.enabled = false
     Roo::Excelx.new(path).cell(row, column)
   ensure
-    Roo::Calamine.enabled = true
+    Roo::Oxide.enabled = true
   end
 
   def roo_sheet_hyperlinks(path)
-    Roo::Calamine.enabled = false
+    Roo::Oxide.enabled = false
     workbook = Roo::Excelx.new(path)
     workbook.sheet_for(nil).hyperlinks
   ensure
-    Roo::Calamine.enabled = true
+    Roo::Oxide.enabled = true
   end
 
   def roo_row(path, row)
-    Roo::Calamine.enabled = false
+    Roo::Oxide.enabled = false
     Roo::Excelx.new(path).row(row)
   ensure
-    Roo::Calamine.enabled = true
+    Roo::Oxide.enabled = true
   end
 
   def test_integer_or_float_follows_the_written_text
@@ -268,7 +268,7 @@ class EdgeCasesTest < Minitest::Test
       workbook = Roo::Excelx.new(path)
       workbook.each_row_streaming.with_index.map { |row, i| edit.call(row.first.value, i) }
     end
-    edit_first_value = -> { Roo::Calamine.each_row_values(path).with_index.map { |(value), i| edit.call(value, i) } }
+    edit_first_value = -> { Roo::Oxide.each_row_values(path).with_index.map { |(value), i| edit.call(value, i) } }
     roo, = Oracle.read(native: false, &edit_first)
     native, = Oracle.read(native: true, &edit_first)
     native_values, = Oracle.read(native: true, &edit_first_value)
@@ -561,7 +561,7 @@ class EdgeCasesTest < Minitest::Test
       workbook.cell(1, 1).replace("edited")
       workbook.cell(4, 4).clear
       read = [workbook.cell(1, 2), workbook.cell(1, 3), Oracle::BOUNDS.map { workbook.public_send(_1) }]
-      Roo::Calamine.enabled = false
+      Roo::Oxide.enabled = false
       read << workbook.sheet_for(nil).cells.transform_values(&:value)
     end
     roo, = Oracle.read(native: false, &edit)
@@ -876,13 +876,13 @@ class EdgeCasesTest < Minitest::Test
       require ARGV[0]
       require "objspace"
       Roo::Excelx.new(ARGV[1], expand_merged_ranges: true).each_with_index do |_, i|
-        next if i <= Roo::Calamine::RowIndex::ROO_ROWS
+        next if i <= Roo::Oxide::RowIndex::ROO_ROWS
 
         print ObjectSpace.memsize_of_all / 1024
         break
       end
     RUBY
-    kilobytes = IO.popen([RbConfig.ruby, "-I", File.expand_path("../lib", __dir__), "-e", script, "roo/calamine", path],
+    kilobytes = IO.popen([RbConfig.ruby, "-I", File.expand_path("../lib", __dir__), "-e", script, "roo/oxide", path],
                          &:read)
 
     assert_operator Integer(kilobytes), :<, 300_000
@@ -931,8 +931,8 @@ class EdgeCasesTest < Minitest::Test
     end
   end
 
-  # Roo::Calamine.enabled = false still runs roo-calamine's Roo::Excelx#each
-  # and #parse, so this compares with roo in a process without roo-calamine:
+  # Roo::Oxide.enabled = false still runs roo-oxide's Roo::Excelx#each
+  # and #parse, so this compares with roo in a process without roo-oxide:
   # roo checks the options and resets the headers before it reads a cell.
   def test_each_and_parse_fail_as_plain_roo_on_a_sheet_that_raises
     path = write(%(<row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>abc</v></c></row>))
@@ -948,12 +948,12 @@ class EdgeCasesTest < Minitest::Test
         [e.class, e.message.lines.first.to_s[0, 60], x.headers]
       end)
     RUBY
-    roo, calamine = %w[roo roo/calamine].map do |library|
+    roo, oxide = %w[roo roo/oxide].map do |library|
       IO.popen([RbConfig.ruby, "-I", File.expand_path("../lib", __dir__), "-e", script, library, path], &:read)
     end
 
     assert_match(/NoMethodError.*TypeError.*FrozenError.*TypeError.*ArgumentError.*\[\]\].*\[\]\].*headers\W+true\}/, roo)
-    assert_equal roo, calamine
+    assert_equal roo, oxide
   end
 
   def test_parse_reads_header_columns_from_the_second_on
@@ -1010,7 +1010,7 @@ class EdgeCasesTest < Minitest::Test
     native, counts = Oracle.read(native: true, &stream)
 
     # roo raises a little before row 251, where libxml2's read-ahead hits the
-    # bad character; roo-calamine yields every row before it, then roo raises.
+    # bad character; roo-oxide yields every row before it, then roo raises.
     assert_equal Nokogiri::XML::SyntaxError, roo.dig(1, 1)
     assert_operator roo.dig(1, 0), :<=, 250
     assert_equal [:ok, [250, Nokogiri::XML::SyntaxError]], native
@@ -1022,7 +1022,7 @@ class EdgeCasesTest < Minitest::Test
     rows = (1..300).map { |i| %(<row r="#{i}"><c r="A#{i}"><v>#{i}</v></c></row>) }
     rows[250] = %(<row r="251"><c r="A251" t="inlineStr"><is><x:t xmlns:x="urn:other">a</x:t><t>251</t></is></c></row>)
     path = write(rows.join)
-    values = -> { Roo::Calamine.each_row_values(path).map(&:first) }
+    values = -> { Roo::Oxide.each_row_values(path).map(&:first) }
     roo, = Oracle.read(native: false, &values)
     native, counts = Oracle.read(native: true, &values)
 
@@ -1086,33 +1086,42 @@ class EdgeCasesTest < Minitest::Test
   def test_kill_switch_restores_roo
     path = write(%(<row r="1"><c r="A1"><v>1</v></c></row>))
 
-    Roo::Calamine.enabled = false
+    Roo::Oxide.enabled = false
     Oracle.counts.clear
     Roo::Excelx.new(path).cell(1, 1)
 
     assert_equal 0, Oracle.counts[:native_readers]
     assert_equal 1, Oracle.counts[:roo_cells]
   ensure
-    Roo::Calamine.enabled = true
+    Roo::Oxide.enabled = true
   end
 
   def test_environment_variable_disables_the_native_reader
     path = write(%(<row r="1"><c r="A1"><v>1</v></c></row>))
-    %w[0 false OFF].each do |value|
-      ENV["ROO_CALAMINE"] = value
-      Oracle.counts.clear
-      workbook = Roo::Excelx.new(path)
-      workbook.each_row_streaming.to_a
+    disabled_values = %w[0 false OFF]
+    %w[ROO_OXIDE ROO_CALAMINE].each do |name|
+      disabled_values.each do |value|
+        ENV[name] = value
+        Oracle.counts.clear
+        workbook = Roo::Excelx.new(path)
+        workbook.each_row_streaming.to_a
 
-      refute_predicate Roo::Calamine, :enabled?
-      assert_equal 0, Oracle.counts[:native_readers]
+        refute_predicate Roo::Oxide, :enabled?, name
+        assert_equal 0, Oracle.counts[:native_readers], name
+      end
+      ENV.delete(name)
     end
+    ENV["ROO_CALAMINE"] = "0"
+    ENV["ROO_OXIDE"] = "1"
+
+    assert_predicate Roo::Oxide, :enabled?
   ensure
+    ENV.delete("ROO_OXIDE")
     ENV.delete("ROO_CALAMINE")
   end
 
   def test_enabled_on_cruby_by_default
-    assert_predicate Roo::Calamine, :available?
-    assert_predicate Roo::Calamine, :enabled?
+    assert_predicate Roo::Oxide, :available?
+    assert_predicate Roo::Oxide, :enabled?
   end
 end

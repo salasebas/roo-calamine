@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Roo
-  module Calamine
+  module Oxide
     # Prepended to Roo::Excelx. roo extracts every worksheet to its temporary
     # directory when it opens a workbook. With the native reader on, a
     # workbook leaves its worksheets in the zip instead:
@@ -35,21 +35,21 @@ module Roo
       end
 
       # Extended onto each Zip::Entry of the copy that the native extension
-      # can read: `calamine_entry` is its Native::ZipEntry, which writes the
+      # can read: `oxide_entry` is its Native::ZipEntry, which writes the
       # file when roo extracts the entry. When the native extraction fails,
       # or cannot take the path, rubyzip extracts it as roo does, and raises
       # or warns as roo does.
       module NativeEntry
-        attr_accessor :calamine_entry, :calamine_metadata
+        attr_accessor :oxide_entry, :oxide_metadata
 
         def extract(entry_path, destination_directory:)
           path = ::File.join(destination_directory, entry_path)
-          if calamine_metadata && METADATA_FILES.include?(entry_path) &&
+          if oxide_metadata && METADATA_FILES.include?(entry_path) &&
              size <= MAX_METADATA_SIZE && !::File.exist?(path)
-            calamine_metadata[entry_path] = Native.metadata_bytes(calamine_entry)
+            oxide_metadata[entry_path] = Native.metadata_bytes(oxide_entry)
             return self
           end
-          calamine_entry.extract(DeferredSheets.native_path(path))
+          oxide_entry.extract(DeferredSheets.native_path(path))
           self
         rescue IOError, EncodingError
           super
@@ -67,7 +67,7 @@ module Roo
 
         # Its Native::ZipEntry.
         def entry
-          @zip_entry.calamine_entry
+          @zip_entry.oxide_entry
         end
 
         # Extracts the worksheet where roo would have, once; another thread
@@ -85,16 +85,16 @@ module Roo
       private
 
       def process_zipfile(zipfilename_or_stream)
-        @calamine_copy = calamine_copy(zipfilename_or_stream)
-        @calamine_copy ? super(@calamine_copy) : super
+        @oxide_copy = oxide_copy(zipfilename_or_stream)
+        @oxide_copy ? super(@oxide_copy) : super
       end
 
       # The snapshot roo opens: a stream, a copy in roo's temporary
       # directory, or the file roo wrote there itself for a URL or
       # `packed: :zip`. An empty file is left to roo: rubyzip's error names
       # the file it opened.
-      def calamine_copy(source)
-        return unless Calamine.enabled? && ROO_VERSIONS.include?(Roo::VERSION)
+      def oxide_copy(source)
+        return unless Oxide.enabled? && ROO_VERSIONS.include?(Roo::VERSION)
 
         if is_stream?(source)
           source.seek(0)
@@ -102,7 +102,7 @@ module Roo
           return source
         end
 
-        write_calamine_copy(source)
+        write_oxide_copy(source)
       end
 
       def memory_copy(source)
@@ -110,11 +110,11 @@ module Roo
         ::StringIO.new(is_stream?(source) ? source.read : ::File.binread(source)) if size&.between?(1, MEMORY_ZIP_SIZE)
       end
 
-      def write_calamine_copy(source)
+      def write_oxide_copy(source)
         copy = memory_copy(source)
         return copy if copy
 
-        path = "#{@tmpdir}/roo_calamine.xlsx"
+        path = "#{@tmpdir}/roo_oxide.xlsx"
         # StringIO#read shares its full String; IO.copy_stream's partial reads copy its buffer.
         if source.is_a?(::StringIO)
           ::File.binwrite(path, source.read)
@@ -125,10 +125,10 @@ module Roo
       end
 
       def process_zipfile_entries(entries)
-        if @calamine_copy
+        if @oxide_copy
           @shared.extend(MetadataShared)
-          @shared.calamine_metadata = {}
-          copy = @calamine_copy
+          @shared.oxide_metadata = {}
+          copy = @oxide_copy
           zip = copy.is_a?(::StringIO) ? Native::ZipBuffer.new(copy.string) : DeferredSheets.native_path(copy)
           native_entries(entries, zip)
         end
@@ -143,10 +143,10 @@ module Roo
         entries.each do |entry|
           next unless entry.file? && !entry.encrypted? && COMPRESSION_METHODS.include?(entry.compression_method)
 
-          entry.extend(NativeEntry).calamine_entry =
+          entry.extend(NativeEntry).oxide_entry =
             Native::ZipEntry.new(zip, entry.local_header_offset, entry.compressed_size, entry.size,
                                  entry.compression_method)
-          entry.calamine_metadata = @shared.calamine_metadata if metadata.include?(entry)
+          entry.oxide_metadata = @shared.oxide_metadata if metadata.include?(entry)
         end
       rescue EncodingError
         nil
@@ -160,7 +160,7 @@ module Roo
       end
 
       def extract_worksheet_ids(entries, path)
-        return super unless @calamine_copy
+        return super unless @oxide_copy
 
         entry = entries.find { |item| item.name[/workbook.xml$/] }
         return super unless entry.is_a?(NativeEntry)
@@ -170,13 +170,13 @@ module Roo
       end
 
       def extract_worksheet_rels(entries, path)
-        return super unless @calamine_copy
+        return super unless @oxide_copy
 
         entry = entries.find { |item| item.name[/workbook.xml.rels$/] }
         return super unless entry
 
         entry.extract(::File.basename(path), destination_directory: ::File.dirname(path))
-        bytes = @shared.calamine_metadata.delete(::File.basename(path))
+        bytes = @shared.oxide_metadata.delete(::File.basename(path))
         document = (bytes ? ::Nokogiri::XML(bytes, path) : Roo::Utils.load_xml(path)).remove_namespaces!
         document.xpath("//Relationship").each_with_object({}) do |relationship, sheets|
           sheets[relationship["Id"]] = relationship["Target"] if worksheet_types.include?(relationship["Type"])
@@ -193,7 +193,7 @@ module Roo
         deferred = found.each_with_index.to_h { |entry, i| ["#{tmpdir}/roo_sheet#{i + 1}", Sheet.new(entry)] }
         sheet_files.concat(deferred.keys)
         @sheet_files.concat(deferred.keys)
-        @shared.instance_variable_set(:@calamine_deferred_sheets, deferred)
+        @shared.instance_variable_set(:@oxide_deferred_sheets, deferred)
       end
 
       def sheet_entry(entries, name)
@@ -204,45 +204,45 @@ module Roo
     # Roo constructs these extractors after extraction. Pass retained bytes
     # alongside their original paths, including when native reading is off.
     module MetadataShared
-      attr_accessor :calamine_metadata
+      attr_accessor :oxide_metadata
 
       def workbook
         @workbook ||= Roo::Excelx::Workbook.new(::File.join(@dir, "roo_workbook.xml"),
-                                                calamine_xml: calamine_metadata["roo_workbook.xml"])
+                                                oxide_xml: oxide_metadata["roo_workbook.xml"])
       end
 
       def styles
         @styles ||= Roo::Excelx::Styles.new(::File.join(@dir, "roo_styles.xml"),
-                                            calamine_xml: calamine_metadata["roo_styles.xml"])
+                                            oxide_xml: oxide_metadata["roo_styles.xml"])
       end
     end
 
     # Roo's document cache is weak: keep the source bytes so metadata can be
     # parsed again after GC, without keeping a large Nokogiri tree alive.
     module MetadataDocument
-      def initialize(*, calamine_xml: nil, **)
-        @calamine_xml = calamine_xml
+      def initialize(*, oxide_xml: nil, **)
+        @oxide_xml = oxide_xml
         super(*, **)
       end
 
       private
 
       def doc
-        return super unless @calamine_xml
+        return super unless @oxide_xml
 
         instance_cache(:@doc) do
           raise Roo::FileNotFound, "#{@path} file not found" unless doc_exists?
 
-          ::Nokogiri::XML(@calamine_xml, @path).remove_namespaces!
+          ::Nokogiri::XML(@oxide_xml, @path).remove_namespaces!
         end
       end
 
       def doc_exists?
-        @calamine_xml ? ::File.directory?(::File.dirname(@path)) : super
+        @oxide_xml ? ::File.directory?(::File.dirname(@path)) : super
       end
     end
 
-    # Prepended to Roo::Excelx::SheetDoc, below Roo::Calamine::SheetDoc. roo
+    # Prepended to Roo::Excelx::SheetDoc, below Roo::Oxide::SheetDoc. roo
     # reads a worksheet's file in #doc, #dimensions, and #each_row_streaming;
     # each one extracts a deferred worksheet first.
     module DeferredSheetDoc
@@ -276,7 +276,7 @@ module Roo
       # nil once the workbook is closed or collected: its temporary directory
       # is gone, and roo raises reading the worksheet's file.
       def deferred_sheet
-        sheet = @shared.instance_variable_get(:@calamine_deferred_sheets)&.[](@path)
+        sheet = @shared.instance_variable_get(:@oxide_deferred_sheets)&.[](@path)
         sheet if sheet && ::File.directory?(::File.dirname(@path))
       end
     end

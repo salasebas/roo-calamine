@@ -3,8 +3,8 @@
   "packages": {
     ".": {
       "release-type": "ruby",
-      "package-name": "roo-calamine",
-      "version-file": "lib/roo/calamine/version.rb",
+      "package-name": "roo-oxide",
+      "version-file": "lib/roo/oxide/version.rb",
       "changelog-path": "CHANGELOG.md",
       "include-component-in-tag": false,
       "initial-version": "0.0.1",

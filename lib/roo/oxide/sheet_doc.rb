@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Roo
-  module Calamine
+  module Oxide
     # Prepended to Roo::Excelx::SheetDoc, where every worksheet read in roo
     # starts: Sheet#cells (and with it #row, #each, #parse), the lazy cells
     # behind Excelx#cell and the other single-cell lookups, and Sheet#each_row
@@ -14,10 +14,10 @@ module Roo
       # the native reader has been turned off since, so the cells handed out
       # stay the ones #cells holds.
       def cells(relationships)
-        return super if @cells || !(native? || @calamine_store)
+        return super if @cells || !(native? || @oxide_store)
 
-        store = @calamine_store || nil
-        @calamine_store = nil
+        store = @oxide_store || nil
+        @oxide_store = nil
         @cells = store ? store.cells : read_cells(relationships)
       rescue UnsupportedError
         super
@@ -28,10 +28,10 @@ module Roo
       # ranges are expanded, and when building some cell would raise, because
       # roo raises for the whole sheet then.
       def lazy_cells(relationships)
-        if @calamine_store.nil? && !@cells && !@options[:expand_merged_ranges] && native?
-          @calamine_store = read_store(relationships)
+        if @oxide_store.nil? && !@cells && !@options[:expand_merged_ranges] && native?
+          @oxide_store = read_store(relationships)
         end
-        @calamine_store || nil
+        @oxide_store || nil
       end
 
       # Yields Native::Row objects; #each_cell turns one into cells when roo
@@ -58,7 +58,7 @@ module Roo
       def each_cell(row_xml, &)
         return super unless row_xml.is_a?(Native::Row)
 
-        calamine_stream_converter.row_cells(row_xml, false).each(&)
+        oxide_stream_converter.row_cells(row_xml, false).each(&)
       end
 
       # The cells #each_cell yields for a Native::Row, as a new Array; nil for
@@ -66,17 +66,17 @@ module Roo
       def native_row_cells(row, pad_cells: false)
         return unless row.is_a?(Native::Row) && method(:each_cell).owner.equal?(SheetDoc)
 
-        calamine_stream_converter.row_cells(row, pad_cells)
+        oxide_stream_converter.row_cells(row, pad_cells)
       end
 
-      # Roo::Calamine.each_row_values. `sheet` is the Roo::Excelx::Sheet that
+      # Roo::Oxide.each_row_values. `sheet` is the Roo::Excelx::Sheet that
       # owns this document; it turns rows that roo reads itself into cells.
       def each_row_values(sheet, &)
         return each_roo_row_values(sheet, 0, &) unless native?
 
         yielded = 0
         reader = Native::Reader.new(sheet_source, true, BATCH_CELLS)
-        while (values = reader.next_values(calamine_stream_converter))
+        while (values = reader.next_values(oxide_stream_converter))
           yield values
           yielded += 1
         end
@@ -100,13 +100,13 @@ module Roo
         nil
       end
 
-      def calamine_stream_converter
-        @calamine_stream_converter ||= Native::Converter.new(Context.new(@shared, hyperlinks(@relationships), true),
-                                                             true)
+      def oxide_stream_converter
+        @oxide_stream_converter ||= Native::Converter.new(Context.new(@shared, hyperlinks(@relationships), true),
+                                                          true)
       end
 
       def native?
-        @path && Calamine.enabled?
+        @path && Oxide.enabled?
       end
 
       # Every cell, in roo's order.

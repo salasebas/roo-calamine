@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
 # Run on JRuby against the installed gem: `ruby test/jruby_smoke.rb`.
-# roo-calamine must load, stay inert, and leave roo reading workbooks itself.
+# roo-oxide must load, stay inert, and leave roo reading workbooks itself.
 require "tmpdir"
+require "roo/oxide"
+require "roo/calamine/version"
 require "roo/calamine"
 require_relative "support/workbook"
 
@@ -12,9 +14,10 @@ def check(condition, message)
 end
 
 check RUBY_ENGINE == "jruby", "running on JRuby (#{RUBY_ENGINE} #{RUBY_ENGINE_VERSION})"
-check !Roo::Calamine.available?, "the native extension is not available"
-check !Roo::Calamine.enabled?, "roo-calamine is disabled"
-check Roo::Excelx::SheetDoc.ancestors.none? { |a| a.name.to_s.start_with?("Roo::Calamine") },
+check Roo::Calamine.equal?(Roo::Oxide), "the legacy namespace refers to roo-oxide"
+check !Roo::Oxide.available?, "the native extension is not available"
+check !Roo::Oxide.enabled?, "roo-oxide is disabled"
+check Roo::Excelx::SheetDoc.ancestors.none? { |a| a.name.to_s.start_with?("Roo::Oxide") },
       "Roo::Excelx::SheetDoc is not patched"
 
 Dir.mktmpdir do |dir|
@@ -24,5 +27,5 @@ Dir.mktmpdir do |dir|
   check workbook.cell(1, 1) == "name", "roo reads a string cell"
   check workbook.cell(1, 2).inspect == "1.0", "roo reads 1.0 as the Float roo returns"
   check workbook.each_row_streaming.map { |row| row.map(&:value) } == [["name", 1.0]], "each_row_streaming works"
-  check Roo::Calamine.each_row_values(path).to_a == [["name", 1.0]], "Roo::Calamine.each_row_values reads through roo"
+  check Roo::Oxide.each_row_values(path).to_a == [["name", 1.0]], "Roo::Oxide.each_row_values reads through roo"
 end
