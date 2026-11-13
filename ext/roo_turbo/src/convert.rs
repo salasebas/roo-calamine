@@ -119,12 +119,7 @@ fn ruby_float(ruby: &Ruby, text: &str) -> Result<Value, Error> {
 /// are pinned by [`DataTypeFunctions::mark`]; caches that may be filled while
 /// Ruby runs live in `Cell`/`RefCell` fields that `mark` does not borrow.
 #[derive(TypedData)]
-#[magnus(
-    class = "Roo::Turbo::Native::Converter",
-    mark,
-    free_immediately,
-    size
-)]
+#[magnus(class = "Roo::Turbo::Native::Converter", mark, free_immediately, size)]
 pub struct Converter {
     mode: Mode,
     empty_cell: bool,
