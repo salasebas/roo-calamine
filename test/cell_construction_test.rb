@@ -7,7 +7,7 @@ class CellConstructionTest < Minitest::Test
   include OracleAssertions
 
   def setup
-    @dir = Dir.mktmpdir("roo-calamine")
+    @dir = Dir.mktmpdir("roo-turbo")
   end
 
   def teardown

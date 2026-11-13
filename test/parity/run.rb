@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # Runs roo's own Excelx tests from the roo 4.0.0 tag twice, once with plain
-# roo and once with roo-calamine loaded, and compares the results. roo is the
+# roo and once with roo-turbo loaded, and compares the results. roo is the
 # oracle: the plugin run must fail exactly the tests the plain run fails.
 #
 #   bundle exec rake parity
@@ -68,10 +68,10 @@ SUITES.each do |path, kind|
   same = roo.slice(:total, :failed, :skipped, :failures) == plugin.slice(:total, :failed, :skipped, :failures)
   mismatch ||= !same
   rows << [path, kind, roo, plugin, same]
-  warn "#{path}: roo failed #{roo[:failures].inspect}, roo-calamine failed #{plugin[:failures].inspect}" unless same
+  warn "#{path}: roo failed #{roo[:failures].inspect}, roo-turbo failed #{plugin[:failures].inspect}" unless same
 end
 
-HEADER = ["Suite", "Tests", "roo: failed / skipped", "roo-calamine: failed / skipped",
+HEADER = ["Suite", "Tests", "roo: failed / skipped", "roo-turbo: failed / skipped",
           "Native readers", "roo cell parses (plugin run)", "Same"].freeze
 puts "| #{HEADER.join(" | ")} |", "|---|---:|---:|---:|---:|---:|---|"
 rows.each do |path, _kind, roo, plugin, same|
@@ -79,4 +79,4 @@ rows.each do |path, _kind, roo, plugin, same|
            plugin[:probe].fetch("native_readers", 0), plugin[:probe].fetch("roo_cells", 0), same ? "yes" : "NO"]
   puts "| #{cells.join(" | ")} |"
 end
-abort "roo-calamine results differ from roo" if mismatch
+abort "roo-turbo results differ from roo" if mismatch

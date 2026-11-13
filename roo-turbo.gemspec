@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
-require_relative "lib/roo/calamine/version"
+require_relative "lib/roo/turbo/version"
 
 Gem::Specification.new do |spec|
-  spec.name = "roo-calamine"
-  spec.version = Roo::Calamine::VERSION
+  spec.name = "roo-turbo"
+  spec.version = Roo::Turbo::VERSION
   spec.authors = ["Sebastian Sala"]
 
   spec.summary = "A native reader that makes roo read .xlsx and .xlsm files faster, with the same results."
@@ -27,12 +27,12 @@ Gem::Specification.new do |spec|
 
   spec.files = Dir[
     "lib/**/*.rb",
-    "ext/roo_calamine/{Cargo.toml,extconf.rb}",
-    "ext/roo_calamine/src/**/*.rs",
+    "ext/roo_turbo/{Cargo.toml,extconf.rb}",
+    "ext/roo_turbo/src/**/*.rs",
     "Cargo.toml", "Cargo.lock", "LICENSE", "README.md", "CHANGELOG.md"
   ]
   spec.require_paths = ["lib"]
-  spec.extensions = ["ext/roo_calamine/extconf.rb"]
+  spec.extensions = ["ext/roo_turbo/extconf.rb"]
 
   spec.add_dependency "rb_sys", "~> 0.9.130"
   spec.add_dependency "roo", "~> 4.0"

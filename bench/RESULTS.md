@@ -1,5 +1,9 @@
 # Benchmark results
 
+These measurements predate the rename from roo-calamine to roo-turbo.
+The recorded labels and source revisions retain the original name.
+Use [the benchmark guide](README.md) for current commands.
+
 ## Single-cell reads
 
 Apple M5 Pro, Ruby 3.4.12, roo 4.0.0. Median of 21 fresh processes per

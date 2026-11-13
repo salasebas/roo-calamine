@@ -32,7 +32,7 @@ const CHUNK: usize = 256 * 1024;
 const CHUNKS_AHEAD: usize = 4;
 
 #[derive(Clone)]
-#[magnus::wrap(class = "Roo::Calamine::Native::ZipBuffer", free_immediately, size)]
+#[magnus::wrap(class = "Roo::Turbo::Native::ZipBuffer", free_immediately, size)]
 struct ZipBuffer(Arc<[u8]>);
 
 impl ZipBuffer {
@@ -58,7 +58,7 @@ impl TryConvert for ZipSource {
 
 /// One entry in a ZIP snapshot, held in a file or a shared byte buffer.
 #[derive(Clone)]
-#[magnus::wrap(class = "Roo::Calamine::Native::ZipEntry", free_immediately, size)]
+#[magnus::wrap(class = "Roo::Turbo::Native::ZipEntry", free_immediately, size)]
 pub struct ZipEntry {
     zip: ZipSource,
     offset: u64,
@@ -179,7 +179,7 @@ impl ZipEntry {
         let (spent, reusable) = mpsc::channel::<Vec<u8>>();
         let entry = self.clone();
         let spawned = std::thread::Builder::new()
-            .name("roo-calamine-inflate".into())
+            .name("roo-turbo-inflate".into())
             .spawn(move || {
                 let mut bytes = match entry.inflated() {
                     Ok(bytes) => bytes,
@@ -461,7 +461,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let zip = std::env::temp_dir().join(format!(
-            "roo-calamine-input-{}-{timestamp}-{}.zip",
+            "roo-turbo-input-{}-{timestamp}-{}.zip",
             std::process::id(),
             NEXT_ENTRY.fetch_add(1, Ordering::Relaxed)
         ));

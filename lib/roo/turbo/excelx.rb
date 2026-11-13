@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Roo
-  module Calamine
+  module Turbo
     # Roo exposes a mutable sheet list, so names must be checked on each lookup.
     module SheetSelection
       private
@@ -33,13 +33,13 @@ module Roo
           build_cells
           return native_rows? ? each_without_options(&) : super
         end
-        return super unless Calamine.enabled?
+        return super unless Turbo.enabled?
 
         each_with_headers(header_columns(options), &)
       end
 
       def parse(options = {})
-        return super if block_given? || options.empty? || !Calamine.enabled?
+        return super if block_given? || options.empty? || !Turbo.enabled?
 
         rows = rows_for(header_columns(options))
         options[:headers] == true ? rows : rows.drop(1)
@@ -99,14 +99,14 @@ module Roo
       end
 
       def set(...)
-        @calamine_set_calls = (@calamine_set_calls || 0) + 1
+        @turbo_set_calls = (@turbo_set_calls || 0) + 1
         super
       end
 
       private
 
       def clean_sheet(name)
-        store = sheet_for(name).lazy_cells if Calamine.enabled?
+        store = sheet_for(name).lazy_cells if Turbo.enabled?
         return super unless store
 
         store.clean(self)

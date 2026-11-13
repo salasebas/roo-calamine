@@ -41,7 +41,7 @@ jobs:
         run: bundle exec rake build
 
       - name: Check the source gem
-        run: ruby script/check_gem.rb pkg/roo-calamine-*.gem ruby
+        run: ruby script/check_gem.rb pkg/roo-turbo-*.gem ruby
 
       - name: Upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

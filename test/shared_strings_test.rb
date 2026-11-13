@@ -4,13 +4,13 @@ require_relative "test_helper"
 
 # Hand-built sharedStrings.xml parts for the rules roo 4.0.0's
 # Roo::Excelx::SharedStrings follows. Each test pins what roo itself returns,
-# then asserts that roo-calamine returns the same arrays, and whether its
+# then asserts that roo-turbo returns the same arrays, and whether its
 # native extension or roo built them.
 class SharedStringsTest < Minitest::Test
   include OracleAssertions
 
   def setup
-    @dir = Dir.mktmpdir("roo-calamine")
+    @dir = Dir.mktmpdir("roo-turbo")
   end
 
   def teardown
@@ -26,11 +26,11 @@ class SharedStringsTest < Minitest::Test
   end
 
   def roo_strings(path, method, **options)
-    Roo::Calamine.enabled = false
+    Roo::Turbo.enabled = false
     workbook = Roo::Excelx.new(path, options)
     workbook.shared_strings.public_send(method)
   ensure
-    Roo::Calamine.enabled = true
+    Roo::Turbo.enabled = true
   end
 
   def test_x000d_becomes_a_line_feed_in_plain_text_only
@@ -352,7 +352,7 @@ class SharedStringsTest < Minitest::Test
 
   def test_kill_switch_and_other_roo_versions_leave_shared_strings_to_roo
     path = write("<si><t>a</t></si>")
-    Roo::Calamine.enabled = false
+    Roo::Turbo.enabled = false
     Oracle.counts.clear
 
     workbook = Roo::Excelx.new(path)
@@ -360,14 +360,14 @@ class SharedStringsTest < Minitest::Test
     assert_equal ["a"], workbook.shared_strings.to_a
     assert_equal 0, Oracle.counts[:native_shared_strings]
 
-    Roo::Calamine.enabled = true
+    Roo::Turbo.enabled = true
     original = Roo::VERSION
     Roo.send(:remove_const, :VERSION)
     Roo.const_set(:VERSION, "4.1.0")
 
     assert_shared_strings_same_as_roo("roo 4.1.0", path, native: false)
   ensure
-    Roo::Calamine.enabled = true
+    Roo::Turbo.enabled = true
     if original
       Roo.send(:remove_const, :VERSION)
       Roo.const_set(:VERSION, original)

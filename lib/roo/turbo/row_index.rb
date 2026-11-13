@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Roo
-  module Calamine
+  module Turbo
     # Answers Excelx#row for the default sheet from its cells in
     # first_row..last_row and first_column..last_column, laid out in one pass
     # over Sheet#cells: in one flat Array with a slot per column of each row

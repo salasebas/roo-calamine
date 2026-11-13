@@ -1,12 +1,17 @@
-# How roo-calamine works
+# How roo-turbo works
 
-roo-calamine keeps roo's API and replaces its busiest read paths with a Rust
+roo-turbo keeps roo's API and replaces its busiest read paths with a Rust
 extension. It returns roo's objects and follows roo's value rules. Unsupported
 files go through roo's own reader.
 
+The native engine uses quick-xml and flate2. The
+[Calamine fork evaluation](https://github.com/salasebas/roo-calamine/pull/77)
+supports retaining this engine; the rename to roo-turbo changes its identity
+and packaging while preserving that architecture.
+
 ## Where the time goes
 
-| roo 4.0.0 | roo-calamine |
+| roo 4.0.0 | roo-turbo |
 |---|---|
 | Extracts every worksheet when opening a workbook | Leaves worksheets in a ZIP snapshot until needed |
 | Loads worksheet XML into Nokogiri and walks it with XPath | Reads rows with [quick-xml](https://github.com/tafia/quick-xml) |
@@ -55,7 +60,7 @@ materialization preserve roo's `value` and `cell_value` behavior. Sheets
 already built whole use roo's cleaning loop.
 
 `each_row_streaming` returns roo cells and preserves its padding, offsets,
-and row limits. `Roo::Calamine.each_row_values` returns the same values as a
+and row limits. `Roo::Turbo.each_row_values` returns the same values as a
 padded stream, without the cell wrappers.
 
 ## Whole-sheet output

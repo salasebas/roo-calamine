@@ -25,7 +25,7 @@ use crate::reader::{parse_index, Body, Kind, Mode, RawCell, RawRow, Reference, S
 use crate::shared_strings::{has_html_tag, HtmlSelection, HtmlStrings};
 
 fn constant<T: magnus::TryConvert>(ruby: &Ruby, path: &str) -> T {
-    ruby.eval(path).expect("roo is loaded before roo/calamine")
+    ruby.eval(path).expect("roo is loaded before roo/turbo")
 }
 
 static COORDINATE: Lazy<RClass> = Lazy::new(|r| constant(r, "Roo::Excelx::Coordinate"));
@@ -120,7 +120,7 @@ fn ruby_float(ruby: &Ruby, text: &str) -> Result<Value, Error> {
 /// Ruby runs live in `Cell`/`RefCell` fields that `mark` does not borrow.
 #[derive(TypedData)]
 #[magnus(
-    class = "Roo::Calamine::Native::Converter",
+    class = "Roo::Turbo::Native::Converter",
     mark,
     free_immediately,
     size
@@ -216,7 +216,7 @@ impl Converter {
         }))
     }
 
-    /// `context` is a `Roo::Calamine::Context`.
+    /// `context` is a `Roo::Turbo::Context`.
     pub fn new(ruby: &Ruby, context: Value, stream: bool) -> Result<Self, Error> {
         let hyperlinks: RHash = context.funcall("hyperlinks", ())?;
         let base_timestamp: Value = context.funcall("base_timestamp", ())?;
@@ -265,7 +265,7 @@ impl Converter {
         })
     }
 
-    /// `Roo::Calamine.each_row_values` for a streamed row: the `value` of each
+    /// `Roo::Turbo.each_row_values` for a streamed row: the `value` of each
     /// cell that `Sheet#each_row(pad_cells: true)` yields, and `nil` for each
     /// cell it pads.
     pub fn row_values(&self, ruby: &Ruby, row: &RawRow) -> Result<RArray, Error> {

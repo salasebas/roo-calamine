@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Roo
-  module Calamine
+  module Turbo
     # Roo 4.0.0's output formatting, using the native records while the
     # sheet's public cells hash has not been materialized.
     module Formatters
@@ -57,15 +57,15 @@ module Roo
 
       def formatter_temporal_value(cell)
         if cell.is_a?(Roo::Excelx::Cell::Time)
-          @calamine_time_formats ||= Hash.new { |formats, encoding| formats[encoding] = {} }
-          formatter = @calamine_time_formats[cell.format.encoding][cell.format] ||=
+          @turbo_time_formats ||= Hash.new { |formats, encoding| formats[encoding] = {} }
+          formatter = @turbo_time_formats[cell.format.encoding][cell.format] ||=
             cell.format.gsub(/#{Roo::Excelx::Cell::DateTime::TIME_FORMATS.keys.join("|")}/,
                              Roo::Excelx::Cell::DateTime::TIME_FORMATS)
           return cell.instance_variable_get(:@datetime).strftime(formatter)
         end
 
-        @calamine_datetime_formats ||= Hash.new { |formats, encoding| formats[encoding] = {} }
-        formatter = @calamine_datetime_formats[cell.format.encoding][cell.format] ||= formatter_datetime(cell)
+        @turbo_datetime_formats ||= Hash.new { |formats, encoding| formats[encoding] = {} }
+        formatter = @turbo_datetime_formats[cell.format.encoding][cell.format] ||= formatter_datetime(cell)
         formatter ? cell.value.strftime(formatter) : cell.formatted_value
       end
 
@@ -80,7 +80,7 @@ module Roo
       end
 
       def native_formatters?
-        Calamine.enabled? && Roo::VERSION == "4.0.0"
+        Turbo.enabled? && Roo::VERSION == "4.0.0"
       end
 
       def formatter_area(sheet, rectangle)

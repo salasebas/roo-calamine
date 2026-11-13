@@ -7,7 +7,7 @@ class FormattersTest < Minitest::Test
   include OracleAssertions
 
   def setup
-    @dir = Dir.mktmpdir("roo-calamine-formatters")
+    @dir = Dir.mktmpdir("roo-turbo-formatters")
     rows = <<~XML
       <row r="2"><c r="B2" t="str"><v>text &amp; &lt;tag&gt; "☺"&#13;&#10;</v></c>
         <c r="C2"><v>1.5</v></c><c r="D2" t="b"><v>0</v></c><c r="E2" t="s"><v>0</v></c></row>
