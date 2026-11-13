@@ -10,7 +10,10 @@ class LoadingTest < Minitest::Test
       gemfile = File.join(dir, "Gemfile")
       project = File.expand_path("..", __dir__)
       File.write(gemfile, "source \"https://rubygems.org\"\ngem \"roo-oxide\", path: #{project.dump}\n")
-      environment = { "BUNDLE_GEMFILE" => gemfile, "BUNDLE_IGNORE_CONFIG" => "1", "BUNDLE_FROZEN" => "false" }
+      environment = {
+        "BUNDLE_GEMFILE" => gemfile, "BUNDLE_IGNORE_CONFIG" => "1", "BUNDLE_FROZEN" => "false",
+        "GEM_HOME" => Gem.dir, "GEM_PATH" => Gem.path.join(File::PATH_SEPARATOR)
+      }
       Bundler.with_unbundled_env do
         output, status = Open3.capture2e(environment, RbConfig.ruby, "-S", "bundle", "lock", "--local")
 
