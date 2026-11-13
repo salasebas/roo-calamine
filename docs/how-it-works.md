@@ -4,11 +4,6 @@ roo-turbo keeps roo's API and replaces its busiest read paths with a Rust
 extension. It returns roo's objects and follows roo's value rules. Unsupported
 files go through roo's own reader.
 
-The native engine uses quick-xml and flate2. The
-[Calamine fork evaluation](https://github.com/salasebas/roo-calamine/pull/77)
-supports retaining this engine; the rename to roo-turbo changes its identity
-and packaging while preserving that architecture.
-
 ## Where the time goes
 
 | roo 4.0.0 | roo-turbo |

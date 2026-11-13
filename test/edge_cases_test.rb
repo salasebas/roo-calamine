@@ -1111,6 +1111,10 @@ class EdgeCasesTest < Minitest::Test
       end
       ENV.delete(name)
     end
+    ENV["ROO_CALAMINE"] = "0"
+    ENV["ROO_TURBO"] = "1"
+
+    assert_predicate Roo::Turbo, :enabled?
   ensure
     ENV.delete("ROO_TURBO")
     ENV.delete("ROO_CALAMINE")
