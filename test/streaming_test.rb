@@ -15,7 +15,7 @@ class StreamingTest < Minitest::Test
   end
 
   def setup
-    @dir = Dir.mktmpdir("roo-turbo")
+    @dir = Dir.mktmpdir("roo-oxide")
   end
 
   def teardown

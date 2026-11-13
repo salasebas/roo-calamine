@@ -1,6 +1,6 @@
 # Benchmarks
 
-`run.rb` compares plain roo, roo with roo-turbo,
+`run.rb` compares plain roo, roo with roo-oxide,
 [calx](https://github.com/7a6163/calx), and [xsv](https://github.com/martijn/xsv)
 on generated workbooks.
 
@@ -9,12 +9,12 @@ on generated workbooks.
 ```sh
 cd bench && bundle install
 bundle exec ruby run.rb                  # the tables below, 3–10 runs per scenario, stopping after 10 s
-bundle exec ruby run.rb 5 roo-turbo   # 5 runs, and only the libraries named
-bundle exec ruby run.rb --scenario row,column --fixture mixed-100k roo-turbo  # only these rows
+bundle exec ruby run.rb 5 roo-oxide   # 5 runs, and only the libraries named
+bundle exec ruby run.rb --scenario row,column --fixture mixed-100k roo-oxide  # only these rows
 bundle exec ruby run.rb --group single-cell                  # only this group
 bundle exec ruby run.rb --all                                # every scenario on every file, as in RESULTS.md
 bundle exec ruby run.rb --profile each-headers mixed-100k    # vernier profile and allocations
-bundle exec ruby scenario.rb roo-turbo yaml fixtures/mixed-100k.xlsx  # one run of one scenario
+bundle exec ruby scenario.rb roo-oxide yaml fixtures/mixed-100k.xlsx  # one run of one scenario
 ```
 
 `run.rb` writes the fixtures it needs (`generate.rb`). Append `digest` to a
@@ -29,11 +29,11 @@ call with `samply record`.
   includes opening the workbook. Memory is the process's peak RSS.
 - **The table shows medians.** Without a run count, each scenario runs 3–10
   times and stops once it has run for 10 s.
-- **Before timing**, one run of roo and one of roo-turbo hash every value
+- **Before timing**, one run of roo and one of roo-oxide hash every value
   they read, and the run stops if the two hashes differ.
 - **Values only:** plain roo runs `each_row_streaming(pad_cells: true)` and
   reads each cell's value.
-- **Flags:** a row is flagged when roo-turbo is less than 5× faster than
+- **Flags:** a row is flagged when roo-oxide is less than 5× faster than
   roo, or more than 1.2× slower than calx.
   [RESULTS.md](RESULTS.md#flagged) says why for each one.
 - **calx and xsv** are references, not drop-in replacements:
@@ -48,14 +48,14 @@ call with `samply record`.
 
 Apple M5 Pro, Ruby 3.4.12, roo 4.0.0, calx 0.1.0, xsv 1.4.1.
 Iteration timings use five fresh processes per scenario. `each` on
-`mixed-100k.xlsx` uses 10 runs on be4ab9b for roo-turbo and calx. Other
+`mixed-100k.xlsx` uses 10 runs on be4ab9b for roo-oxide and calx. Other
 rows keep their earlier measurements.
 
 [RESULTS.md](RESULTS.md) has every other scenario and file.
 
 ### 100k rows × 20 mixed columns
 
-| Scenario | roo 4.0.0 | roo + roo-turbo | Faster | calx 0.1.0 | xsv 1.4.1 |
+| Scenario | roo 4.0.0 | roo + roo-oxide | Faster | calx 0.1.0 | xsv 1.4.1 |
 |---|---:|---:|---:|---:|---:|
 | `each_row_streaming` | 13.49 s · 119 MB | **0.55 s · 51 MB** | 24.6× | 0.52 s · 179 MB | 9.66 s · 51 MB |
 | `parse(headers: true)` | 19.61 s · 3300 MB | **0.75 s · 282 MB** | 26× | 0.71 s · 290 MB | 11.18 s · 203 MB |
@@ -69,7 +69,7 @@ rows keep their earlier measurements.
 
 ### 100k rows × 10 shared strings
 
-| Scenario | roo 4.0.0 | roo + roo-turbo | Faster | calx 0.1.0 | xsv 1.4.1 |
+| Scenario | roo 4.0.0 | roo + roo-oxide | Faster | calx 0.1.0 | xsv 1.4.1 |
 |---|---:|---:|---:|---:|---:|
 | `each_row_streaming` | 4.92 s · 121 MB | **0.24 s · 53 MB** | 20.4× | 0.24 s · 114 MB | 4.19 s · 48 MB |
 | `parse(headers: true)` | 6.02 s · 1630 MB | **0.34 s · 117 MB** | 18× | 0.33 s · 208 MB | 4.72 s · 108 MB |
@@ -83,7 +83,7 @@ rows keep their earlier measurements.
 
 ### 100k rows × 10 unique strings
 
-| Scenario | roo 4.0.0 | roo + roo-turbo | Faster | calx 0.1.0 | xsv 1.4.1 |
+| Scenario | roo 4.0.0 | roo + roo-oxide | Faster | calx 0.1.0 | xsv 1.4.1 |
 |---|---:|---:|---:|---:|---:|
 | `each_row_streaming` | 10.27 s · 933 MB | **0.47 s · 254 MB** | 22.0× | 0.37 s · 152 MB | 14.88 s · 254 MB |
 | `parse(headers: true)` | 9.07 s · 2327 MB | **0.58 s · 211 MB** | 16× | 0.47 s · 206 MB | 15.18 s · 347 MB |
@@ -97,7 +97,7 @@ rows keep their earlier measurements.
 
 ### 100 rows × 20 mixed columns
 
-| Scenario | roo 4.0.0 | roo + roo-turbo | Faster | calx 0.1.0 | xsv 1.4.1 |
+| Scenario | roo 4.0.0 | roo + roo-oxide | Faster | calx 0.1.0 | xsv 1.4.1 |
 |---|---:|---:|---:|---:|---:|
 | `each_row_streaming` | 15.9 ms · 45 MB | **2.0 ms · 42 MB** | 8.0× | 0.7 ms · 27 MB | 11.5 ms · 42 MB |
 | `parse(headers: true)` | 12.8 ms · 45 MB | **2.0 ms · 41 MB** | 6.4× | 0.7 ms · 27 MB | 11.5 ms · 42 MB |

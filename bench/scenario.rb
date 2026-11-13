@@ -6,7 +6,7 @@
 #
 # Prints JSON with the wall time, the peak RSS, and the objects allocated by
 # this process. With `digest`, it also hashes every value read, so the values
-# roo and roo-turbo return can be compared; that run is not timed in the
+# roo and roo-oxide return can be compared; that run is not timed in the
 # table. With `profile`, it records the run with vernier into
 # bench/profiles/LIBRARY-SCENARIO-FILE.json.
 require "digest"
@@ -18,7 +18,7 @@ library, scenario, path, mode = ARGV
 DIGESTING = mode == "digest"
 case library
 when "roo" then require "roo"
-when "roo-turbo" then require "roo/turbo"
+when "roo-oxide" then require "roo/oxide"
 when "calx" then require "calx"
 when "xsv" then require "xsv"
 end
@@ -188,8 +188,8 @@ ROO_SCENARIOS = {
 end).freeze
 
 def values_scenario(library, path, digest)
-  if library == "roo-turbo"
-    Roo::Turbo.each_row_values(path) { |row| row.each { |cell_value| digest << value(cell_value) } }
+  if library == "roo-oxide"
+    Roo::Oxide.each_row_values(path) { |row| row.each { |cell_value| digest << value(cell_value) } }
   else
     stream_values(open_workbook(path), digest, pad_cells: true)
   end

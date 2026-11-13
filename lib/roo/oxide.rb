@@ -2,21 +2,21 @@
 
 require "roo"
 require "roo/excelx"
-require_relative "turbo/version"
+require_relative "oxide/version"
 
-if Roo.const_defined?(:Calamine, false) && !Roo::Calamine.equal?(Roo::Turbo)
-  raise LoadError, "Replace roo-calamine with roo-turbo in your Gemfile before loading roo/turbo"
+if Roo.const_defined?(:Calamine, false) && !Roo::Calamine.equal?(Roo::Oxide)
+  raise LoadError, "Replace roo-calamine with roo-oxide in your Gemfile before loading roo/oxide"
 end
 
-Roo::Calamine = Roo::Turbo unless Roo.const_defined?(:Calamine, false)
+Roo::Calamine = Roo::Oxide unless Roo.const_defined?(:Calamine, false)
 
 module Roo
   # Reads `.xlsx` and `.xlsm` worksheets for Roo::Excelx with a native
-  # extension. Loading this file is all it takes; `Roo::Turbo.enabled =
-  # false` or `ROO_TURBO=0` switches back to roo's own reader at runtime.
-  module Turbo
+  # extension. Loading this file is all it takes; `Roo::Oxide.enabled =
+  # false` or `ROO_OXIDE=0` switches back to roo's own reader at runtime.
+  module Oxide
     # Raised by the native reader for XML it does not reproduce exactly the
-    # way roo reads it. Roo::Turbo rescues it and lets roo read the sheet.
+    # way roo reads it. Roo::Oxide rescues it and lets roo read the sheet.
     class UnsupportedError < StandardError; end
 
     DISABLING_ENV_VALUES = %w[0 false off].freeze
@@ -35,11 +35,11 @@ module Roo
 
       # Whether the next worksheet read goes through the native reader.
       def enabled?
-        environment = ENV.fetch("ROO_TURBO") { ENV.fetch("ROO_CALAMINE", "") }
+        environment = ENV.fetch("ROO_OXIDE") { ENV.fetch("ROO_CALAMINE", "") }
         @enabled && available? && !DISABLING_ENV_VALUES.include?(environment.downcase)
       end
 
-      # roo-turbo's own API, not roo's: yields each row of a worksheet as an
+      # roo-oxide's own API, not roo's: yields each row of a worksheet as an
       # Array of the values roo's cells return from `#value`, without building
       # the cells. A row is what
       # `Roo::Excelx#each_row_streaming(sheet:, pad_cells: true)` yields, with
@@ -69,32 +69,32 @@ end
 
 if RUBY_ENGINE == "ruby"
   begin
-    require "roo/turbo/#{RUBY_VERSION[/\d+\.\d+/]}/roo_turbo"
+    require "roo/oxide/#{RUBY_VERSION[/\d+\.\d+/]}/roo_oxide"
   rescue LoadError
-    require "roo/turbo/roo_turbo"
+    require "roo/oxide/roo_oxide"
   end
-  require_relative "turbo/context"
-  require_relative "turbo/deferred_sheets"
-  require_relative "turbo/sheet_doc"
-  require_relative "turbo/sheet_parts"
-  require_relative "turbo/excelx"
-  require_relative "turbo/csv"
-  require_relative "turbo/formatters"
-  require_relative "turbo/row_index"
-  require_relative "turbo/row_iteration"
-  require_relative "turbo/sheet"
-  require_relative "turbo/shared_strings"
-  Roo::Excelx::SheetDoc.prepend(Roo::Turbo::DeferredSheetDoc)
-  Roo::Excelx::SheetDoc.prepend(Roo::Turbo::SheetDoc)
-  Roo::Excelx::SheetDoc.prepend(Roo::Turbo::SheetParts)
-  Roo::Excelx::Relationships.prepend(Roo::Turbo::HyperlinkRelationships)
-  Roo::Excelx::Sheet.prepend(Roo::Turbo::Sheet)
-  Roo::Excelx.prepend(Roo::Turbo::DeferredSheets)
-  Roo::Excelx.prepend(Roo::Turbo::Excelx)
-  Roo::Excelx.prepend(Roo::Turbo::SheetSelection)
-  Roo::Excelx::SharedStrings.prepend(Roo::Turbo::SharedStrings)
-  Roo::Excelx::Workbook.prepend(Roo::Turbo::MetadataDocument)
-  Roo::Excelx::Styles.prepend(Roo::Turbo::MetadataDocument)
-  Roo::Excelx.prepend(Roo::Turbo::CSV)
-  Roo::Excelx.prepend(Roo::Turbo::Formatters)
+  require_relative "oxide/context"
+  require_relative "oxide/deferred_sheets"
+  require_relative "oxide/sheet_doc"
+  require_relative "oxide/sheet_parts"
+  require_relative "oxide/excelx"
+  require_relative "oxide/csv"
+  require_relative "oxide/formatters"
+  require_relative "oxide/row_index"
+  require_relative "oxide/row_iteration"
+  require_relative "oxide/sheet"
+  require_relative "oxide/shared_strings"
+  Roo::Excelx::SheetDoc.prepend(Roo::Oxide::DeferredSheetDoc)
+  Roo::Excelx::SheetDoc.prepend(Roo::Oxide::SheetDoc)
+  Roo::Excelx::SheetDoc.prepend(Roo::Oxide::SheetParts)
+  Roo::Excelx::Relationships.prepend(Roo::Oxide::HyperlinkRelationships)
+  Roo::Excelx::Sheet.prepend(Roo::Oxide::Sheet)
+  Roo::Excelx.prepend(Roo::Oxide::DeferredSheets)
+  Roo::Excelx.prepend(Roo::Oxide::Excelx)
+  Roo::Excelx.prepend(Roo::Oxide::SheetSelection)
+  Roo::Excelx::SharedStrings.prepend(Roo::Oxide::SharedStrings)
+  Roo::Excelx::Workbook.prepend(Roo::Oxide::MetadataDocument)
+  Roo::Excelx::Styles.prepend(Roo::Oxide::MetadataDocument)
+  Roo::Excelx.prepend(Roo::Oxide::CSV)
+  Roo::Excelx.prepend(Roo::Oxide::Formatters)
 end

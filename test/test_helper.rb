@@ -1,20 +1,20 @@
 # frozen_string_literal: true
 
 require "minitest/autorun"
-require "roo/turbo"
+require "roo/oxide"
 require_relative "support/oracle"
 require_relative "support/roo_checkout"
 require_relative "support/workbook"
 
 module OracleAssertions
-  # Asserts that roo-turbo returns what roo returns for `description`, and
+  # Asserts that roo-oxide returns what roo returns for `description`, and
   # that the native reader, not roo's parser, produced it; with `lazy`, that
   # it built cells one at a time as they were read.
   def assert_same_as_roo(label, native_only: true, lazy: false, &)
     roo, = Oracle.read(native: false, &)
     native, counts = Oracle.read(native: true, &)
 
-    assert_equal roo, native, "#{label}: roo-turbo differs from roo"
+    assert_equal roo, native, "#{label}: roo-oxide differs from roo"
     return unless native_only && roo.first == :ok
 
     assert_operator counts[:native_readers], :>, 0, "#{label}: the native reader did not run"
@@ -31,7 +31,7 @@ module OracleAssertions
       roo, = Oracle.read(native: false, &read)
       ours, counts = Oracle.read(native: true, &read)
 
-      assert_equal roo, ours, "#{label} #{order}: roo-turbo's shared strings differ from roo's"
+      assert_equal roo, ours, "#{label} #{order}: roo-oxide's shared strings differ from roo's"
       assert_equal native, counts[:native_shared_strings].positive?,
                    "#{label} #{order}: the native extension #{native ? "did not build" : "built"} the shared strings"
     end
@@ -54,5 +54,5 @@ end
 
 # On sheets of 3 rows or more, roo answers the first row of each #each call
 # and the row index the rest, so small sheets cover both and the hand-over.
-Roo::Turbo::RowIndex.send(:remove_const, :ROO_ROWS)
-Roo::Turbo::RowIndex.const_set(:ROO_ROWS, 1)
+Roo::Oxide::RowIndex.send(:remove_const, :ROO_ROWS)
+Roo::Oxide::RowIndex.const_set(:ROO_ROWS, 1)

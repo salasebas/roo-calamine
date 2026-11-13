@@ -1,5 +1,5 @@
 [workspace]
-members = ["ext/roo_turbo"]
+members = ["ext/roo_oxide"]
 resolver = "2"
 
 [profile.release]

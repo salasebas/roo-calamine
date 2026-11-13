@@ -3,7 +3,7 @@
 require "English"
 
 module Roo
-  module Turbo
+  module Oxide
     # Prepended to Roo::Excelx. roo's #to_csv writes every slot from the first
     # row and column to the last through #empty?, #cell and #celltype, and each
     # of them looks up the sheet and the cell again. This writes the same text
@@ -38,7 +38,7 @@ module Roo
       # roo prints each field on its own; a line joins them, so the separator
       # has to join UTF-8 text, and IO#print must add no $\ between fields.
       def csv_lines?(separator)
-        Turbo.enabled? && ROO_VERSIONS.include?(Roo::VERSION) && $OUTPUT_RECORD_SEPARATOR.nil? &&
+        Oxide.enabled? && ROO_VERSIONS.include?(Roo::VERSION) && $OUTPUT_RECORD_SEPARATOR.nil? &&
           (separator.ascii_only? || separator.encoding == Encoding::UTF_8)
       end
 

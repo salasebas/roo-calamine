@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # Loaded with -r before roo's own test suite. In plugin mode it loads
-# roo-turbo; in both modes it counts how often roo's Ruby cell parser and
+# roo-oxide; in both modes it counts how often roo's Ruby cell parser and
 # the native reader run, so the report shows which reader served the suite.
 require "json"
 require "roo"
@@ -20,17 +20,17 @@ end)
 counts = Hash.new(0)
 
 if ENV.fetch("PARITY_MODE") == "plugin"
-  require "roo/turbo"
-  abort "roo-turbo did not enable itself" unless Roo::Turbo.enabled?
+  require "roo/oxide"
+  abort "roo-oxide did not enable itself" unless Roo::Oxide.enabled?
 
-  Roo::Turbo::Native::Reader.singleton_class.prepend(Module.new do
+  Roo::Oxide::Native::Reader.singleton_class.prepend(Module.new do
     define_method(:new) do |*args|
       counts[:native_readers] += 1
       super(*args)
     end
   end)
 
-  Roo::Turbo::Native::Store.singleton_class.prepend(Module.new do
+  Roo::Oxide::Native::Store.singleton_class.prepend(Module.new do
     define_method(:read) do |*args|
       counts[:native_readers] += 1
       super(*args)

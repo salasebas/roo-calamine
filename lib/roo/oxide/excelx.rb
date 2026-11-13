@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Roo
-  module Turbo
+  module Oxide
     # Roo exposes a mutable sheet list, so names must be checked on each lookup.
     module SheetSelection
       private
@@ -33,13 +33,13 @@ module Roo
           build_cells
           return native_rows? ? each_without_options(&) : super
         end
-        return super unless Turbo.enabled?
+        return super unless Oxide.enabled?
 
         each_with_headers(header_columns(options), &)
       end
 
       def parse(options = {})
-        return super if block_given? || options.empty? || !Turbo.enabled?
+        return super if block_given? || options.empty? || !Oxide.enabled?
 
         rows = rows_for(header_columns(options))
         options[:headers] == true ? rows : rows.drop(1)
@@ -99,14 +99,14 @@ module Roo
       end
 
       def set(...)
-        @turbo_set_calls = (@turbo_set_calls || 0) + 1
+        @oxide_set_calls = (@oxide_set_calls || 0) + 1
         super
       end
 
       private
 
       def clean_sheet(name)
-        store = sheet_for(name).lazy_cells if Turbo.enabled?
+        store = sheet_for(name).lazy_cells if Oxide.enabled?
         return super unless store
 
         store.clean(self)

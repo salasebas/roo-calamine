@@ -1,7 +1,7 @@
 //! The text `Roo::Formatters::CSV#cell_to_csv` writes for a cell, from the
 //! value the cell holds or would hold, without building the cell when its
 //! value is enough. Formatting that depends on Ruby (numbers, dates, errors)
-//! stays the `Roo::Turbo::CSV` helpers of the workbook.
+//! stays the `Roo::Oxide::CSV` helpers of the workbook.
 
 use std::io::Write;
 

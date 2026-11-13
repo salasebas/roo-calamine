@@ -203,8 +203,8 @@ jobs:
 
       - name: Install the gem the way users do
         run: |
-          gem build roo-turbo.gemspec
-          gem install ./roo-turbo-*.gem --no-document
+          gem build roo-oxide.gemspec
+          gem install ./roo-oxide-*.gem --no-document
 
       - name: Test — inert on JRuby, roo unchanged
         run: ruby test/jruby_smoke.rb

@@ -1,6 +1,6 @@
 # Benchmark results
 
-These measurements predate the rename from roo-calamine to roo-turbo.
+These measurements predate the rename from roo-calamine to roo-oxide.
 The recorded labels and source revisions retain the original name.
 Use [the benchmark guide](README.md) for current commands.
 

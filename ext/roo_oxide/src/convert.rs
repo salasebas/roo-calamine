@@ -25,7 +25,7 @@ use crate::reader::{parse_index, Body, Kind, Mode, RawCell, RawRow, Reference, S
 use crate::shared_strings::{has_html_tag, HtmlSelection, HtmlStrings};
 
 fn constant<T: magnus::TryConvert>(ruby: &Ruby, path: &str) -> T {
-    ruby.eval(path).expect("roo is loaded before roo/turbo")
+    ruby.eval(path).expect("roo is loaded before roo/oxide")
 }
 
 static COORDINATE: Lazy<RClass> = Lazy::new(|r| constant(r, "Roo::Excelx::Coordinate"));
@@ -119,7 +119,7 @@ fn ruby_float(ruby: &Ruby, text: &str) -> Result<Value, Error> {
 /// are pinned by [`DataTypeFunctions::mark`]; caches that may be filled while
 /// Ruby runs live in `Cell`/`RefCell` fields that `mark` does not borrow.
 #[derive(TypedData)]
-#[magnus(class = "Roo::Turbo::Native::Converter", mark, free_immediately, size)]
+#[magnus(class = "Roo::Oxide::Native::Converter", mark, free_immediately, size)]
 pub struct Converter {
     mode: Mode,
     empty_cell: bool,
@@ -211,7 +211,7 @@ impl Converter {
         }))
     }
 
-    /// `context` is a `Roo::Turbo::Context`.
+    /// `context` is a `Roo::Oxide::Context`.
     pub fn new(ruby: &Ruby, context: Value, stream: bool) -> Result<Self, Error> {
         let hyperlinks: RHash = context.funcall("hyperlinks", ())?;
         let base_timestamp: Value = context.funcall("base_timestamp", ())?;
@@ -260,7 +260,7 @@ impl Converter {
         })
     }
 
-    /// `Roo::Turbo.each_row_values` for a streamed row: the `value` of each
+    /// `Roo::Oxide.each_row_values` for a streamed row: the `value` of each
     /// cell that `Sheet#each_row(pad_cells: true)` yields, and `nil` for each
     /// cell it pads.
     pub fn row_values(&self, ruby: &Ruby, row: &RawRow) -> Result<RArray, Error> {

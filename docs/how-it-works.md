@@ -1,12 +1,12 @@
-# How roo-turbo works
+# How roo-oxide works
 
-roo-turbo keeps roo's API and replaces its busiest read paths with a Rust
+roo-oxide keeps roo's API and replaces its busiest read paths with a Rust
 extension. It returns roo's objects and follows roo's value rules. Unsupported
 files go through roo's own reader.
 
 ## Where the time goes
 
-| roo 4.0.0 | roo-turbo |
+| roo 4.0.0 | roo-oxide |
 |---|---|
 | Extracts every worksheet when opening a workbook | Leaves worksheets in a ZIP snapshot until needed |
 | Loads worksheet XML into Nokogiri and walks it with XPath | Reads rows with [quick-xml](https://github.com/tafia/quick-xml) |
@@ -55,7 +55,7 @@ materialization preserve roo's `value` and `cell_value` behavior. Sheets
 already built whole use roo's cleaning loop.
 
 `each_row_streaming` returns roo cells and preserves its padding, offsets,
-and row limits. `Roo::Turbo.each_row_values` returns the same values as a
+and row limits. `Roo::Oxide.each_row_values` returns the same values as a
 padded stream, without the cell wrappers.
 
 ## Whole-sheet output

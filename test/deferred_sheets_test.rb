@@ -23,7 +23,7 @@ class DeferredSheetsTest < Minitest::Test
   HYPERLINK_RELS = %(<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="#{Workbook::REL}/hyperlink" Target="https://example.com/" TargetMode="External"/></Relationships>).freeze
 
   def setup
-    @dir = Dir.mktmpdir("roo-turbo")
+    @dir = Dir.mktmpdir("roo-oxide")
   end
 
   def teardown
@@ -48,7 +48,7 @@ class DeferredSheetsTest < Minitest::Test
       xlsx.parse(headers: true)
 
       assert_empty extracted_sheets(xlsx), source.class.to_s
-      refute_path_exists File.join(xlsx.instance_variable_get(:@tmpdir), "roo_turbo.xlsx")
+      refute_path_exists File.join(xlsx.instance_variable_get(:@tmpdir), "roo_oxide.xlsx")
     ensure
       xlsx&.close
       source.close if source.respond_to?(:close)
@@ -84,7 +84,7 @@ class DeferredSheetsTest < Minitest::Test
     tmpdir = xlsx.instance_variable_get(:@tmpdir)
 
     assert_empty Dir.children(tmpdir).grep(/roo_(workbook|styles)/)
-    Roo::Turbo.enabled = false
+    Roo::Oxide.enabled = false
     GC.start
 
     assert_equal %w[Sheet1 Sheet2], xlsx.sheets
@@ -93,7 +93,7 @@ class DeferredSheetsTest < Minitest::Test
     assert_equal 1, xlsx.cell(1, 1)
     assert_equal({ foo: 1 }, Roo::Excelx::Styles.new("unused", foo: 1).instance_variable_get(:@options))
   ensure
-    Roo::Turbo.enabled = true
+    Roo::Oxide.enabled = true
     xlsx&.close
   end
 
@@ -212,7 +212,7 @@ class DeferredSheetsTest < Minitest::Test
         end
         xlsx = Roo::Excelx.new(path)
         File.delete(path)
-        Roo::Turbo.enabled = false if turn_off
+        Roo::Oxide.enabled = false if turn_off
         [Oracle.describe_cells(xlsx), Oracle.describe_stream(xlsx, {}), xlsx.sheet_for("Sheet2").dimensions]
       end
 
@@ -268,16 +268,16 @@ class DeferredSheetsTest < Minitest::Test
       first = numbers.call("first#{runs += 1}", [1, 2, 3])
       xlsx = Roo::Excelx.new(first)
       IO.copy_stream(numbers.call("second#{runs}", [7, 8, 9]), first)
-      Roo::Turbo.enabled = false
+      Roo::Oxide.enabled = false
       xlsx.reload
       xlsx.column(1)
     end
   end
 
   def test_a_packed_workbook_named_like_the_copy
-    packed = File.join(@dir, "roo_turbo.xlsx.zip")
+    packed = File.join(@dir, "roo_oxide.xlsx.zip")
     book = write
-    Zip::File.open(packed, create: true) { |zip| zip.add("roo_turbo.xlsx", book) }
+    Zip::File.open(packed, create: true) { |zip| zip.add("roo_oxide.xlsx", book) }
 
     assert_same_as_roo("packed") { Oracle.describe_stream(Roo::Excelx.new(packed, packed: :zip), {}) }
   end

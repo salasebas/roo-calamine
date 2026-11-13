@@ -1,4 +1,4 @@
-//! Native fast path for `roo-turbo`.
+//! Native fast path for `roo-oxide`.
 //!
 //! [`reader`] turns worksheet XML into raw cell records without touching Ruby.
 //! [`convert`] turns those records into roo's cells,
@@ -28,8 +28,8 @@ use convert::Converter;
 use reader::{Mode, RawRow, Unsupported};
 
 static UNSUPPORTED: Lazy<ExceptionClass> = Lazy::new(|r| {
-    r.eval("Roo::Turbo::UnsupportedError")
-        .expect("roo/turbo defines its error before the extension loads")
+    r.eval("Roo::Oxide::UnsupportedError")
+        .expect("roo/oxide defines its error before the extension loads")
 });
 
 pub(crate) fn unsupported(ruby: &Ruby, error: Unsupported) -> Error {
@@ -103,7 +103,7 @@ fn wait_for(batches: &Receiver<Batch>) -> Result<Wait, Error> {
 }
 
 /// One streamed `<row>`, converted to cells only when roo asks for them.
-#[magnus::wrap(class = "Roo::Turbo::Native::Row", free_immediately, size)]
+#[magnus::wrap(class = "Roo::Oxide::Native::Row", free_immediately, size)]
 pub struct Row(RawRow);
 
 impl Row {
@@ -125,7 +125,7 @@ enum Batches {
 /// Reads small ZIP entries on demand without the GVL. Large worksheets are
 /// read one batch ahead on a worker, so a busy Ruby thread does not slow
 /// every batch down.
-#[magnus::wrap(class = "Roo::Turbo::Native::Reader", free_immediately, size)]
+#[magnus::wrap(class = "Roo::Oxide::Native::Reader", free_immediately, size)]
 struct Reader {
     /// `None` once closed.
     batches: RefCell<Option<Batches>>,
@@ -151,7 +151,7 @@ impl Reader {
         } else {
             let (sender, batches) = mpsc::sync_channel::<Batch>(1);
             std::thread::Builder::new()
-                .name("roo-turbo".into())
+                .name("roo-oxide".into())
                 .spawn(move || loop {
                     let rows = sheet.next_rows(batch);
                     let last = !matches!(&rows, Ok(rows) if !rows.is_empty());
@@ -282,7 +282,7 @@ impl Reader {
 fn init(ruby: &Ruby) -> Result<(), Error> {
     let native = ruby
         .define_module("Roo")?
-        .define_module("Turbo")?
+        .define_module("Oxide")?
         .define_module("Native")?;
 
     let reader = native.define_class("Reader", ruby.class_object())?;

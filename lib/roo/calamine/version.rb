@@ -1,5 +1,5 @@
 # frozen_string_literal: true
 
-require_relative "../turbo/version"
+require_relative "../oxide/version"
 
-Roo::Calamine = Roo::Turbo unless Roo.const_defined?(:Calamine, false)
+Roo::Calamine = Roo::Oxide unless Roo.const_defined?(:Calamine, false)

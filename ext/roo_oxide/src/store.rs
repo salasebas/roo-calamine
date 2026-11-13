@@ -139,7 +139,7 @@ impl Formulas {
 /// `Roo::Excelx::SheetDoc#extract_cells` reads it, when every cell can be
 /// built on its own: none raises, so roo would not raise for the sheet.
 #[derive(TypedData)]
-#[magnus(class = "Roo::Turbo::Native::Store", mark, free_immediately, size)]
+#[magnus(class = "Roo::Oxide::Native::Store", mark, free_immediately, size)]
 pub struct Store {
     converter: Opaque<Obj<Converter>>,
     text: String,
@@ -251,7 +251,7 @@ fn read(ruby: &Ruby, source: Source, converter: &Converter) -> Result<Option<Rec
 
 impl Store {
     /// The store for the worksheet `source`, or `nil` when its cells have to
-    /// be built all at once, in order. `context` is a `Roo::Turbo::Context`.
+    /// be built all at once, in order. `context` is a `Roo::Oxide::Context`.
     fn read(ruby: &Ruby, source: Source, context: Value) -> Result<Option<Self>, Error> {
         let converter = ruby.obj_wrap(Converter::new(ruby, context, false)?);
         let Some(Records {
@@ -764,7 +764,7 @@ struct CsvArea {
 }
 
 impl Store {
-    /// `Roo::Turbo::CSV#write_csv_lines` for the cells of this store, with
+    /// `Roo::Oxide::CSV#write_csv_lines` for the cells of this store, with
     /// `book` the `Roo::Excelx` whose CSV helpers format the fields Ruby
     /// formats, and `area` `[rows, width, first_row, last_row, first_column,
     /// last_column]`. When a field raises, `io` holds the text up to it, as
